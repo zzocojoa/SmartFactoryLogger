@@ -1686,3 +1686,42 @@ R3 suite SHA256: `4eede2324f9dfff7beaed877793c5a28265a3b4b55a2d7d49a343dbcb63f95
 15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
 
 Windows 경로 처리 근거: [Microsoft File System Redirector](https://learn.microsoft.com/en-us/windows/win32/winprog64/file-system-redirector).
+
+
+## 2026-10-15 R3 실제 실행 실패와 WPR 인자·종료 코드 보완
+
+실제 R3 suite41712/controller4412/Guard41068 실행을 관찰한 뒤 세 프로세스의 종료를 확인했다.
+사용자가 제공한 TS0ddd9e1ae7e1 summary SHA256
+`bc55f8f53896760d88e7494fc60de5308cdc0407063c91fca75ffbc2fb60ed6f`와 로컬 바이트가 일치한다.
+사용자 콘솔은 부모32비트→Sysnative 선택, 자식64비트PS5.1, LAUNCH_EXIT1을 확인한다.
+Normal 단계에서 실패해 뒤의 ControllerExit/Deadline은 실행되지 않았다.
+
+실제 WPR 첫 status 인자가 하나의 문자열
+`-status-instancename SFLTrace_105ea2aa6cf04cd0a3d5987bbdf6980d`로 전달됐다.
+WPR는3311404546(0xc5600602, Invalid command syntax)으로 종료했다.
+단일 옵션 switch 결과가 scalar가 되어 +=가 문자열 결합을 한 것이 코드와 원시 argv에서 확인됐다.
+start_attempted=false, start-intent 없음, status-before1회만 있으므로 이 실행은 추적을 시작하지 않았다.
+이 결과를 cleanup PASS 또는 다른 WPR 세션 부재 증명으로 확대하지 않는다.
+
+별도로 Start-Process 출력 리디렉션과 WaitForExit만 사용하면 실제 exit0/1/23 모두 null이 되는
+현상을 PS5.1에서 재현했다. 즉시 프로세스 Handle을 보유하면 각각0/1/23으로 확인됐다.
+원래 summary의 controller_exit=null과 FAIL은 보존한다. 추정 값으로 과거 종료 코드를 채우지 않는다.
+R4는 Get-TraceArguments로 모든 옵션을 배열로 구성하고 Start-TraceProcess로 핸들을 보유한다.
+suite와 Guard 양쪽에 적용하고 종료 후 Dispose한다. 권한·독립성·소유권·시간 제한은 유지한다.
+
+기존 lifecycle14조건과 native PS5.1 suite10개가 최종exit0이다. 네 가지 WPR 동작의 인자를
+실제 네이티브 자식에서 대조하고 위험 인자4종을 거부했다. 빠른/지연 종료0/1/23 여섯 경우와
+실제 읽기 전용 WPR status exit0/ABSENT/job active0을 확인했다. start/stop/cancel은 실제 WPR에 실행하지 않았다.
+32/64비트8실행·입력 거부7조건, Ruff, 최종 R4 명령의 양쪽 비트수 일반 권한 거부 검증도exit0이다.
+첫 회귀의 Python 경로 escape 경고는 수정하고 새 tests-r2로 재검증했으며 첫 기록도 보존한다.
+
+기록/새 묶음: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_COMMAND_20261015_395f95be`.
+R3 원문14파일은 source/copy 길이·SHA로 검산해 보존했다. 다음 실행은 개발 PC 독립 관리자
+PowerShell에서 `PINNED_LOCAL_TRACE_COMMAND_R4.txt` 본문을 한 번 실행하고 LAUNCH_EXIT를 확인한다.
+manifest SHA256 `7f2ec742e79a857f1b13c8050d30407d6be9628faef24f66de604904a25ae663`.
+suite SHA256 `aae7da0ba5f44b025c51f77b5c1c303a5f64d3d047a620cf2f878178cb12fb30`.
+실제 R4 WPR3조건·ETL 품질 검증은 남는다. 제품/설치본 변경이 없어 앱 health/build는 반복하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+관련 근거: [PowerShell Start-Process 종료 코드 문제](https://github.com/PowerShell/PowerShell/issues/20400),
+[Microsoft Process.WaitForExit](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit).

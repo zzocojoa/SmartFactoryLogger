@@ -5,7 +5,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
-$held=[Collections.Generic.List[IO.Stream]]::new();$suitePath=$null
+$held=[Collections.Generic.List[IO.Stream]]::new();$children=[Collections.Generic.List[Diagnostics.Process]]::new();$suitePath=$null
 $summary=[ordered]@{status='FAIL';scope='LOCAL_WPR_CONTROLLER_LIFECYCLE_ONLY';scenarios=@();errors=@();release_gate='HOLD';promotion_allowed=$false;field_gate='NOT_EVALUATED';trace_quality='NOT_EVALUATED'}
 try{
     $nativePs=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
@@ -53,7 +53,8 @@ try{
         $arguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',($package+'\invoke-trace-validation.ps1'),'-Mode','Run','-Scenario',$scenario,'-PackageRoot',$package,'-ExpectedManifestSha256',$ExpectedManifestSha256)
         $line=(@($arguments|ForEach-Object{[SflOwnedRun]::Quote($_)}) -join ' ')
         $out=$suitePath+'\'+$scenario+'.stdout.log';$err=$suitePath+'\'+$scenario+'.stderr.log'
-        $controller=Start-Process -FilePath $nativePs -ArgumentList $line -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        $controller=Start-TraceProcess $nativePs $line $out $err
+        $children.Add($controller)
         Assert-Trace ($controller.WaitForExit(240000)) 'controller-terminal-not-observed-do-not-rerun'
         Assert-Trace (([IO.FileInfo]::new($out)).Length -le 64KB -and ([IO.FileInfo]::new($err)).Length -le 64KB) 'controller-log-budget'
         $output=[IO.File]::ReadAllText($out)
@@ -90,6 +91,7 @@ finally{
         }catch{Write-Host ('RESULT_WRITE_FAILED='+$_.Exception.Message)}
     }
     foreach($stream in $held){$stream.Dispose()}
+    foreach($child in $children){$child.Dispose()}
 }
 $summary|ConvertTo-Json -Depth 12
 if($summary.status -cne 'CONTROL_FLOW_COMPLETE'){exit 1};exit 0

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T23:04:30.188649+00:00",
+  "lastUpdated": "2026-10-14T23:12:12.716860+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T23:04:30.188649+00:00"
+        "lastUpdated": "2026-10-14T23:12:12.716860+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Execute the pinned R3 command once in standalone elevated Windows PowerShell on the development PC. Both parent architectures were verified to select native x64; user actual R2 parent architecture remains unknown. Collect LAUNCH_EXIT and runtime/errors or new TS/T results before any retry. Then inspect guardian lifecycle and ETL quality/coverage. Do not rerun unchanged field15 or start120/promote yet.",
+            "nextAction": "Run the pinned R4 command once in standalone elevated development-PC PowerShell. R3 native/runtime and result hash were confirmed; it failed before trace start due to malformed WPR arguments, with a separate null ExitCode defect. Both defects now have actual native regression evidence. Inspect new TS/T results, exact exits and ETL quality before further execution or field progression. Preserve prior FAIL results, field15 FAIL, 120-minute not started and release HOLD.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11025,6 +11025,83 @@
                   "sha256": "e2609020246fd52cde70e60f4773692851c4277b6f5200042f1e3b74de9ac790"
                 }
               },
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceCommandR4Stage": {
+              "recordedAt": "2026-10-14T23:12:12.716860+00:00",
+              "status": "R3_COMMAND_FAILURE_VERIFIED_R4_PREPARED",
+              "r3UserLaunchExit": 1,
+              "r3UserParentIs64": false,
+              "r3ChildNative64Verified": true,
+              "r3SummarySha256": "bc55f8f53896760d88e7494fc60de5308cdc0407063c91fca75ffbc2fb60ed6f",
+              "r3ControllerExitUnknown": true,
+              "r3WprStatusExit": 3311404546,
+              "r3WprErrorHex": "0xc5600602",
+              "r3TraceStartAttempted": false,
+              "r3FailurePreserved": true,
+              "sourceDefects": [
+                "Single-option switch output became a scalar before += instance arguments",
+                "PS5.1 redirected Start-Process did not retain a handle for ExitCode"
+              ],
+              "fixes": [
+                "Explicit argument arrays passed to native child",
+                "Retain handle immediately and dispose after use"
+              ],
+              "lifecycleCases": 14,
+              "nativePsSuites": 10,
+              "argumentOperations": 4,
+              "commandRejections": 4,
+              "retainedExitCodeCases": 6,
+              "actualReadonlyWprExit": 0,
+              "coreTestsExit": 0,
+              "architectureInvocations": 8,
+              "architectureInputRejections": 7,
+              "architectureTestsExit": 0,
+              "ruffExit": 0,
+              "finalPackageVerificationExit": 0,
+              "manifestSha256": "7f2ec742e79a857f1b13c8050d30407d6be9628faef24f66de604904a25ae663",
+              "suiteSha256": "aae7da0ba5f44b025c51f77b5c1c303a5f64d3d047a620cf2f878178cb12fb30",
+              "commandPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\PINNED_LOCAL_TRACE_COMMAND_R4.txt",
+              "commandSha256": "5ff51fec3fc6cfea892751786b6700f3951c0a24104696e3227ce7b6721a787a",
+              "evidence": {
+                "r3Failure": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\r3-failure-review.json",
+                  "bytes": 5635,
+                  "sha256": "236bd52bacc33a82ca360f40bf96459ac2c44068cdb126228c3c8aae26a9ec9c"
+                },
+                "exitReproduction": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\exit-reproduction.json",
+                  "bytes": 605,
+                  "sha256": "dd9b1d2444cf41a72e4b97cbcbdbf01dd43a0197fdb01eb123f2fd9f19989461"
+                },
+                "coreTests": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\tests-r2\\summary.json",
+                  "bytes": 1586,
+                  "sha256": "c131455d429ec44c2d9c893da72edb8b1cb6a5d0d108bd70108426c076c48d50"
+                },
+                "architectureTests": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\architecture-tests\\summary.json",
+                  "bytes": 1519,
+                  "sha256": "4d969b570b3f38af74acdd09871cf1411efddb054719357353c3065fede5526f"
+                },
+                "readiness": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\package-readiness-r4.json",
+                  "bytes": 1835,
+                  "sha256": "8af59ed05005700f070ed79f91f32b5a12781acc7bf1daf30439ca6784751d9a"
+                },
+                "packageVerification": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COMMAND_20261015_395f95be\\final-package-verification.json",
+                  "bytes": 1248,
+                  "sha256": "bb8c1eadcc4180159955f2c128925ddcbd8a6b70a8ecceb274eeff70cb335244"
+                }
+              },
+              "r4ElevatedTraceExecuted": false,
               "productOrInstallerChanged": false,
               "field15Status": "FAIL",
               "canary120Started": false,

@@ -154,6 +154,75 @@ elif mode == 'exit7': sys.exit(7)
     environment_root = root / 'environment'
     for key in ('APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'):
         (environment_root / key).mkdir(parents=True)
+    arguments_body = 'Initialize-RunNative\n$rows=@()\n'
+    arguments_body += '$package=' + quote(root / 'package with spaces') + '\n'
+    arguments_body += '$directory=' + quote(root) + '\n'
+    arguments_body += "$instance='SFLTrace_" + os.urandom(16).hex() + "'\n"
+    arguments_body += r'''
+foreach($op in @('status','start','stop','cancel')){
+ $argv=@(Get-TraceArguments $op $package $directory $instance 'trace.etl')
+ $expected=switch($op){
+  'status' {@('-status','-instancename',$instance)}
+  'start' {@('-start',($package+'\SFLThreadScheduling.wprp!SFLThreadScheduling.light'),'-instancename',$instance)}
+  'stop' {@('-stop',($directory+'\trace.etl'),'-skipPdbGen','-instancename',$instance)}
+  'cancel' {@('-cancel','-instancename',$instance)}
+ }
+ Check (($argv|ConvertTo-Json -Compress) -ceq ($expected|ConvertTo-Json -Compress)) ('argv boundaries '+$op)
+ $actualArgs=@('-S',FIXTURE,'args',MARKER)+$argv
+ $r=Invoke-TraceNative EXECUTABLE $actualArgs ($directory+'\argv-'+$op) ENVIRONMENT 10
+ Check ($r.status -ceq 'PASS' -and $r.actual_exit_code -eq 0 -and $r.job_after_cleanup[1] -eq 0) ('argv native child '+$op)
+ $received=$r.stdout|ConvertFrom-Json
+ Check (($received.args|ConvertTo-Json -Compress) -ceq ($expected|ConvertTo-Json -Compress)) ('received argv '+$op)
+ $rows+=@{operation=$op;arguments=$received.args}
+}
+$rejected=0
+foreach($fault in @('operation','instance','output','existing')){
+ try{
+  if($fault -eq 'operation'){Get-TraceArguments 'unscoped' $package $directory $instance ''}
+  if($fault -eq 'instance'){Get-TraceArguments 'status' $package $directory 'other' ''}
+  if($fault -eq 'output'){Get-TraceArguments 'stop' $package $directory $instance '../outside.etl'}
+  if($fault -eq 'existing'){
+   [IO.File]::WriteAllText(($directory+'\trace.etl'),'fixture only')
+   Get-TraceArguments 'stop' $package $directory $instance 'trace.etl'
+  }
+ }catch{$rejected++}
+}
+Check ($rejected -eq 4) 'unsafe command rejection'
+@{rows=$rows;rejections=$rejected}|ConvertTo-Json -Depth 10
+'''.replace('FIXTURE', quote(fixture)).replace('MARKER', quote(root / 'unused.json'))
+    arguments_body = arguments_body.replace('EXECUTABLE', quote(sys._base_executable))
+    arguments_body = arguments_body.replace('ENVIRONMENT', quote(environment_root))
+    argument_results = run('wpr-argument-boundaries', arguments_body)
+    assert len(argument_results['rows']) == 4 and argument_results['rejections'] == 4
+    exit_body = '$native=' + quote(native) + '\n$directory=' + quote(root) + '\n'
+    exit_body += r'''
+$rows=@()
+foreach($delay in @(0,250)){
+ foreach($code in @(0,1,23)){
+  $line='-NoProfile -NonInteractive -Command "Start-Sleep -Milliseconds '+$delay+';exit '+$code+'"'
+  $name=$delay.ToString()+'-'+$code
+  $p=Start-TraceProcess $native $line ($directory+'\exit-'+$name+'.stdout.log') ($directory+'\exit-'+$name+'.stderr.log')
+  try{
+   Check ($p.WaitForExit(10000)) 'fixture bounded exit'
+   Check ($null -ne $p.ExitCode -and $p.ExitCode -eq $code) 'actual retained exit code'
+   $rows+=@{delay_ms=$delay;expected=$code;actual=$p.ExitCode}
+  }finally{$p.Dispose()}
+ }
+}
+$rows|ConvertTo-Json
+'''
+    exit_results = run('redirected-process-exit-codes', exit_body)
+    assert len(exit_results) == 6
+    readonly_body = 'Initialize-RunNative\n'
+    readonly_body += "$instance='SFLTrace_" + os.urandom(16).hex() + "'\n"
+    readonly_body += '$argv=@(Get-TraceArguments status ' + quote(source.parent)
+    readonly_body += ' ' + quote(root) + " $instance '')\n"
+    readonly_body += r"$r=Invoke-TraceNative 'C:\Windows\System32\wpr.exe' $argv "
+    readonly_body += quote(root / 'readonly-native-status') + ' ' + quote(environment_root) + ' 20\n'
+    readonly_body += "Check ((Read-TraceState $r) -ceq 'ABSENT') 'real WPR status accepts separate arguments'\n$r|ConvertTo-Json -Depth 12\n"
+    readonly = run('readonly-wpr-status', readonly_body)
+    assert readonly['actual_exit_code'] == 0 and readonly['job_after_cleanup'][1] == 0
+    assert not readonly['termination_requested']
     unrelated = subprocess.Popen(
         [sys._base_executable, '-S', '-c', 'import time;time.sleep(120)'],
         creationflags=subprocess.CREATE_NO_WINDOW,
@@ -192,6 +261,8 @@ elif mode == 'exit7': sys.exit(7)
     save(root / 'summary.json', dict(
         status='PASS', scope='SIMULATED_LIFECYCLE_AND_NATIVE_OWNED_COMMANDS_ONLY',
         simulated_lifecycle_cases=14, actual_etw_executed=False,
+        command_argument_operations=4, unsafe_command_rejections=4,
+        retained_exit_code_cases=6, real_wpr_readonly_status_exit=0,
         receipts=receipts, sources=facts, release_gate='HOLD', promotion_allowed=False,
     ))
     print(json.dumps(dict(status='PASS', lifecycle_cases=14, process_suites=len(receipts), actual_etw_executed=False)))

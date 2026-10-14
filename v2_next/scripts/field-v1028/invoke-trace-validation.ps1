@@ -83,6 +83,29 @@ function Read-TraceState($Command){
     if($active -and -not $absent){return 'ACTIVE'}
     return 'UNKNOWN'
 }
+function Get-TraceArguments([string]$Operation,[string]$Package,[string]$Directory,[string]$Instance,[string]$File){
+    Assert-Trace ($Instance -cmatch '^SFLTrace_[0-9a-f]{32}$') 'trace-command-instance'
+    # Keep single-option commands as arrays; a scalar += would concatenate them.
+    $argv=@(switch($Operation){
+        'status' {'-status'}
+        'start' {'-start';$Package+'\SFLThreadScheduling.wprp!SFLThreadScheduling.light'}
+        'stop' {
+            Assert-Trace ($File -cmatch '^(trace|recovery-[0-9a-f]{8})\.etl$' -and -not [IO.File]::Exists($Directory+'\'+$File)) 'trace-output-already-exists-or-unsafe'
+            '-stop';$Directory+'\'+$File;'-skipPdbGen'
+        }
+        'cancel' {'-cancel'}
+        default {throw 'trace-operation-not-allowed'}
+    })
+    return @($argv+@('-instancename',$Instance))
+}
+function Start-TraceProcess([string]$Executable,[string]$ArgumentLine,[string]$Stdout,[string]$Stderr){
+    $process=Start-Process -FilePath $Executable -ArgumentList $ArgumentLine -WindowStyle Hidden -PassThru -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr
+    try{
+        # PS5.1 redirected Start-Process loses ExitCode unless its handle is retained.
+        Assert-Trace ($process.Handle -ne [IntPtr]::Zero) 'trace-process-handle-required'
+        return $process
+    }catch{$process.Dispose();throw}
+}
 function Assert-TraceLease($Lease,[string]$Directory){
     Assert-Trace ($Lease.schema -ceq 'sfl-local-trace-lease-v1' -and $Lease.scope -ceq 'LOCAL_CONTROLLER_VALIDATION_ONLY') 'trace-lease-schema'
     Assert-Trace ($Lease.instance -cmatch '^SFLTrace_[0-9a-f]{32}$') 'trace-instance'
@@ -203,7 +226,7 @@ function Assert-TraceRecovery($Intent,$Lease,[string]$LeaseSha,[string]$Manifest
     Assert-Trace (-not (& $GenerationAlive $Intent.guard_pid $Intent.guard_created_filetime)) 'trace-recovery-guard-still-alive'
 }
 
-$held=[Collections.Generic.List[IO.Stream]]::new();$traceParent=$null;$directory=$null
+$held=[Collections.Generic.List[IO.Stream]]::new();$traceParent=$null;$directory=$null;$guard=$null
 try{
     $nativePs=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
     Assert-Trace ([Environment]::Is64BitProcess -and $PSVersionTable.PSEdition -ceq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -eq 1 -and [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ieq $nativePs) 'trace-native-ps51-required'
@@ -247,7 +270,7 @@ try{
         $argumentLine=(@($guardArgs|ForEach-Object{[SflOwnedRun]::Quote($_)}) -join ' ')
         # A separate hidden console and no inherited job ensure closing this
         # controller's window does not also close the sole trace owner.
-        $guard=Start-Process -FilePath $nativePs -ArgumentList $argumentLine -WindowStyle Hidden -PassThru -RedirectStandardOutput ($directory+'\guard.stdout.log') -RedirectStandardError ($directory+'\guard.stderr.log')
+        $guard=Start-TraceProcess $nativePs $argumentLine ($directory+'\guard.stdout.log') ($directory+'\guard.stderr.log')
         Write-TraceJson ($directory+'\guard-process.json') @{pid=$guard.Id;created_filetime=$guard.StartTime.ToUniversalTime().ToFileTimeUtc().ToString()}
         $readyClock=[Diagnostics.Stopwatch]::StartNew()
         while(-not [IO.File]::Exists($directory+'\ready.json') -and -not $guard.HasExited -and $readyClock.Elapsed.TotalSeconds -lt 45){Start-Sleep -Milliseconds 100}
@@ -282,14 +305,7 @@ try{
     $prefix=if($Mode -ceq 'Recover'){'recovery-'+[Guid]::NewGuid().ToString('N').Substring(0,8)}else{'cmd'}
     $context=@{index=0}
     $command={param($Operation,$File)
-        $argv=switch($Operation){
-            'status' {@('-status')}
-            'start' {@('-start',($package+'\SFLThreadScheduling.wprp!SFLThreadScheduling.light'))}
-            'stop' {Assert-Trace ($File -cmatch '^(trace|recovery-[0-9a-f]{8})\.etl$' -and -not [IO.File]::Exists($directory+'\'+$File)) 'trace-output-already-exists-or-unsafe';@('-stop',($directory+'\'+$File),'-skipPdbGen')}
-            'cancel' {@('-cancel')}
-            default {throw 'trace-operation-not-allowed'}
-        }
-        $argv+=@('-instancename',$lease.instance)
+        $argv=@(Get-TraceArguments $Operation $package $directory $lease.instance $File)
         $folder=$directory+'\'+$prefix+'-'+$context.index.ToString('00');$context.index++
         Invoke-TraceNative $wpr $argv $folder $directory $(if($Operation -ceq 'stop'){60}else{20})
     }
@@ -332,6 +348,7 @@ try{
     }
     exit 1
 }finally{
+    if($null -ne $guard){$guard.Dispose()}
     if($null -ne $traceParent){$traceParent.Dispose()}
     foreach($stream in $held){$stream.Dispose()}
 }
