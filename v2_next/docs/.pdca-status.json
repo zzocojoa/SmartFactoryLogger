@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "APPROVED_LOCAL_HELPER_TESTS_PASS_SERVER_EXECUTION_PENDING",
+            "status": "APPROVED_SERVER_COLD_BACKUP_IN_PROGRESS_CANDIDATE_INSTALL_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8526,6 +8526,21 @@
             },
             "localTestsTotal": 81,
             "localTestsExitCode": 0,
+            "serverBackup": {
+              "path": "C:/Users/user/Desktop/SmartFactory/Q3d9da3",
+              "phase": "COPYING",
+              "appClosedThroughUi": true,
+              "runtimeAbsenceObservedAtUtc": "2026-10-14T00:07:56.7832272Z",
+              "sameGenerationNormalExitLogReviewed": false,
+              "finalCopyVerified": false
+            },
+            "installerHelper": {
+              "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
+              "unitChecks": 28,
+              "unitExitCode": 0,
+              "syntheticControllerExitCode": 0,
+              "serverExecution": "NOT_STARTED"
+            },
             "physicalBoundaryTest": "NOT_TESTED",
             "lowSignalAlarmEnabled": false,
             "comparatorVerified": false,
