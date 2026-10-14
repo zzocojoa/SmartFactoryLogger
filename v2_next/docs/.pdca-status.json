@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T14:08:45.231167+00:00",
+  "lastUpdated": "2026-10-14T15:29:52.103436+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T14:08:45.231167+00:00"
+        "lastUpdated": "2026-10-14T15:29:52.103436+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Await the existing pinned package-r2 elevated development-PC three-scenario run; no new execution request is needed. Bind resulting ETL/commands/exports by locked hashes and inspect real loss, decode gaps and coverage. Target scheduler payload/identity/request-QPC joins remain unverified; do not infer the 203.1356ms server cause or repeat the unchanged 15-minute run/start 120 minutes. Retain 60345/1 and recheck live job metadata before field work.",
+            "nextAction": "User execution is now confirmed by local Windows PowerShell events. Inspect LAUNCH_EXIT and the existing console error before retrying: PID 99316 reported a generic system error and stopped without an observed TS/T result. Exact failure stage and root cause remain unconfirmed; do not request or execute the same suite again yet. After resolving the confirmed cause, validate actual guardian lifecycle, ETL loss/decoding/coverage and request correlation. Keep field 15-minute FAIL, 120-minute not started and promotion HOLD. Recheck live job metadata before future field work.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -10933,6 +10933,43 @@
               "manufacturerReplyObserved": false,
               "serverDeliveredOrExecuted": false,
               "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceExecutionReviewStage": {
+              "recordedAt": "2026-10-14T15:29:52.103436+00:00",
+              "status": "LOCAL_TRACE_LAUNCH_ERROR_OBSERVED_CONSOLE_DETAILS_REQUIRED",
+              "userReportedComplete": true,
+              "computer": "DESKTOP-SS5CURC",
+              "launchObservedAtKst": "2026-10-15T00:19:02.8065924+09:00",
+              "engineStoppedAtKst": "2026-10-15T00:19:03.9742012+09:00",
+              "processId": 99316,
+              "engineError": "시스템 오류입니다.",
+              "engineErrorRecordId": 7751360,
+              "observedResultDirectories": 0,
+              "actualLaunchExit": null,
+              "rootCause": "UNCONFIRMED",
+              "actualGuardianLifecycleVerified": false,
+              "expectedPackageFilesUnchanged": true,
+              "expectedPackageFileCount": 5,
+              "launchReview": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_RUN_REVIEW_20261015_7fbe670b\\execution-review.json",
+                "bytes": 4196,
+                "sha256": "dc5d41d85ecc1998c69df6d241c3c4d08e2a944845f45d95bab3ee5cbcd019ee"
+              },
+              "errorReview": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_RUN_REVIEW_20261015_7fbe670b\\operational-error-review.json",
+                "bytes": 3380,
+                "sha256": "95d872438f375c121474c9b97acb83274143d9fde6001b542075e469a1393195"
+              },
+              "currentTurnClassification": "PROGRESS_NEW_ENGINE_ERROR_EVIDENCE",
+              "verifiedLiveWait": false,
+              "previousBlockedAuditReused": false,
+              "retryAllowedBeforeErrorReview": false,
               "field15Status": "FAIL",
               "canary120Started": false,
               "physicalBoundary": "NOT_TESTED",

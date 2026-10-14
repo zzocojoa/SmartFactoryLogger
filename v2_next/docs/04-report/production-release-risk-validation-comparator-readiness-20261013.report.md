@@ -1622,3 +1622,35 @@ event/header clock·종료 시각·손실·report 개수/skip·개별 해독 오
 [thread 사건](https://learn.microsoft.com/en-us/windows/win32/etw/thread-v2),
 [ReadyThread](https://learn.microsoft.com/en-us/windows/win32/etw/readythread),
 [공개 fixture 출처](https://github.com/microsoft/perfview/tree/10e5d271cebcdf5d6cf122c6ab9c863860a7a2f1/src/TraceEvent/TraceEvent.Tests/inputs).
+
+
+## 2026-10-15 로컬 추적 실행 오류 확인
+
+사용자의 완료 답변 뒤 개발 PC `DESKTOP-SS5CURC`의 Windows 실행 기록을 확인했다.
+R2 suite를 실행한 PID99316의 PowerShell engine 시작은00:19:02.806KST,
+종료는00:19:03.974KST다. Operational event4100(record7751360)에
+“시스템 오류입니다.”가 남았으나 숫자 오류 코드·실패 줄·실제 LAUNCH_EXIT는 없다.
+원인은 미확정이다. 시작 전 중단은 추정이며 정확한 실패 단계로 확정하지 않는다.
+
+실제 사용자 바탕화면 SmartFactory에서 예상 TS/T 결과 폴더를 찾지 못했다.
+대체 사용자/Public/OneDrive/systemprofile 경로도 확인했으며 대상 SmartFactory가 없었다.
+manifest·suite·controller·native helper·WPR profile5파일의 크기/SHA256은 준비 당시와 같다.
+같은15초 범위 AppLocker/MSI and Script·CodeIntegrity·Defender 로그에는 사건이 없었다.
+이 제한된 검색으로 모든 보안 제한의 부재나 추적 세션 정리 완료를 증명하지 않는다.
+
+증거는 `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_RUN_REVIEW_20261015_7fbe670b`의
+`execution-review.json`(SHA256 `dc5d41d85ecc1998c69df6d241c3c4d08e2a944845f45d95bab3ee5cbcd019ee`)과
+`operational-error-review.json`(SHA256 `95d872438f375c121474c9b97acb83274143d9fde6001b542075e469a1393195`)이다.
+앞선 차례는 실행 확인, 이번 차례는 실제 engine 오류 확보로 PROGRESS다.
+열린 대화형 PowerShell 창은 시험 suite가 계속 실행 중이라는 근거가 아니며 verified wait가 아니다.
+이전 blocked 감사 횟수는 새 사용자 완료 답변 뒤의 감사에 그대로 재사용하지 않는다.
+
+다음 절차:
+
+1. 이미 열린 콘솔의 LAUNCH_EXIT와 오류 전문을 확인한다. 원인 검토 전 같은 명령을 재실행하지 않는다.
+2. 확인된 원인에 필요한 수정만 수행하고 관련 검사를 실행한다. 기존 묶음/실패 증거는 보존한다.
+3. 실제3조건 종료·ETL 저장/해독/손실/범위가 확인된 뒤 요청 시각 연결과 현장 계측을 이어간다.
+
+이번 변경은 조사 기록과 다음 행동의 갱신이다. 제품·설치본·서버 실행은 변경하지 않아
+앱 health/build·현장15분/120분 시험은 실행하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
