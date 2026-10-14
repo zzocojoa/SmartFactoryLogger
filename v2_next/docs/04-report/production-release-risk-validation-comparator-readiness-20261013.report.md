@@ -363,3 +363,44 @@ CSV514개의 부재 원인을 확정하지 않는다. 최종 사본 검산·콘�
 정식 HOLD를 유지했는지 확인한다. 제품·frontend·backend 변경이 없어 전체 health는
 반복하지 않았다. 새 도우미 빌드·휴대 실행 검증·서버 전달은 별도로 완료해야 한다.
 이미 전달한 구도우미는 보존하며 이 큰 입력의 검사에 사용하지 않는다.
+
+고정 helper commit `f274b5347eeaaae50d397a07466604bb9826da7c`의 깨끗한 소스 30파일에서
+새 도우미를 빌드했다(exit0). 실행 파일은 16,059,253B,
+SHA256 `2c62d1d5ad3566d80a1d18b22a55da7d61b3b17f8afd97781394988d16766c68`이다.
+내장 CSV 입력 모듈의 코드와 commit 소스의 컴파일 결과도 일치한다. native PS5.1을 포함한
+휴대 실행 8개는 모두 예상 exit를 확인했고 전체 검증 driver는 exit0였다. 합성 정상·OFF·
+v2 전용 흐름은 exit0, 실제 보관 자료의 미승인 attestation·중복 JSON·잘못된 외부 해시·
+비관리자 생산 launcher는 예상대로 exit1이었다. 개발 fixture의 ACL 변경은 새 시험 폴더에만
+적용했으며 생산 관리자 ACL 적용 또는 서버 QA를 시험한 것으로 보고하지 않는다.
+
+새 전달 폴더 `FIELD_OFF_20261014_0dd2ced0_R2`는 13파일/42,161,139B다.
+전달 manifest SHA256은 `6fd3a6459b42f8b08527a3070be9b4d6c56eb11112eae63ad69b134007db372e`다.
+개발 폴더와 `Z:/SmartFactory/20261014/send` 사본의 전체 파일 해시가 일치한다.
+Chrome 원격 데스크톱으로 서버
+`C:/Users/user/Desktop/SmartFactory/FIELD_OFF_20261014_0dd2ced0_R2`까지 복사하고,
+절대경로·RUN128의 8파일·reference의 2파일과 최상위 자료를 화면으로 확인했다.
+`server-delivery.json`과 `server-r2-*.png`에 기록했다. 서버 로컬 해시 검산·도우미 실행·
+후보 설치는 아직 하지 않았다. 기존 전달 묶음과 제품 후보4cc/installer882 바이트는 유지한다.
+
+### 회수 대장과 추가 이미지 94,022개의 실제 연결
+
+서버 탐색기로 이미지 fact·최종 manifest·관측 fact를 새 공유 회수 폴더
+`Z:/SmartFactory/20261014/return/FIELD_OFF_0dd2ced0_dataqa`에 복사했다.
+개발 사본의 세 기본 본문은 잠정 백업 목록과 크기·해시가 일치한다. 최종 image manifest는
+461B, SHA256 `755a30feaa0e2d86064703d09f9215e70a4a7e50a698e53e2f603999127d080c`다.
+image fact는 2,171,614,099B/SHA256 `7b5d26e7e1d85fc884a1398686a3f6f95fdfa4da8761aba6c00afb895cc35d01`,
+관측 fact는 365,096,518B/SHA256 `3cf5c2eb694e8e6ece38a644c6b2f1f4452f2b5320595bdf2b73069dd59cd77c`다.
+첫 회수 분석은 manifest 상대경로의 선행 역슬래시를 빠뜨려 복사 전에 exit1로 중단됐다.
+실제 경로를 정확히 맞추도록 정정한 회수 분석은 exit0였으며 최초 실패 기록도 보존한다.
+
+`image-ledger-review-r1/review.json`은 이미지 대장 4,237,531행 전체를 읽어 최종 manifest의
+row_count와 맞췄다(exit0). 새 목록의 추가 이미지 94,022개는 각각 대장 한 행과 연결되며
+path·크기·SHA256·capture ID·captured 상태가 일치한다. 전부 같은 SPOT service
+`efca4313-f987-4bb2-bcc8-4de40712396c`에 속하고, 관측 대장 314,216행의 실제 key와도
+94,022개 모두 연결됐다. 중복 추가 경로·누락 대장 행·없는 관측 key·service 불일치는 0이다.
+이 service의 관측 행은 106,655개, 연결 이미지의 link_status 기록은 모두 fresh다.
+
+이는 파일명 시각만으로 세대를 추정하던 범위에서 실제 대장 key 연결로 진행한 결과다.
+추가 이미지 본문 디코딩, 전체 보존 이력의 무결성, 과거 drop173의 원인·영향을 증명하지는
+않는다. 서버 전체 사본 검산과 최종 콘솔 해시가 아직 없어 잠정 증거로 유지하며
+full_data NOT_EVALUATED, physical NOT_TESTED, release HOLD를 바꾸지 않았다.

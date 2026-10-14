@@ -8559,7 +8559,11 @@
               "provisionalAddedImageFiles": 94022,
               "provisionalAddedImagesMatchShutdownWrittenCount": true,
               "provisionalImageNameHashTimeViolations": 0,
-              "provisionalImageFactGenerationJoinPerformed": false,
+              "provisionalImageFactGenerationJoinPerformed": true,
+              "provisionalAddedImageLedgerRowsMatched": 94022,
+              "provisionalAddedImageObservationKeysMatched": 94022,
+              "provisionalImageLedgerRows": 4237531,
+              "provisionalImageLedgerReview": "C:/Users/user/Desktop/SmartFactory/PDCA_FIELD_CAPACITY_20261014_0dd2ced0/image-ledger-review-r1/review.json",
               "provisionalImageDecodePerformed": false
             },
             "csvHelperCompatibility": {
@@ -8570,8 +8574,15 @@
               "csvInputTests": 22,
               "closedDataAndRunnerTests": 27,
               "testExitCode": 0,
-              "replacementPortableBuildVerified": false,
-              "replacementServerDelivered": false
+              "replacementPortableBuildVerified": true,
+              "portableNativeInvocations": 8,
+              "portableDriverExitCode": 0,
+              "helperCommit": "f274b5347eeaaae50d397a07466604bb9826da7c",
+              "executableSha256": "2c62d1d5ad3566d80a1d18b22a55da7d61b3b17f8afd97781394988d16766c68",
+              "replacementServerDelivered": true,
+              "serverPath": "C:/Users/user/Desktop/SmartFactory/FIELD_OFF_20261014_0dd2ced0_R2",
+              "serverLocalHashesVerified": false,
+              "serverExecuted": false
             },
             "installerHelper": {
               "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
