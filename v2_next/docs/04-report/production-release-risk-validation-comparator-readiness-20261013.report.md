@@ -812,3 +812,88 @@ wrapper SHA256은 `0a519643275da1c72329e2a34fdbaf1f47d661b09a78d5ce51afc7e30a089
 원격 UI 터미널 조작 제한에 따라 사용자에게 전체 본문 복사·PowerShell 실행만 요청했다.
 이 기록 시점에 서버 attestation은 미실행이며 앱은 종료 상태다. 실행 결과를 회수·대조하기
 전에는 앱을 다시 시작하지 않는다. 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD를 유지한다.
+
+
+## 2026-10-14 USER_SELF 확인 기록 적용과 실제 재기동 확인
+
+사용자 실행 후 16:33 KST `LAUNCH_EXIT=0`을 확인했다. 실제 결과 폴더는
+`C:/Users/user/Desktop/SmartFactory/Aa99a9622`이며 result.json은 2,621B /
+`14912203e64a8e69cd75d7772ddf50e5d8b7cdb34dd38f2fccfb268e1319f88f`다.
+5개 결과를 공유 return과 개발 PC로 회수해 전 파일 해시·콘솔 핀을 대조했다.
+`review-field-attestation-result.py` 실제 검토 exit0, 격리 검토기 검사10개도 exit0다.
+서버는 적용 전 native 앱 프로세스/8000 listener 부재를 확인했고, 적용 후에도
+부재를 검사했다. 이는 앞선 종료 이후의 부재 증거이며 정밀 종료 소요 시간 측정은 아니다.
+
+허용한 네 attestation 필드 외 설정은 동일하다. 결과 config.ini는 2,671B /
+`2f872a957b0899858a2f71a2c8b8928f3ef9f416ed04ce2ca7282f83adaf5fb4`다.
+운영자 USER_SELF, 확인 시각 `2026-10-14T07:33:48.472124Z`, 후보 지문 3ddc2e90…을
+실제 파일에서 확인했다. Low Signal alarm/configured comparator는 false이며 물리 시험
+미완료를 verified로 바꾸지 않았다. `attestation-production-review.json` SHA256은
+`e8dc2f789e6c7f7d9a4a915c46f1a46faeac679ec75a998cf7aa1086f800cd69`다.
+
+재실행 전에 서버의 `spot_image_fact_manifest.final.json` 457B를 보존했다. SHA256은
+`8f25709068c73e79141222e5b72b597da1323095a072bef9b4fbf5f6d7b62fdd`다.
+시작 sidecar 요약4,237,531행/written0과 별도 종료 요약4,237,772행/written241의
+차이241은 종료 영수증241과 일치한다. 종료 요약의 failure/drop도0이다. 후보 코드와
+현재 코드의 관련 파일이 같고, 시작 sidecar를 보존하면서 별도 종료 manifest를 작성하는
+계약 및 portable final-manifest validator 검사2개가 exit0였다. 이 요약 차이는 설명됐다.
+회수 파일과 공유 사본 해시는 같지만 서버 콘솔 핀은 없으며, 실제 누적 image fact 바이트
+해시 대조·241개 이미지 decode·전체 CSV-fact join을 수행했다는 뜻은 아니다.
+근거는 `candidate-image-manifest-comparison.json`이며 기존 취득 증거는 수정하지 않았다.
+
+16:43 KST 표준 사용자 바탕화면 바로가기로 후보를 실행했다. 실제 API에서 확인 상태
+verified, USER_SELF, 동일 지문, drift=false/빈 목록, 승인 프로파일, Low Signal OFF를
+확인했다. logger `5122ad44-bc29-49d3-88c7-f622a3232732`, 새 CSV
+`Factory_Integrated_Log_v2_20261014_164348.csv`, 작업60580/1이다.
+두 차례 각6GET 모두 HTTP200/collector exit0이며 CSV rows1→323, 이미지0→67로 증가했다.
+관측 오류 목록은 비어 있고 이미지 failure/drop0이다. 초기 startup_pending14/stale191은
+그대로 기록한다. observation 초기화 약26.45초 관찰이며 기동 성능 PASS가 아니다.
+이 실행도 사전 native 계측이 없으므로 정상 기동3회의 계측 결과로 계산하지 않는다.
+
+`candidate-attested-runtime-review.json`은 7,770B /
+`3db01449ec50aea1720863f41512a1b7e62e50186beb97e4f415fd4f98195d11`이다.
+실제 runtime에서 필요한 필드만 고정한 제한 현장 설정 기준은
+`candidate-attested-configuration-reference.json` 1,985B /
+`4d4c9b05068719f7bc8810ab7fc0bfa8ab9b83c727d422205e7f687da45ac29f`이며,
+기존 설정 binder가 지문을 재계산해 DISABLED_LOW_SIGNAL_FIELD_TRIAL 범위 PASS를 확인했다.
+실제 native 프로세스 식별·서버 내부15분/120분 측정·계측 기동3회·전체 데이터 QA는 남아 있다.
+현재 앱은 Running으로 유지하며 설치/attestation 명령은 반복하지 않는다.
+물리 경계 NOT_TESTED, 정식 QA/출시 HOLD, 운영 승격 금지를 유지한다.
+
+
+## 2026-10-14 실제 프로세스 결합 15분 관찰 R2 전달
+
+확인 기록이 유효한 Running 후보를 유지하며 서버 내부 900초 관찰용 묶음을 준비했다.
+기존 FIELD_OFF R2의 RUN128 계측기와 후보 payload 기준은 재빌드하지 않았다.
+준비 도우미는 실제 8000 listener, 설치 경로, 부모 프로세스, PID와 생성 시각을 확인한다.
+현재 config 해시와 승인·runtime 설정 기준을 대조하고 실제 프로세스 식별값을 가진
+관찰 요청을 만든 뒤 기존 계측기를 호출한다. 앱 시작·종료, 설치, 설정 수정은 수행하지 않는다.
+
+첫 개발 검사에서 FILETIME을 먼저 부동소수점으로 바꾸면 psutil 생성 시각과 달라지는
+문제를 발견했다. R1은 서버에 전달하지 않았다. R2는 정수 상태에서 Unix 기준 시각을
+먼저 빼고 초로 환산한다. 실제 Windows PowerShell 5.1 프로세스 값 대조를 포함한
+native 검사10개와 명령 운반부 검사7개가 통과했고 각 드라이버 exit0다.
+분기 검사의 CIM/listener는 fixture이며 실제 프로세스 정밀도 검사는 별도 native 측정이다.
+성공 요청은 기존 field_runner validator로 검사했다. 전체 stdout/stderr를 읽었으며
+CLIXML stderr는 information/progress였다. 개발 검사를 서버 현장 PASS로 계산하지 않는다.
+
+공유 `Z:/SmartFactory/20261014/send/OBS15_OFF_20261014_0dd2ced0_R2_delivery`에서
+서버 `C:/Users/user/Desktop/SmartFactory/OBS15_OFF_20261014_0dd2ced0_R2`로 복사했고,
+일반 탐색기에서 실제 절대경로와 묶음8개 파일을 확인했다. 루트의
+`PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt`를 메모장에 열고 `$observeBundle=`
+시작 본문을 확인했다. 묶음과 명령 합계9파일/29,976B다. 공유 사본은 해시를 대조했으나
+서버 로컬 해시는 사용자 실행 시 잠긴 입력으로 검증한다. 파일 존재 확인을 해시 PASS로 대체하지 않는다.
+
+bundle-manifest SHA256은
+`c784a6af1d2b4067c50f096b6ac8122ce07f7538290fc12fd92f4a8d575c2052`,
+도우미 SHA256은 `d5ff3ddf1ad941da5b5ad97791e190a200c4d50ffdb8d310d06fbcbedc61c235`,
+명령 SHA256은 `515ad2e0e71e2f436147310cd4bb6516d8608f32709d21b1bdb7d304e2180f60`이다.
+전달 영수증은 작업 루트 `server-observe15-r2-delivery.json`, 개발 검토는
+`observe15-development-transfer-review.json`이다. 기존 실패·원본 증거는 보존했다.
+
+이 기록 시점에 관찰은 미실행이며 원격 UI 터미널 조작 제한 때문에 사용자 실행을 기다린다.
+앱은 Running으로 유지한다. 시작 시 PREPARATION_PATH/PREPARATION_SHA256,
+STARTING_FIELD_OBSERVATION_SECONDS=900을 출력하며, 이후 상세 출력 없이 측정할 수 있다.
+마지막 RESULT_PATH/LAUNCH_EXIT와 결과 파일을 회수·대조한 뒤 측정 결과를 판단한다.
+15분/120분, 사전 계측 기동3회, 전체 데이터 QA는 미완료다.
+물리 경계 NOT_TESTED, 정식 QA/출시 HOLD, 운영 승격 금지를 유지한다.

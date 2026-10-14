@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "CANDIDATE_ATTESTATION_DELIVERED_AWAITING_OPERATOR_EXECUTION",
+            "status": "OBSERVE15_R2_DELIVERED_AWAITING_USER_EXECUTION",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8811,7 +8811,7 @@
               "configSha256": "be03f4ef477e4333f616ca8e0f3ef270b2ce3acaa05aeaef3075da3d46557b57",
               "fingerprint": "3ddc2e9080e7d804bdb1eb784d5136b38286c92dc927850c82d16a04732c7683",
               "attestationStatus": "fingerprint_mismatch",
-              "attestationApplied": false,
+              "attestationApplied": true,
               "csvRows": 1152,
               "temperatureOutputCounts": {
                 "startup_pending": 22,
@@ -8823,7 +8823,7 @@
               "processExitObserved": false,
               "formalStartupMeasurementCycles": 0,
               "fieldPerformanceTestStarted": false,
-              "imageManifestVsShutdownDifferencePending": true,
+              "imageManifestVsShutdownDifferencePending": false,
               "fullDataQa": "NOT_EVALUATED",
               "attestationDelivery": {
                 "receiptPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-attestation-delivery.json",
@@ -8834,12 +8834,90 @@
                 "helperSha256": "0a519643275da1c72329e2a34fdbaf1f47d661b09a78d5ce51afc7e30a089a3a",
                 "commandSha256": "6daa1e181e26735a9e46e17042ec4b75a60ce632c69105f6f8707439152b5cb4",
                 "serverLocalCopyObserved": true,
-                "serverLocalHashesVerified": false,
-                "serverExecuted": false,
+                "serverLocalHashesVerified": true,
+                "serverExecuted": true,
                 "nativeChecks": 7,
                 "carrierChecks": 7,
                 "driversExitCode": 0
+              },
+              "attestationResult": {
+                "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\Aa99a9622",
+                "resultSha256": "14912203e64a8e69cd75d7772ddf50e5d8b7cdb34dd38f2fccfb268e1319f88f",
+                "launchExit": 0,
+                "reviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\attestation-production-review.json",
+                "reviewSha256": "e8dc2f789e6c7f7d9a4a915c46f1a46faeac679ec75a998cf7aa1086f800cd69",
+                "operator": "USER_SELF",
+                "configurationAfter": {
+                  "bytes": 2671,
+                  "sha256": "2f872a957b0899858a2f71a2c8b8928f3ef9f416ed04ce2ca7282f83adaf5fb4"
+                },
+                "nonAttestationConfigUnchanged": true,
+                "nativeColdPreconditionVerified": true,
+                "resultReviewChecks": 10,
+                "resultReviewChecksExit": 0
+              },
+              "imageManifestComparison": {
+                "status": "OPEN_SNAPSHOT_VS_FINAL_COUNTER_DIFFERENCE_EXPLAINED",
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\candidate-image-manifest-comparison.json",
+                "sha256": "641fd87196963c226148198511ecd980b7084c79862328fce5a0d4ee4538b365",
+                "metadataStartRows": 4237531,
+                "finalRows": 4237772,
+                "finalWritten": 241,
+                "rowDelta": 241,
+                "actualLedgerBytesVerified": false,
+                "imageDecodeVerified": false,
+                "separateManifestTests": 2,
+                "testsExit": 0
               }
+            },
+            "attestedRuntime": {
+              "reviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\candidate-attested-runtime-review.json",
+              "reviewSha256": "3db01449ec50aea1720863f41512a1b7e62e50186beb97e4f415fd4f98195d11",
+              "loggerServiceInstanceId": "5122ad44-bc29-49d3-88c7-f622a3232732",
+              "configurationReference": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\candidate-attested-configuration-reference.json",
+                "bytes": 1985,
+                "sha256": "4d4c9b05068719f7bc8810ab7fc0bfa8ab9b83c727d422205e7f687da45ac29f"
+              },
+              "configurationStatus": "verified",
+              "driftDetected": false,
+              "operator": "USER_SELF",
+              "httpRequests": 12,
+              "http200": 12,
+              "csvRows": [
+                1,
+                323
+              ],
+              "imagesWritten": [
+                0,
+                67
+              ],
+              "initialStaleRows": 191,
+              "productNo": "60580",
+              "moldNo": "1",
+              "measuredStartupCycles": 0,
+              "formalPerformanceMeasured": false,
+              "field15minComplete": false,
+              "field120minComplete": false,
+              "applicationRunning": true
+            },
+            "observe15Delivery": {
+              "receiptPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-observe15-r2-delivery.json",
+              "receiptSha256": "b95d4fd588ad2214f26351cec6de876ece8c3fbd31278daf6c2201454a25132a",
+              "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\OBS15_OFF_20261014_0dd2ced0_R2",
+              "commandPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt",
+              "manifestSha256": "c784a6af1d2b4067c50f096b6ac8122ce07f7538290fc12fd92f4a8d575c2052",
+              "helperSha256": "d5ff3ddf1ad941da5b5ad97791e190a200c4d50ffdb8d310d06fbcbedc61c235",
+              "commandSha256": "515ad2e0e71e2f436147310cd4bb6516d8608f32709d21b1bdb7d304e2180f60",
+              "serverLocalCopyObserved": true,
+              "serverLocalHashesVerified": false,
+              "serverExecuted": false,
+              "durationSeconds": 900,
+              "nativeChecks": 10,
+              "carrierChecks": 7,
+              "driversExitCode": 0,
+              "actualNativeIdentityPrecisionCheckPassed": true,
+              "productionFieldResult": "NOT_RUN"
             }
           }
         }
