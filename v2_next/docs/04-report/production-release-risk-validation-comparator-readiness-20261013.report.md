@@ -1470,3 +1470,59 @@ API 해석 근거: [Microsoft job accounting](https://learn.microsoft.com/en-us/
 [PID 목록](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_process_id_list),
 [명시적 job membership](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob).
 accounting의 종료 참조 영향은 가능한 해석이며 이번 실제 conhost 식별을 대신하는 원인 확정이 아니다.
+
+
+## 2026-10-14 요청 스레드·QPC 연결 계측과 제한된 부하 비교
+
+설치 후보의 `/health`는 payload 내부 시간이500ms 이상일 때만 구간 로그를 남긴다.
+성공한 health의 access 완료 로그도 생략하므로203.1356ms 사건의 서버 구간은 기존 로그로
+분해할 수 없다. 서버 처리·client 실행 대기·Python lock/GIL의 원인은 계속미확정이다.
+
+`field_native_timing.py`와 HTTP 수집기에 자기 PID/TID·생성 FILETIME·QPC 주파수와
+요청 전후 시계 대조 범위·thread CPU counter를 추가했다. PID/TID 재사용, 생성 시각/주파수
+변경, 역전·불일치 시계는 연결 불가로 남긴다. 알 수 없는 native 값은UNAVAILABLE이며,
+원시 응답과 기존 시간/실패 판정은 보존한다. 비교용 OFF는 native API를 호출하지 않는다.
+body 완료 시각은 기존 방식으로 측정하고, decoder 이전 경계에서 native 종료 표본을 읽는다.
+초기 identity 조회 비용을 첫 요청의 connect 구간에서 제외하지 않았다.
+생성 FILETIME과 QPC는 정수로 보존하며 소수점 변환으로 다른 프로세스 세대를 합치지 않는다.
+
+네이티브 clock/identity7검사와 HTTP·resource·인증·설정·관찰105회귀 검사는 실제exit0이다.
+Ruff F/E9도exit0이다. 진단 실패 시 원시 body/200ms 위반을 보존하고, 인증 token 비노출,
+첫 실패 포함, 일정 누락·정상 종료/세대·설정 조건이 유지되는지 확인했다.
+
+첫 부하 비교는 회귀 검사와 겹쳐CONFOUNDED로 별도 기록하고 원문을 보존했다.
+그 결과를 계측 부하의 근거로 쓰지 않고, 회귀 종료 확인 후 새 사본에서
+OFF→ON→ON→OFF 각15초의 합성 loopback 비교를 수행했다. 총284요청,ON142요청의
+시계·identity 연결을 독립 검산했고4개 manifest/580파일의 크기·SHA256이 일치했다.
+정식15분 시험이 아니며 실제 앱·장비·WPR 추적은 포함하지 않는다.
+
+| 전체 client 응답 평균(ms) | OFF | ON | ON−OFF |
+| --- | ---: | ---: | ---: |
+| health(각16표본) | 2.066519 | 1.906988 | −0.159531 |
+| data(각6표본) | 2.288400 | 4.788283 | +2.499883 |
+| image(각120표본) | 2.215642 | 3.243265 | +1.027623 |
+
+단기 표본은 변동을 포함하며 무부하 또는 영향 없음의 증거가 아니다. 개별 native capture
+2,000회 중앙값1.6µs/p99 2.9µs와 실제 HTTP 차이를 혼동하지 않는다. ON 요청의 경계
+시계 대조 폭은 최대118,300ns였다. CPU delta142개 중136개가0, 최대15,625,000ns로
+관찰됐으므로 wall−CPU를 서버 대기나 scheduler 지연으로 이름 붙이지 않는다.
+이 값은 추후 OS 사건과 연결할 근거이며 인과 설명 자체가 아니다.
+
+WPR의 CSwitch/ProcessThread/ReadyThread/ThreadPriority만 켜는 Memory 프로파일을 준비하고
+개발 PC `wpr -profiledetails` exit0으로64KiB×256의 명목16MiB 설정을 확인했다.
+실제 할당량·보존 범위·event loss·trace parsing·ON/OFF 부하는 아직 확인하지 않았다.
+현재 개발 프로세스는 일반 권한이며 실제 추적에는 적절한 실행 권한이 필요하다.
+고유 instance 소유권·시간 제한·정상/오류/중단 정리 도우미를 완성·시험한 뒤 실행 단계를 준비한다.
+다른 세션을 stop/cancel하지 않으며 이번 차례에는 추적을 시작하지 않았다.
+
+증거: `C:/Users/user/Desktop/SmartFactory/PDCA_REQUEST_TIMING_20261014_c09c2e46`.
+`readiness.json` SHA256 `37b4c634e097d8ab71614795917ccdc0c52b7ac9dda12eac78cb74c4ace181e4`.
+새 portable 묶음 검증·서버 전달/실행과 backend 요청 내부의 추가 식별 필요성은 남는다.
+제품 소스·설치본은 바꾸지 않아 전체 앱 health/build를 반복하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+근거 문서: [Python 시계](https://docs.python.org/3.12/library/time.html#time.perf_counter),
+[Windows QPC](https://learn.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps),
+[thread time](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes),
+[WPR 명령·instance](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options),
+[버퍼 설정](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/buffers).

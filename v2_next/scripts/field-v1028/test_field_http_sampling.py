@@ -118,6 +118,7 @@ def test_normal_full_bytes_and_decoding(server):
         assert record['body_bytes'] == len(body)
         assert math.isclose(record['client_request_and_body_ms'], sum(record[key] for key in ('connect_ms', 'send_ms', 'headers_wait_ms', 'body_ms')), abs_tol=.00001)
         assert record['finished_ns'] >= record['response_finished_ns'] >= record['started_ns']
+        assert record['native_timing']['status']=='CORRELATABLE_BOUNDARIES',record['native_timing']
 
 
 def test_failed_samples_keep_received_bytes(server, mode, kind, error):
@@ -175,6 +176,8 @@ def test_independent_channels_no_overlap_no_catchup_and_manifest(server, tmp_pat
     assert result['channels']['image']['missed_slots'] >= 4
     assert result['http_component_status'] == 'FAIL'
     assert result['field_gate'] == 'NOT_EVALUATED' and result['release_gate'] == 'HOLD'
+    assert result['native_timing']['status']=='COMPLETE',result['native_timing']
+    assert result['native_timing']['server_or_scheduling_cause_established'] is False
     assert result['finished_ns'] - result['origin_ns'] >= result['duration_ns']
     assert set(server.maximum.values()) == {1}
     image_starts = server.starts['/api/spot/live_image.jpg']
@@ -307,6 +310,7 @@ def load_tests(_loader, _tests, _pattern):
         {'duration_seconds': 1, 'endpoints': ()}, {'duration_seconds': 1, 'timeout_seconds': 0},
         {'duration_seconds': 1, 'endpoints': (replace(sampling.ENDPOINTS[0], interval_seconds=.000001),)},
         {'duration_seconds': 1, 'endpoints': (replace(sampling.ENDPOINTS[0], path='/change-settings'),)},
+        {'duration_seconds': 1, 'include_native_timing': 1},
     ]:
         cases.append((test_invalid_contract_refused_before_write, {'kwargs': kwargs}))
     suite = unittest.TestSuite()

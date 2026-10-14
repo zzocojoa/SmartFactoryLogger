@@ -22,6 +22,8 @@ import time
 
 from PIL import Image
 
+import field_native_timing
+
 
 @dataclass(frozen=True)
 class Endpoint:
@@ -108,7 +110,7 @@ def _contains_control_token(raw, token):
     return token.encode('ascii') in decoded_ascii.lower()
 
 
-def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None):
+def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None, include_native_timing=True):
     """Preserve full/partial response bytes; elapsed time excludes decoding/I/O."""
     _validate_endpoint(endpoint)
     if endpoint.name == CONTROL_HEALTH.name:
@@ -120,8 +122,11 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None):
         raise ValueError('Loopback port required')
     if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 30:
         raise ValueError('Timeout must be in (0, 30] seconds')
+    if type(include_native_timing) is not bool:
+        raise ValueError('Native timing flag must be boolean')
     started = time.perf_counter_ns()
     deadline = started + round(timeout_seconds * 1e9)
+    native_begin = field_native_timing.capture() if include_native_timing else None
     result = {'kind': 'request', 'endpoint': endpoint.name, 'path': endpoint.path,
               'started_ns': started, 'started_utc': datetime.now(timezone.utc).isoformat(),
               'status': None, 'headers': [], 'body_complete': False, 'decode_complete': False,
@@ -132,6 +137,7 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None):
     response = None
     raw = bytearray()
     received = None
+    native_end = None
     try:
         connection.connect()
         connected = time.perf_counter_ns()
@@ -165,6 +171,7 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None):
                     raise http.client.IncompleteRead(b'', response.length)
                 break
         received = time.perf_counter_ns()
+        native_end = field_native_timing.capture() if include_native_timing else None
         result.update(body_complete=True, body_ms=(received - headers_at) / 1e6)
         if received > deadline:
             raise TimeoutError('whole-request-deadline')
@@ -191,12 +198,17 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None):
                       error_reason=reason[:2048], error_reason_truncated=len(reason) > 2048)
     finally:
         response_finished = received if received is not None else time.perf_counter_ns()
+        if include_native_timing and native_end is None:
+            native_end = field_native_timing.capture()
         if response is not None:
             response.close()
         connection.close()
     result.update(response_finished_ns=response_finished, finished_ns=time.perf_counter_ns(),
                   client_request_and_body_ms=(response_finished - started) / 1e6,
                   body_bytes=len(raw), body_sha256=hashlib.sha256(raw).hexdigest())
+    result['native_timing'] = ({'begin': native_begin, 'end': native_end,
+                               **field_native_timing.interval(native_begin, native_end)}
+                              if include_native_timing else {'status': 'DISABLED'})
     if control_token is not None and (_contains_control_token(raw, control_token)
             or _contains_control_token(json.dumps(result, ensure_ascii=True).encode(), control_token)):
         # A credential echo is never persisted as raw evidence. Fail closed and
@@ -297,7 +309,8 @@ def _prepare_output(output):
 
 def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3,
-                        origin_ns=None, pending_byte_budget=64 * 1024**2, pending_record_budget=256):
+                        origin_ns=None, pending_byte_budget=64 * 1024**2, pending_record_budget=256,
+                        include_native_timing=True):
     """Collect a bounded component window. Caller owns installation/session binding."""
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
@@ -311,6 +324,8 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         raise ValueError('Pending byte budget must be in [1, 256 MiB]')
     if type(pending_record_budget) is not int or not 1 <= pending_record_budget <= 4096:
         raise ValueError('Pending record budget must be in [1, 4096]')
+    if type(include_native_timing) is not bool:
+        raise ValueError('Native timing flag must be boolean')
     endpoints = tuple(endpoints)
     if not endpoints or len({endpoint.name for endpoint in endpoints}) != len(endpoints):
         raise ValueError('Nonempty unique endpoints required')
@@ -416,6 +431,7 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                'persistence_mode': 'BOUNDED_ASYNC_FSYNC_BEFORE_COMPLETION',
                'pending_byte_budget': pending_byte_budget, 'pending_record_budget': pending_record_budget,
                'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+               'native_timing_enabled': include_native_timing,
                'scope': 'HTTP_COMPONENT_ONLY', 'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD'})
 
     def worker(endpoint):
@@ -439,7 +455,8 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                     record = {'kind': 'missed_slot', 'sequence': sequence, 'scheduled_ns': target,
                               'reason': 'scheduler-missed-entire-slot'}
                 else:
-                    record, body = fetch_sample(port, endpoint, timeout_seconds=timeout_seconds)
+                    record, body = fetch_sample(port, endpoint, timeout_seconds=timeout_seconds,
+                                               include_native_timing=include_native_timing)
                     record.update(sequence=sequence, scheduled_ns=target,
                                   start_lateness_ms=(record['started_ns'] - target) / 1e6,
                                   body_file=f'{name}-{sequence:05d}.body')
@@ -485,6 +502,13 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                    e.name: summarize_channel(e, rows[e.name], counts[e.name]) for e in endpoints},
                'file_persistence_max_ms': max((r['file_persistence_ms'] for r in observed_writes), default=None),
                'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD', 'promotion_allowed': False}
+    requests = [r for channel in rows.values() for r in channel if r['kind'] == 'request']
+    linked = sum(r.get('native_timing', {}).get('status') == 'CORRELATABLE_BOUNDARIES' for r in requests)
+    summary['native_timing'] = {'enabled': include_native_timing, 'requests': len(requests),
+                               'correlatable_requests': linked,
+                               'status': ('DISABLED' if not include_native_timing else
+                                          'COMPLETE' if requests and linked == len(requests) else 'INCOMPLETE'),
+                               'server_or_scheduling_cause_established': False}
     summary['http_component_status'] = 'PASS' if not errors and not persistence_errors and not stop.is_set() and all(
         row['http_component_status'] == 'PASS' for row in summary['channels'].values()) else 'FAIL'
     write_json('summary.json', summary)

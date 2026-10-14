@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T13:03:10.424511+00:00",
+  "lastUpdated": "2026-10-14T13:22:11.731191+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T13:03:10.424511+00:00"
+        "lastUpdated": "2026-10-14T13:22:11.731191+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Current job 60345/1 is confirmed. Local quick-exit reproduction identified transient owned live conhost processes; the server remaining process is still unidentified. Native helper identity/state observation is verified by 14 checks and retains the original failure verdict. Prepare bounded targeted latency instrumentation with overhead/loss/time alignment checks and verify a separately pinned portable helper before field delivery. Preserve the 15-minute FAIL, closed image coverage and historical absence/orphan/drop evidence. Do not repeat unchanged performance tests to seek PASS, start 120 minutes or promote; candidate closed QA remains pending.",
+            "nextAction": "Prepare and test a bounded uniquely owned trace controller and decoder, including failure cleanup and trace loss/coverage. Then verify exact portable helper bytes before delivery and the required elevated local tracing check. Preserve the current field FAIL; do not infer a root cause or start 120 minutes from these local checks. Retain earlier job confirmation 60345/1 and recheck live metadata before field work.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -10760,6 +10760,64 @@
               "actualServerExecution": false,
               "field15Status": "FAIL",
               "serverCauseConfirmed": false,
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "requestThreadClockStage": {
+              "recordedAt": "2026-10-14T13:22:11.731191+00:00",
+              "status": "REQUEST_THREAD_CLOCK_CORRELATION_VERIFIED_ETW_NOT_EXECUTED",
+              "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TIMING_20261014_c09c2e46",
+              "readiness": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TIMING_20261014_c09c2e46\\readiness.json",
+                "bytes": 6328,
+                "sha256": "37b4c634e097d8ab71614795917ccdc0c52b7ac9dda12eac78cb74c4ace181e4"
+              },
+              "verification": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TIMING_20261014_c09c2e46\\verification.json",
+                "bytes": 133,
+                "sha256": "a1b979640128994c51dae450abaeec8bc3a371d2dce37d109eded4d7e1dca91a"
+              },
+              "sources": [
+                {
+                  "path": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next\\scripts\\field-v1028\\field_http_sampling.py",
+                  "bytes": 27284,
+                  "sha256": "4cf790e3958862c521aa5b1f6b75468306e3634ebdb4ec6c988d0e04458d594d"
+                },
+                {
+                  "path": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next\\scripts\\field-v1028\\field_native_timing.py",
+                  "bytes": 6886,
+                  "sha256": "666fd724609fdf8e78e1a7e2af839c0cf841e148f16ee4a45c38a42c921e77db"
+                },
+                {
+                  "path": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next\\scripts\\field-v1028\\test_field_http_sampling.py",
+                  "bytes": 16706,
+                  "sha256": "d8309e41023655a36d89d1ec4dfe2cae47524a0d63689ae6531c8f184e1bdedb"
+                },
+                {
+                  "path": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next\\scripts\\field-v1028\\test_field_native_timing.py",
+                  "bytes": 6042,
+                  "sha256": "f982aaf67f8c0b7b9dec67a7f03df40cb64243a34285d0dad8a89e6456e58eb3"
+                }
+              ],
+              "nativeTests": 7,
+              "relatedRegressionTests": 105,
+              "testsExit": 0,
+              "ruffExit": 0,
+              "comparisonRequests": 284,
+              "correlatableRequests": 142,
+              "comparisonExit": 0,
+              "meanImageOnMinusOffMs": 1.0276233333333331,
+              "zeroOverheadProven": false,
+              "nominalWprBufferBytes": 16777216,
+              "wprProfileDetailsExit": 0,
+              "wprTraceStarted": false,
+              "developerProcessElevated": false,
+              "serverDeliveredOrExecuted": false,
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
               "canary120Started": false,
               "physicalBoundary": "NOT_TESTED",
               "fullDataGate": "NOT_EVALUATED",
