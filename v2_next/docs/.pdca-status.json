@@ -8551,6 +8551,12 @@
               "unitChecks": 28,
               "unitExitCode": 0,
               "syntheticControllerExitCode": 0,
+              "carrierChecks": 7,
+              "carrierExitCode": 0,
+              "staticInputFiles": 6,
+              "staticInputBytes": 825532,
+              "precedingBundleManifestSha256": "a928cdaf7eb134acf50a02099b9c6768d076ab965fb529ef3f961f267b7c1e45",
+              "finalServerRequestCreated": false,
               "serverExecution": "NOT_STARTED"
             },
             "physicalBoundaryTest": "NOT_TESTED",
