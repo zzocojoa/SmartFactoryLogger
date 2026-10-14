@@ -447,3 +447,63 @@ stdout/stderr는 모두 0B였고, 잠근 입력의 종료 재검산만 PASS다. 
 입력 사본은 재사용하되 새 경로 전용 metadata와 결과는 `recovered-csv-r2`에 기록한다.
 13:03 KST 실제 소비자 실행을 확인했으며 결과는 아직 미확정이다. 서버 도우미·앱·
 설치본은 재실행하지 않았다. 검증 조건과 정식 출시 HOLD는 그대로 유지한다.
+
+### 2026-10-14 13:16 KST 백업 완료와 최종 설치 묶음 서버 전달
+
+동일 서버 백업 `C:/Users/user/Desktop/SmartFactory/Q3d9da3`가 13:16:23 KST에
+`SELECTED_COLD_COPY_DEFAULT_AND_NAMED_DATA_STREAMS_VERIFIED`로 완료됐다.
+파일325,089/폴더246/추가 스트림680, 총14,095,162,877B이며 원본·사본의 본문/추가
+스트림 해시와 구성, 원본 metadata 유지, 앱·backend·port 부재 확인이 모두 true다.
+콘솔 결과를 서버 탐색기로 공유 회수 폴더에 복사한 뒤 개발 사본과 대조했다(exit0).
+
+- `result.json`: 2,147B, SHA256
+  `c4ce41277032748f6c78160e42ed093f11305c0ceb7b88ae0089146efe966afb`
+- `files.tsv`: 156,501,349B, SHA256
+  `ab637280383d38777649310f00cd586a80e7f74e0cf159d9535a1d170287f393`
+- 보존 위치: `PDCA_LIMITED_FIELD_20261014_0dd2ced0/server-final-backup`
+- 완료 화면: `PDCA_FIELD_CAPACITY_20261014_0dd2ced0/server-backup-terminal.png`
+
+첫 해시 대조는 콘솔의 `6C`를 `C6`로 옮겨 적어 exit1로 중단됐고, 화면을 잘라 확대해
+확인한 정확한 콘솔 값으로 재대조했다. 첫 정상 종료 결합 도구도 종료 영수증 경로에
+불필요한 `logs`를 넣어 exit1이었다. 최종 고정 manifest에서 18개 원본이 모두
+운영 자료 루트의 `shutdown_evidence` 하위에 있음을 확인해, 별도 `bind-final-backup-review-r2.py`의
+경로 상수 한 곳만 정정했다. 원 도구·실패 로그·원본 증거는 보존했다.
+
+수정한 결합 검토는 실제 exit0다. 같은 실행 세대의 정상 종료 기록·종료 영수증18개·
+닫힌 CSV와 metadata·config·system/status 로그 등 원본24개가 최종 manifest와 맞았다.
+`final-backup-close-review.json` SHA256은
+`d776d9cd72252012addb4bfca439729bcfea19a6f9a973bc30cac367c1a2f0c0`다.
+이전 백업과 최종 목록의 비교도 exit0이며 기존 잠정 수량/용량 차이와 같았다.
+`backup-manifest-comparison/comparison.json` SHA256은
+`7ab94baa4d76c1909dbc337fcad0265a00a4fc0be6e981c6a5f91c15e3b93571`다.
+과거 CSV514개의 부재 원인과 drop173의 원인·영향은 여전히 미확정이다. 이전 백업을
+보존하며 이 비교를 복구 시험이나 전체 데이터 의미 검증 PASS로 해석하지 않는다.
+
+최종 입력으로 `complete-install-bundle.py`를 실행해 설치 묶음을 완성했다(exit0).
+서버 최종 위치는 `C:/Users/user/Desktop/SmartFactory/INSTALL_OFF_20261014_0dd2ced0`다.
+묶음10파일의 manifest SHA256은
+`c9143a129c78ec1aa1c0febaf8daabb4671aa8fa2020af0737a0b70570f6e27a`이며,
+별도 `PINNED_FIELD_INSTALL_COMMAND_0dd2ced0.txt`는 8,398B/SHA256
+`10c898ea5396e08b43051274070eb25e8c275b7af62f4afe1894e6a63d4d4b7f`다.
+합계11파일/848,024B를 `Z:/SmartFactory/20261014/send/INSTALL_OFF_20261014_0dd2ced0_delivery`에
+복사하고 개발/공유 전체 해시를 재대조했다(exit0).
+
+Chrome 원격 데스크톱으로 서버 SmartFactory까지 복사하고 최종 절대경로·묶음10파일을
+확인했다. 같은 부모의 명령문 텍스트 파일을 메모장에 열어 `$installBundle=`의 실제
+서버 경로와 manifest pin을 확인했다. `server-install-delivery.json`,
+`server-install-bundle-path.png`, `server-install-command-ready.png`에 범위를 기록했다.
+서버 로컬 파일 해시는 실행 launcher가 확인할 대상이며 화면 확인만으로 검산을 주장하지
+않는다. 사용자에게 관리자 PowerShell의 실행만 요청했고 이 기록 시점 설치는 미실행이다.
+
+운영 서버 명령 실행은 Computer Use 스킬이 참조하는 guidance의
+“Do not run Windows terminal commands via UI automation directly or indirectly.”
+제한 때문에 사용자 조작이 필요하다. 승인된 설치 범위는 다시 묻지 않았다. 다음 순서는
+사용자 실행 → 실제 설치 결과·파일·설정 확인 → 승인된 일반 수집/15분/120분 검증이다.
+Low Signal OFF, physical NOT_TESTED, formal release HOLD, promotion false를 유지한다.
+
+추가로 회수한 5개 CSV 입력도 같은 최종 manifest에 결합했다(exit0).
+`PDCA_FIELD_CAPACITY_20261014_0dd2ced0/final-recovered-input-binding.json` SHA256은
+`aeaaa57a5fe663695ef81fc55e1b839a6924f71211f90a7f294ac5407be097d2`다. 이전 잠정 목록과
+최종 목록의 바이트가 같아 기존 이미지94,022개 대장 연결 근거를 유지할 수 있다.
+CSV 소비자 재검사는 13:29 KST에도 실제 프로세스가 실행 중이며 결과는 미확정이다.
+과거 입력 영수증의 잠정 상태를 소급 수정하지 않고 최종 결합 근거를 별도로 남겼다.
