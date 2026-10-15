@@ -159,6 +159,34 @@ class SpotAttestationScriptTests(unittest.TestCase):
                 self.assertIn("config_verified_by = previous_operator", config)
                 self.assertIn(f"config_verified_fingerprint_sha256 = {'b' * 64}", config)
 
+    def test_health_candidate_uses_same_disabled_profile_and_hash_guards(self) -> None:
+        build = "acaf77d95101a050f4d3ecd76125d3502036f5a7"
+        for changes, config_hash, expected in (
+            ({}, None, None),
+            ({"low_signal_alarm_enabled": True}, None, "profile mismatch"),
+            ({"low_signal_comparator_verified": True}, None, "profile mismatch"),
+            ({}, "0" * 64, "input hash mismatch"),
+        ):
+            with self.subTest(changes=changes, config_hash=config_hash):
+                result, config = self._run_attestation(
+                    drift_fields=["spot_config_fingerprint_sha256"],
+                    attestation_status="fingerprint_mismatch", schema_version="2.5.2",
+                    comparator_verified=False, limited_trial=True,
+                    metadata_overrides={"build_git_commit": build, **changes},
+                    config_hash_override=config_hash,
+                )
+                if expected:
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(expected, result.stdout + result.stderr)
+                    self.assertIn("config_verified_by = previous_operator", config)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn("config_verified_by = USER_SELF", config)
+                    self.assertIn("low_signal_comparator_verified = false", config)
+                    self.assertIn("low_signal_alarm_enabled = false", config)
+                    self.assertIn("Physical boundary: NOT_TESTED", result.stdout)
+                    self.assertIn("formal QA: HOLD", result.stdout)
+
     def test_blocks_device_readback_drift(self) -> None:
         result, _updated_config = self._run_attestation(
             drift_fields=["spot_config_fingerprint_sha256", "device_config_readback_status"],

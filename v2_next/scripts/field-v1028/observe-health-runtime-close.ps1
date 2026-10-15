@@ -62,6 +62,20 @@ function Read-RuntimeExit($Held) {
     Require-Runtime ($Held.process.StartTime.ToUniversalTime().ToFileTimeUtc() -eq $Held.identity.created_filetime) 'held-process-generation-mismatch'
     return [ordered]@{identity=$Held.identity;actual_exit_code=$Held.process.ExitCode;exit_at_utc=$Held.process.ExitTime.ToUniversalTime().ToString('o');forced_termination=$false}
 }
+function Wait-RuntimeProcesses($Held,[int]$TimeoutMilliseconds=450000) {
+    Require-Runtime ($TimeoutMilliseconds -gt 0 -and $TimeoutMilliseconds -le 450000 -and @($Held).Count -gt 0) 'exit-wait-budget'
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    while($true){
+        # HasExited can expose an exit code before the OS handle is signaled.
+        # Only a signaled retained handle permits reading the final receipt.
+        $pending=0
+        foreach($one in $Held){if(-not $one.process.WaitForExit(0)){$pending++}}
+        if($pending -eq 0){return}
+        $remaining=$TimeoutMilliseconds-$watch.ElapsedMilliseconds
+        Require-Runtime ($remaining -gt 0) 'normal-exit-timeout-no-force'
+        Start-Sleep -Milliseconds ([int][Math]::Min(500,$remaining))
+    }
+}
 function Read-RuntimeHealth($Request) {
     $q=[Net.HttpWebRequest]::Create('http://127.0.0.1:8000/health')
     $q.Method='GET';$q.Proxy=$null;$q.Timeout=5000;$q.ReadWriteTimeout=5000
@@ -148,11 +162,7 @@ try{
     $files['runtime-before.json']=Write-RuntimeJson ($resultRoot+'\runtime-before.json') ([ordered]@{observed_at_utc=[DateTime]::UtcNow.ToString('o');main_pid=$mains[0].ProcessId;backend_pid=$backend.ProcessId;processes=@($held|ForEach-Object{$_.identity});observation=$before})
     $phase='wait-normal-exit'
     Write-Host ('RESULT_PATH='+$resultRoot);Write-Host 'READY_FOR_NORMAL_APP_EXIT'
-    $watch=[Diagnostics.Stopwatch]::StartNew()
-    while(@($held|Where-Object{-not $_.process.HasExited}).Count -gt 0){
-        Require-Runtime ($watch.Elapsed.TotalSeconds -lt 450) 'normal-exit-timeout-no-force'
-        Start-Sleep -Milliseconds 500
-    }
+    Wait-RuntimeProcesses $held
     $phase='closed-read'
     $exits=@($held|ForEach-Object{Read-RuntimeExit $_})
     $files['process-exits.json']=Write-RuntimeJson ($resultRoot+'\process-exits.json') $exits

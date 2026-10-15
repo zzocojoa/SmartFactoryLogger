@@ -217,3 +217,62 @@ active process/listener·요청 build/CSV·개발 PC 실행 거부를 포함한�
 요청 SHA `0a48997cdc9e336265de7c3edf87e1240a7b1d37504f757d09976decde277292`로 검사한다.
 현재 앱은 Running이며 작업 정보는 최근 적용 21:38:35 이후 필수값 미입력이다.
 이전 60365·4를 재적용하지 않았고 다음 재시작 시 현재 작업값을 확인해야 한다.
+
+### 2026-10-15 22:35 KST 첫 실행 종료 자료 검토와 설정 확인 준비
+
+사용자 실행 뒤 22:09 KST 콘솔의 `READY_FOR_NORMAL_APP_EXIT`를 확인하고 앱의 닫기 버튼을
+눌렀다. 종료 직전 화면은 제품 60365·금형 4, 최근 적용 22:04:47이었다. Codex가 작업값을
+다시 입력한 것은 아니다. 앱 창은 닫혔으나 도우미는 `closed-read` 단계에서
+`held-process-still-running`, `LAUNCH_EXIT=1`로 끝났다. 결과 폴더는
+`C:\Users\user\Desktop\SmartFactory\Rc3c34431385b`이며 콘솔과 회수한 `hold.json` SHA는
+`49e34eedd8758eb5bd6e368c4d74ceaf9fe88ffbd0bca161102752693346eb4e`로 일치한다.
+보유 native handle은 도우미 종료 시 해제됐으므로 이번 실행의 OS exit code를 사후 추정하지 않는다.
+
+4개 오류 증거 파일과 별도로 현재 CSV·metadata·설정·이미지 최종 manifest·shutdown 영수증을
+탐색기로 `Z:/SmartFactory/20261015/return/RC29_804b2fcc_2210`에 회수했다. 개발 사본은
+위 근거 루트의 `runtime-close-Rc3c34431385b`, `first-runtime-closed`다. 공유/개발 바이트는
+파일별 대조했고, 별도 회수 CSV/metadata에는 콘솔 외부 pin이 없다는 범위도 기록했다.
+설정 SHA는 기존 `2f872a95…`와 일치한다. `review-first-runtime-closed.py` exit 0 결과:
+
+- CSV 12,386행, 실제 metadata의 전체 헤더 일치·행 형태·sample_seq 1–12,386 연속·logger 일치.
+  status는 valid 7,967 / under_range 4,204 / stale 198 / startup_pending 17이다.
+  이는 전체 온도 의미·이미지/fact 연결 QA 통과를 뜻하지 않는다.
+- `csv_closeout`은 동일 logger의 finalized shutdown, 마지막 번호 12,386이다.
+- 같은 build/backend PID 6104의 control begin/final 영수증·SHA 연결을 대조했다.
+  stopped/drained 10단계 true, stage exit 0, 이미지 enqueue/written 2,631/2,631,
+  queue/inflight/unfinished/failure/drop 0이다. OS 프로세스 종료 관찰과는 별개다.
+- metadata 이미지 manifest는 시작 시점 4,313,886행/written 0이고 별도 최종 manifest는
+  4,316,517행/written 2,631이다. 실제 이미지 fact/바이트 전체 대조는 아직 하지 않았다.
+- 검토 `first-runtime-closed-review.json` SHA:
+  `4d7fe1203bc1c624c6ef480294cf26360287fb025a99eee21b49131e227254ef`.
+  결과는 `CSV_SEQUENCE_AND_APPLICATION_CLOSEOUT_VERIFIED_NATIVE_EXIT_UNVERIFIED`다.
+
+도우미의 `HasExited` 대기와 `WaitForExit(0)` 사이 불일치를 발견했다. .NET Framework의
+[`Process` 구현](https://github.com/Microsoft/referencesource/blob/main/System/services/monitoring/system/diagnosticts/Process.cs)은
+종료 코드와 handle 신호를 구분한다. 이 차이는 이번 오류의 원인 후보이며 서버 재현으로 확정하지 않았다.
+공통 450초 예산에서 모든 보유 handle의 실제 신호를 기다리도록 수정했고 native PS5.1 x64
+`test-health-runtime-close.ps1` 10검사 exit 0이었다. 기존 해시 고정 서버 묶음은 변경하지 않았다.
+새 `review_health_runtime_close.py`의 외부 pin/native/CSV 계약 검사 10개 exit 0,
+Ruff `--isolated --select E9,F821` exit 0도 확인했다. 이번 실패 폴더를 정상 result로 처리하지 않았다.
+
+새 build의 확인 기록 연결을 위해 `apply_spot_temperature_v25_attestation.ps1`의 제한된
+현장 허용 build에 acaf77d9를 추가했다. 승인 프로파일·외부 input SHA·Low Signal OFF·
+comparator 미확인 조건은 유지한다. `test_spot_attestation_script.py` 9검사 exit 0이다.
+실제 회수 config/metadata 사본을 사용한 native PS5.1 시험에서도 네 attestation 필드만 바뀌었고,
+active process/listener 거부 및 32/64비트 bootstrap의 개발 host 실행 거부를 확인했다(exit 0).
+시험 요약은 `attestation-tests-4a4b55e91736/summary.json`이다.
+
+다음 묶음 `AT29_20261015_ae932846`은 11파일·74,756바이트다. 고정 controller SHA는
+`c4f8f154f4becb00f6323ca647f9af30419daf1d1c905d5ab7a71c2d2a548b7c`, request SHA는
+`53e10d0fc93cf89108b5840bd87f9e319e5b880aac8eabc6aa87a9f5c06c6878`다.
+현재 metadata SHA `b75e847f90462a2eb33191688030af076f805a04d8909391e53435c7ef639b62`를
+서버 원본과 다시 비교하고 process/port 부재를 확인한 뒤에만 네 설정 확인 항목을 쓴다.
+전체 백업·설치·자동 앱 시작은 하지 않는다. 쓰기 복구를 위해 설정 파일 범위의 사본만 보존한다.
+네 확인 항목의 적용·새 runtime·native 정상 종료·현장 성능·전체 데이터 QA와 운영 승격은 미완료다.
+
+22:37 KST 서버 `C:/Users/user/Desktop/SmartFactory/AT29_20261015_ae932846`의 11파일과
+메모장에 열린 `PINNED_HEALTH_ATTEST_COMMAND.txt`를 확인했다. 공유 사본은 파일별 해시를
+대조했으며 서버 로컬 잠금 바이트 검증은 사용자 실행 시 수행한다. 전달 기록은
+`health-attestation-server-delivery.json`, 화면은 `server-health-attestation-command-open.jpg`다.
+앱은 종료 상태로 유지하며 사용자에게 명령 본문 1회 실행을 요청했다. 이전 종료 도우미나
+설치 프로그램은 재실행하지 않는다. 전체 PDCA는 진행 중이며 출시/승격 HOLD다.

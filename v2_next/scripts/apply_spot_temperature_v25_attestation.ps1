@@ -313,7 +313,11 @@ if ($readbackStatus -notin @("matched", "not_supported")) {
     throw "Device readback status does not allow attestation: $readbackStatus"
 }
 if ($disabledLowSignalTrial) {
-    if ($buildCommit -cne "4cc7393e1bafbf90a329726aed9470fe0daacb21") { throw "Limited field candidate build mismatch." }
+    $limitedCandidateBuilds = @(
+        "4cc7393e1bafbf90a329726aed9470fe0daacb21",
+        "acaf77d95101a050f4d3ecd76125d3502036f5a7"
+    )
+    if ($buildCommit -cnotin $limitedCandidateBuilds) { throw "Limited field candidate build mismatch." }
     $limitedProfile = @{
         spot_model_info = "SPOT+ AL"; spot_app_mode = "App1: AL E"
         spot_range_min_c = 200.0; spot_range_max_c = 900.0

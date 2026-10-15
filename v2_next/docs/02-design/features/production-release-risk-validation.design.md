@@ -567,3 +567,23 @@ health와 전후 OS 관찰이 일치할 때만 READY를 출력하고 최대 450�
 이 단계는 파일 내용 QA·개별 저장 worker 종료 검토·새 build attestation을 대신하지 않는다.
 검증 예: `powershell.exe -NoProfile -File scripts/field-v1028/test-health-runtime-close.ps1 -OutputParent <개발 검증 폴더>`.
 실제 짧은 자식 프로세스의 exit 23을 포함한 로컬 native/계약 검사는 현장 정상 종료 통과와 구분한다.
+
+2026-10-15 현장 보완: `HasExited`와 프로세스 handle의 signaled 상태는 같은 보장이 아니다.
+대기 루프도 보유한 각 handle의 `WaitForExit(0)`으로 확인하고, 공통 450초 한도 안에서만 기다린다.
+종료 코드가 먼저 보이는 합성 조건과 일부 handle 미종료·타임아웃 조건을 회귀 검사한다.
+기존 고정 묶음은 보존하고 새 소스의 검증 결과로 이전 실행의 누락된 종료 코드를 복원하지 않는다.
+`review_health_runtime_close.py`는 외부 result/request pin, 파일별 SHA·정확한 목록,
+native 생성 시각·부모·포트·exit, CSV 연속 번호·logger·finalized metadata를 검토한다.
+정상 result가 없으면 이 검토기를 성공 처리하지 않는다. 탐색기로 별도 회수한 CSV와 앱 종료
+영수증 검토는 `native exit unverified`를 명시한 별도 범위로 남긴다.
+
+### 5.20 1.0.29의 승인 설정 확인 기록 연결
+
+1.0.29/acaf77d9는 설치·원본 보존 검토 후 기존 USER_SELF 승인 프로파일과 같은 canonical
+settings hash를 보였다. build 식별자만 바뀐 fingerprint mismatch인 경우, 기존 제한된 현장
+시험 승인과 실제 새 metadata/config SHA를 함께 고정해 네 attestation 필드를 갱신한다.
+허용 build는 기존 4cc7393e와 새 acaf77d9 두 값으로 제한한다. 알 수 없는 build, 변경된
+프로파일, 입력 hash 불일치, comparator/Low Signal 활성화는 계속 거부한다.
+실행 전후 프로세스와 8000 listener 부재를 확인하며 기존 물리 경계 NOT_TESTED·정식 QA HOLD는
+그대로다. 설정 파일 쓰기 복구용 사본만 보존하고 전체 백업·설치·자동 시작은 하지 않는다.
+이 변경은 이전 실행의 OS exit 증거 누락을 해소하지 않으며 다음 실행의 native 관찰은 별도다.

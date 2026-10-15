@@ -23,11 +23,28 @@ Check 'actual-held-native-process-exit-23' {
         $bound=Hold-RuntimeProcess $child.Id $native
         Require-Runtime ($bound.identity.created_filetime -eq $child.StartTime.ToUniversalTime().ToFileTimeUtc()) 'native-creation-pin'
         Reject {Read-RuntimeExit $bound} 'held-process-still-running'
-        Require-Runtime ($child.WaitForExit(10000)) 'test-child-timeout'
+        Wait-RuntimeProcesses @($bound) 10000
         $receipt=Read-RuntimeExit $bound
         Require-Runtime ($receipt.actual_exit_code -eq 23 -and -not $receipt.forced_termination) 'native-exit-code'
         $null=Write-RuntimeJson ($root+'\native-exit.json') $receipt
     }finally{if($bound){$bound.process.Dispose()};$child.Dispose()}
+}
+Check 'early-hasexited-does-not-bypass-native-signal' {
+    $fake=[pscustomobject]@{HasExited=$true;wait_calls=0}
+    $fake|Add-Member ScriptMethod WaitForExit {param($milliseconds);$this.wait_calls++;return $this.wait_calls -ge 2}
+    Wait-RuntimeProcesses @([pscustomobject]@{process=$fake}) 3000
+    Require-Runtime ($fake.wait_calls -eq 2) 'early-hasexited-not-waited'
+}
+Check 'all-native-signals-required-and-timeout-does-not-force' {
+    $ready=[pscustomobject]@{HasExited=$true;wait_calls=0}
+    $ready|Add-Member ScriptMethod WaitForExit {param($milliseconds);$this.wait_calls++;return $true}
+    $pending=[pscustomobject]@{HasExited=$true;wait_calls=0}
+    $pending|Add-Member ScriptMethod WaitForExit {param($milliseconds);$this.wait_calls++;return $false}
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    Reject {Wait-RuntimeProcesses @([pscustomobject]@{process=$ready},[pscustomobject]@{process=$pending}) 50} 'normal-exit-timeout-no-force'
+    Require-Runtime ($ready.wait_calls -ge 2 -and $pending.wait_calls -ge 2 -and $watch.ElapsedMilliseconds -lt 2000) 'native-wait-timeout-contract'
+    Reject {Wait-RuntimeProcesses @() 100} 'exit-wait-budget'
+    Reject {Wait-RuntimeProcesses @([pscustomobject]@{process=$ready}) 450001} 'exit-wait-budget'
 }
 Check 'native-wrong-executable-rejected' {
     Reject {Hold-RuntimeProcess $PID 'C:\not-the-current-process.exe'} 'process-executable-mismatch'
