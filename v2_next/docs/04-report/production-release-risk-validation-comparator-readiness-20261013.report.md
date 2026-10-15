@@ -2050,3 +2050,16 @@ SHA256 `05672d116ad5e93ee147b091f13dcec563fd0239bc47740c61f97e5c1e66c65a`다.
 SHA256 `5c2f3e9004b7335e19dbe9297f6394c610b6940a9164253fc4cbf18fda08878d`다.
 제품/설치본/서버 변경은 없으며 현장15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.
 상세 실행 명령·범위와 남은 연결 작업은 위 후보 검증 보고에 기록했다.
+
+### 2026-10-15 제한 진단 수집기의 실제 설치 앱 통합
+
+새 read-only 수집기가 기존 소유 job/시간 제한 안에서 payload·설정·인증된 실행 세대와
+native health 요청을 연결하도록 구현했다. 합성 실패8검사 exit0 후 같은1.0.29 설치본을
+오프라인 Sandbox에서 실행했다. 생성 FILETIME 불일치는 요청 전에 거부했고, 정상6초 구간의
+3요청·전후 설정/실행 세대와 raw replay가 일치했다. 앱/backend 정상 종료0, 강제 종료/잔존0.
+출력338파일을 검산·보존하고 Sandbox를 종료했다. 시험 reference의 크기/UTC 표기와 bootstrap
+경로 문제는 원문 실패를 남기고 시험 도우미에서 수정했다. 제품/검증 조건/서버 변경은 없다.
+근거 `PDCA_HEALTH_COLLECT_20261015_1ee93334/verification.json`의 SHA256은
+`8eadbbba7794a003c03fded89552a4570b55623305a78e20ea1414227bdc52a3`다.
+같은 실행 WPR·기존 thread coverage·보호된 서버 실행기와 전달은 아직 남아 있다.
+현장15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.

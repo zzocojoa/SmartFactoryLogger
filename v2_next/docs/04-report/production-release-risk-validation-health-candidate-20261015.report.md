@@ -60,8 +60,8 @@
 
 1. 이 **동일 installer SHA**의 격리 설치·업그레이드·재시작·복구와 Electron 실제 lifecycle 검증을 수행했다.
    아래 후속 결과의 기존 1.0.26 오류를 보존하며, 전체 검토를 PASS로 바꾸지 않는다.
-2. 새 candidate에 맞춘 제한 진단을 exact payload/listener/session/native generation 및 같은 실행 ETW와
-   연결하고, 원격 UI 가용성을 확인한 뒤 서버 로컬 최종 폴더까지 전달한다.
+2. 제한 진단의 payload/listener/session/native generation·설정 연결은 아래 실제 격리 검증을 마쳤다.
+   다음은 같은 실행 ETW·독립 감시 프로세스 연결과 coverage 검증, 원격 UI 확인 및 서버 로컬 전달이다.
 3. 실제 현장 지연 원인을 확인·보완한 뒤 영향받은 현장 QA를 수행한다. 같은15분 시험을 통과할 때까지
    반복하거나200ms 기준을 늘리지 않는다. 선행 조건 전120분 시험과 운영 승격은 진행하지 않는다.
 
@@ -180,3 +180,48 @@ fingerprint가 필요하다. 1.0.28 확인값을 복사해서 1.0.29 확인 근�
 
 이 단계에서 실제 앱/Windows 추적 실행·서버 조작·설치본 재생성은 없었다.
 기존 15분 FAIL/120분 미시작/물리 NOT_TESTED/출시 HOLD와 이전 전체 검토의 실패 기록을 유지한다.
+
+## 2026-10-15 소유 수집기와 실제 설치 앱의 통합 검증
+
+`field_health_collection.py`에서 외부 고정 payload/설정 기준, 인증된 backend 실행 세대,
+native 생성 FILETIME과 진단 요청 함수를 연결했다. 기존 supervisor의 gated child/job과
+시간 제한을 사용하며 앱은 그 job에 넣지 않는다. 요청 전후 설정·실행 세대를 확인하고
+원문·manifest·종료 결과를 보존한다. 개발 API의 수집 구간은 최대30초, 요청 간격은2초다.
+누락된 시점을 뒤늦게 채우거나 실패한 요청을 자동 재시도하지 않는다. 200ms 초과 요청도
+연결 가능한 진단 증거로 남으며 `BOUND_WINDOW_CAPTURED`는 현장 성능 통과가 아니다.
+
+변경 모듈의 합성 실패 전파8검사와 Ruff는 각각 exit0였다. 초기 시험 fixture의 기준 파일
+누락은 오류로 남겼고, placeholder 파일을 추가한 최종 상태에서8검사를 다시 실행했다.
+중단·설정/실행 세대 변경·native 조회 실패·reference 종료 검사 실패·시간 초과에 따른 slot
+누락·결과 변조를 확인했다. 기존 supervisor 구현과 제품 코드는 변경하지 않았다.
+
+별도 오프라인 Windows Sandbox에 **동일 1.0.29 installer**를1회 설치해 실제 Electron/backend로
+실행했다. loopback 장비와 시험 전용 설정 확인값을 사용했으며 실제 현장 장비 승인이 아니다.
+최종 runtime의 host/guest exit0, 수집 worker exit0, 정상 앱/backend 종료 각각0이었다.
+잘못된 backend 생성 FILETIME을 넣은 대조 실행은 probe0건/worker exit1로 거부됐고,
+두 collector job 모두 active process0·강제 종료 없음이었다. 그 뒤 같은 앱 실행에서
+6초 구간의 진단3건이 모두 `REQUEST_AND_RUNTIME_BOUND`였다.
+
+원문을 다시 읽어 해시·요청 ID·native 시계·실행 세대와 전후 설정을 재검산한 결과도 일치했다.
+3건의 client 시간은4.9869/7.2946/7.3821ms다. 이 소수 격리 표본은 현장15분 성능 결과를
+대체하지 않는다. payload1,867파일과 정확한 해시의 NSIS uninstaller1파일을 종료 전 재대조했다.
+최종 system ERROR/traceback0, crash log0bytes, 앱/backend/fixture와 관련 수신 포트 부재를
+확인했다. 출력338파일/4,376,547bytes를 검산하고 Sandbox를 종료한 뒤 동일 바이트를 확인했다.
+
+시험 준비의 실패도 보존했다. 로그인 준비 전 CLI2회 거부, 과대 설정 reference의 수집 거부,
+격리 Python import 경로 보완, fixture의 UTC 표기 `+00:00`→제품의 `Z` 정규화가 있었다.
+최초 크기 제한32768과 정확한 설정 비교는 유지했다. 정상 종료를 확인한 뒤 같은 설치 앱을
+사용했으며 재설치하지 않았다. 검토기의 파일 수에는 payload 외의 고정 uninstaller1개를
+구분했고, 종료 확인은 보존된 초기 실패 summary와 최종 성공 실행을 구별하도록 수정했다.
+이전 실패·로그·고정 input은 덮어쓰지 않았다.
+
+원문·실행 종료 코드·최종 소스와 후속 도우미는
+`C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_COLLECT_20261015_1ee93334`에 보존했다.
+`review_collection.py`, `finalize_collection_r2.py`, `record_verification.py`는 각각 exit0였다.
+`verification.json`: 24,248bytes, SHA256
+`8eadbbba7794a003c03fded89552a4570b55623305a78e20ea1414227bdc52a3`.
+
+남은 현장 선행 작업은 보호된 외부 실행기, 같은 실행 WPR 감시·요청 연결, 이미 실행 중인
+thread의 ETW rundown/coverage 검증과 서버 로컬 전달이다. 이번 시험에서는 WPR와 서버를
+사용하지 않았다. 미서명 후보의 build/installer와 운영/롤백 기준은 유지하며 전체 health·
+빌드를 반복하지 않았다. 기존 15분 FAIL/120분 미시작/물리 NOT_TESTED/출시 HOLD는 그대로다.
