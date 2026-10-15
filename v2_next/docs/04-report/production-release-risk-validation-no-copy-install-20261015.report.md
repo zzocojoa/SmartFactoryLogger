@@ -523,3 +523,61 @@ payload 1,867파일 외에 NSIS가 생성한 `Uninstall smart-factory.exe` 1개�
 서버 로컬 hash 회수 검증은 아직 수행하지 않았으며 실행 시 pinned 검사가 남아 있다.
 사용자에게 R2의 관리자 실행과 결과 세 줄을 요청했다. 이전 실패 결과의 외부 콘솔 pin 확인은
 별도로 미완료로 유지한다. 이번 턴은 실제 진전이며, 재개 전의 blocked 횟수를 이어 세지 않는다.
+
+### 2026-10-16 R2 현장 6초 진단 회수와 요청별 추적 대조
+
+07:41 KST 원격 화면에서 새 실행의 `LAUNCH_EXIT=0`과 반환된 프롬프트를 확인했다.
+서버 결과 `C:/Users/user/Desktop/SmartFactory/H6f94e281e217`을 원격 탐색기로
+`Z:/SmartFactory/20261016/return/HQ29R2_ba3d7ba8_0742`에 복사한 뒤 개발 근거 루트의
+`recovered-H6f94e281e217`로 회수했다. 80파일·23,829,422바이트의 정확한 목록과 내부
+크기·SHA, 기존 request/package/configuration pin을 대조했다. 공유 읽기는 열린 handle 및
+경로의 전후 식별자·크기·수정 시각을 확인했고, 개발 사본 검산은 native read-sharing 잠금을
+사용했다. 공유 경로를 로컬 전용 잠금으로 여는 첫 시도는 `handle-path-mismatch`로 거부됐으며
+로컬 잠금 함수를 완화하지 않았다. 최종 검토와 80파일 재검산은 exit 0이다.
+
+회수 launcher SHA는 `9f49507817d784c96952d2c87b14affcf2880ad42b4c4f1446bbbe3e9d24c2b3`다.
+사용자는 실행 완료를 확인했지만 이후 콘솔 창을 닫았다고 답했다. 원래 콘솔에 출력된 SHA는
+회수하지 못했으므로 외부 콘솔 pin 대조는 **미완료/현재 확인 불가**다. 파일에서 계산한 SHA를
+원래 콘솔 값으로 간주하지 않는다. 재측정을 요청하지 않았으며 내부 상관 검증의 범위와 이
+출처 한계를 `field-correlation-closeout-r2.json`에 남겼다. 그 파일 SHA는
+`6de3a95d58758947bc2a2e3b6c2369e76aec32ef1c1505889c7d9e0312b3990d`다.
+
+수집기는 1.0.29 payload 1,867파일과 제거 파일 1개를 확인했고 종료 전 1,868파일을
+재검산했다. 전후 설정·build·logger/SPOT UUID와 backend PID 11520/생성 FILETIME
+`134365457289141278`이 일치했다. worker와 coordinator exit 0, 정리 후 소유 프로세스 0,
+강제 종료 요청 false다. 제품 설치·앱 종료·설정 변경·전체 백업은 수행하지 않았다.
+
+6초 동안 2초 간격으로 수집한 세 health 요청의 client 응답·본문 수신 시간은
+24.6421ms, 8.7625ms, 10.5116ms다. 이 세 표본의 50ms 경고·200ms 초과는 각각 0건이다.
+이는 짧은 진단 표본이며 초기 시작 성능, 15분/120분 또는 전체 API·화면 성능의 통과가 아니다.
+이번 실행에서 과거 장기 관찰의 지연 원인을 입증하지 못했으며 `latency_cause=UNDETERMINED`다.
+
+ETL은 6,029,312바이트, SHA
+`ba620059df0afddb7690c20985ffa30765996a6077ca2cddd88dc2bd5a463804`다. 기존 고정 분석 도구로
+개발 PC에서 XML/선택 이벤트를 내보냈고 두 도구 모두 exit 0이다. 첫 비교기는 로컬 검증만
+허용하는 source-scope 검사에서 멈췄다. 별도 현장 검토본은 `FIELD_DIAGNOSTIC`을 명시하고
+나머지 schema·ETL·파일·gate·개수 검사를 유지했다. 원본 추적과 앞선 결과는 보존했다.
+
+선택 이벤트 129,330건의 값·개수와 시간/CPU 순서가 두 해석에서 일치했다. CSwitch 81,270,
+ReadyThread 45,179, thread 2,881건이며 선택 기록의 순서 단절·역전·TID 재사용은 0이다.
+세 요청의 loop/worker/collector 9개 구간 모두 native 시계·실행 세대와 결합했고, raw XML의
+스레드별 계산과 선택 JSONL의 CPU별 실행 구간 계산이 일치했다(거부 0, exit 0).
+`health-window-verification.json` SHA는
+`a4ec75f629ea7acb35856452f0fb1f04c5d6e85a8f530f9739cdc16006f53e2f`다.
+
+전체 추적 품질은 `INCOMPLETE_OR_UNUSABLE`로 유지한다. 처리 오류 2,888건, 해석하지 못한
+이벤트 1,441건 및 opaque/provider 정보 누락이 있다. 선언된 event/buffer loss 0을 완전한
+커버리지 증거로 사용하지 않는다. 선택 구간의 일치가 전체 추적 품질이나 정확한 CPU 시간의
+검증을 대신하지 않는다. 최종 Python 검토 스크립트의 Ruff E9/F821도 exit 0이다.
+
+독립적으로 개발 PC의 기존 사본에서 최초 종료 실행에 필요한 observation fact를 찾았다.
+발견된 1,076개·1,033,438,094바이트를 읽어 SHA를 비교했으나 요구 SHA
+`0bc2679fb7f424fd30f42b37f83af09e29883f98b1c6295f5bdd8a7bd9c23f7a`는 없었다.
+`fact-locator-r1/observation-fact-search.json`에 검색 범위와 결과를 보존했다.
+이는 해당 개발 사본 범위의 미발견이며 서버 원본의 부재 증명이 아니다. 전체 데이터 QA는
+여전히 미완료다. 제조사 메일은 이번 턴 조회에서도 보낸 메시지 1개만 확인했다.
+
+다음 장기 관찰 준비에서 `field_runner.py`의 observe 요청이 아직 1.0.28 commit/reference에
+고정됨을 확인했다. 이 도우미를 1.0.29에 그대로 적용하지 않고 후보 식별 지원과 영향 검사를
+보완해야 한다. 15분/120분·전체 데이터 QA·물리 경계와 정식 출시/운영 승격은 미완료/HOLD다.
+이번 턴은 실제 진전이며 목표는 active로 유지한다.
