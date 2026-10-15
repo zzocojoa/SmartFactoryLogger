@@ -12,6 +12,8 @@ from typing import Any
 import unittest
 from uuid import uuid4
 from unittest.mock import patch
+from starlette.requests import Request
+from starlette.responses import Response
 
 _TEST_ROOT = Path(__file__).resolve().parents[2]
 _TEST_APPDATA_ROOT = _TEST_ROOT / ".tmp_test_appdata"
@@ -709,7 +711,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertIn("executable_mtime", payload)
             return
 
-        payload = asyncio.run(backend_app.health())
+        payload = asyncio.run(backend_app.health(Request({"type": "http", "headers": []}), Response()))
         self.assertEqual(payload["app_version"], __version__)
         self.assertIn(payload["runtime_kind"], {"dev", "frozen"})
         self.assertTrue(payload["executable_path"])

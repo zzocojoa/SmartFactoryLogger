@@ -110,9 +110,13 @@ def _contains_control_token(raw, token):
     return token.encode('ascii') in decoded_ascii.lower()
 
 
-def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None, include_native_timing=True):
+def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None, include_native_timing=True,
+                 health_probe_id=None):
     """Preserve full/partial response bytes; elapsed time excludes decoding/I/O."""
     _validate_endpoint(endpoint)
+    if health_probe_id is not None and (endpoint.name != 'health' or not isinstance(health_probe_id, str)
+            or re.fullmatch('[0-9a-f]{32}', health_probe_id) is None):
+        raise ValueError('Health probe requires the health endpoint and a lowercase 32-hex ID')
     if endpoint.name == CONTROL_HEALTH.name:
         if not isinstance(control_token, str) or re.fullmatch('[0-9a-f]{64}', control_token) is None:
             raise ValueError('Control health requires a valid embedded token')
@@ -134,6 +138,8 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None, inc
               'connect_ms': None, 'send_ms': None, 'headers_wait_ms': None, 'body_ms': None,
               'decode_ms': None, 'timeout_seconds': timeout_seconds}
     connection = _LoopbackConnection(port, deadline)
+    if health_probe_id is not None:
+        result['health_probe_id'] = health_probe_id
     response = None
     raw = bytearray()
     received = None
@@ -146,6 +152,8 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None, inc
                            'User-Agent': 'SFL-Field-HTTP-Probe/1'}
         if control_token is not None:
             request_headers['X-SFL-Control-Token'] = control_token
+        if health_probe_id is not None:
+            request_headers['X-SFL-Health-Probe'] = health_probe_id
         connection.request('GET', endpoint.path, headers=request_headers)
         sent = time.perf_counter_ns()
         result['send_ms'] = (sent - connected) / 1e6

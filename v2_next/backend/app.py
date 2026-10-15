@@ -109,6 +109,7 @@ from backend.FacilityData.repository import logger_service
 from backend.Observability.metrics_logger import comm_metrics_logger_service
 from backend.Observability.memory_service import estimate_size_bytes, memory_service
 from backend.Observability.service import observability_service
+from backend.Observability.health_timing import HealthTiming, TIMING_HEADER, start_health_timing
 from backend.Configuration.Configuration_DB_Manager import config_manager
 from backend.launcher_policy import is_embedded_electron
 from backend.Configuration.Configuration_Logic_Layout import (
@@ -2453,13 +2454,17 @@ def reset_operator_metadata(request: Request):
 HEALTH_SLOW_RESPONSE_THRESHOLD_MS = 500.0
 
 
-def build_health_payload() -> dict[str, Any]:
+def build_health_payload(*, diagnostic: HealthTiming | None = None) -> dict[str, Any]:
     started_perf = time.perf_counter()
 
     plc_health = plc_service.get_health()
+    if diagnostic is not None:
+        diagnostic.mark("plc_done")
     plc_completed_perf = time.perf_counter()
 
     runtime_info = get_runtime_info()
+    if diagnostic is not None:
+        diagnostic.mark("runtime_done")
     runtime_completed_perf = time.perf_counter()
 
     frontend_status = get_frontend_static_status(
@@ -2471,6 +2476,8 @@ def build_health_payload() -> dict[str, Any]:
         frontend_resolution_candidate_specs,
     )
     completed_perf = time.perf_counter()
+    if diagnostic is not None:
+        diagnostic.mark("frontend_done")
 
     total_ms = (completed_perf - started_perf) * 1000.0
     if total_ms >= HEALTH_SLOW_RESPONSE_THRESHOLD_MS:
@@ -2504,8 +2511,24 @@ def build_health_payload() -> dict[str, Any]:
 
 
 @app.get("/health")
-async def health():
-    return await asyncio.to_thread(build_health_payload)
+async def health(request: Request, response: Response):
+    diagnostic = start_health_timing(request)
+    if diagnostic is None:
+        return await asyncio.to_thread(build_health_payload)
+
+    def build_timed_health():
+        diagnostic.worker_tid = threading.get_native_id()
+        diagnostic.mark("worker_enter")
+        payload = build_health_payload(diagnostic=diagnostic)
+        diagnostic.mark("worker_exit")
+        return payload
+
+    diagnostic.mark("submitted")
+    payload = await asyncio.to_thread(build_timed_health)
+    diagnostic.mark("route_resume")
+    # Serialization, middleware completion and socket writes occur after this point.
+    response.headers[TIMING_HEADER] = diagnostic.header()
+    return payload
 
 @app.get("/stats")
 async def stats():

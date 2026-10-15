@@ -434,3 +434,45 @@ stdout/stderr를 새 파일로 저장하고 시간·출력·잔류 자손·실�
 검사 자손만 정리한다. 기존 부모 ACL·설치·설정·운영 데이터는 변경하지 않는다.
 보호된 실행과 각 단계 결과를 실제 관찰→정상 앱 종료→전체 새 사본/QA로 연결하는 현장 절차는
 별도 검증 대상이며 물리·UI/packet·승격 조건을 이 진입점의 PASS로 대신하지 않는다.
+
+### 5.16 요청별 health 처리 구간의 선택적 계측
+
+현장203.1356ms 표본은 기존500ms worker 로그에 남지 않으며 executor 대기와 event loop 복귀를
+분리할 수 없다. `/health`의 기존 응답 본문·500ms 로그·200ms 실패 기준은 유지한다.
+명시적인 로컬 진단 요청에만 `X-SFL-Health-Timing` 응답 헤더를 추가한다.
+
+요청 조건은 `X-SFL-Health-Probe` 하나에 소문자32자리 hex ID, ASGI peer의 literal loopback IP,
+Origin/Referer 헤더 부재다. 부적합한 진단 표시는 일반 health로 처리한다. 별도 인증 수단이나
+외부 접근 통제를 대신하지 않는다. 전역 상태·파일 기록·장비 제어·추가 worker pool은 만들지 않는다.
+요청마다 독립 객체를 쓰고 예외·취소 때 완료 헤더를 만들지 않는다.
+
+예: 확인한 loopback `/health`에 `X-SFL-Health-Probe: 0123456789abcdef0123456789abcdef`를 보낸다.
+수집기는 `fetch_sample(port, ENDPOINTS[0], health_probe_id=<새 uuid4 hex>)`로 지정하며,
+응답 원문 헤더·본문·해시와 요청 ID를 보존한다. ID 미지정 시 기존 수집 동작을 유지한다.
+수집기의 HTTP 성공은 timing 지원·정합성을 뜻하지 않는다. 해석 시 헤더가 정확히 하나인지,
+v=1·probe_id 일치·clock·양의 정수 PID/TID·아래 모든 checkpoint의 단조 순서를 별도로 검증해야 한다.
+누락되거나 다른 schema/ID인 자료를 시간0으로 채우거나 PASS로 해석하지 않는다.
+
+| checkpoint 차이 | 포함하는 벽시계 구간 |
+| --- | --- |
+| worker_enter − submitted | executor 제출과 worker 시작 사이; 정확한 queue-only 시간은 아님 |
+| plc_done − worker_enter | PLC health 조회 및 진입 계측 |
+| runtime_done − plc_done | runtime 정보 조회와 경계 계측 |
+| frontend_done − runtime_done | frontend 상태 조회와 경계 계측 |
+| worker_exit − frontend_done | 기존 느린 응답 로그·payload 조합 등 나머지 worker 처리 |
+| route_resume − worker_exit | worker 반환·future 전달·event loop 복귀 |
+
+헤더는 v/probe_id/pid/loop_tid/worker_tid/clock/checkpoints로 구성하며,
+checkpoint 순서는 route_enter, submitted, worker_enter, plc_done, runtime_done,
+frontend_done, worker_exit, route_resume다. clock은 Python `perf_counter_ns`이고 단위는 ns다.
+route_enter는 진단 요청 조건을 확인한 직후이므로 그 앞의 헤더 검사 시간도 포함하지 않는다.
+고정 필드와 검증한 hex ID만 포함한다. 단계 사이 시간에는 OS scheduling·GIL/lock 대기·계측 비용이
+포함될 수 있으므로 정확한 CPU 시간이나 특정 원인으로 자동 분류하지 않는다.
+route_resume 뒤의 JSON 직렬화·middleware·socket 전송 및 route 진입 전 처리는 포함하지 않는다.
+PID/TID만으로 세대를 확정하지 않으며 현장 적용 때 native 생성 식별자와 설치본 identity가 필요하다.
+ETW QPC와 직접 같은 수치라고 가정하지 않고 같은 실행의 clock anchor와 trace coverage를 검증한다.
+
+검증은 일반/잘못된/외부/브라우저 표시 요청, 동시 요청, 오류·취소, worker pool 포화,
+각 처리 단계와 event loop 복귀 지연을 포함한다. 실제 loopback HTTP 시험은 장비 서비스 lifespan을
+끄고 조회값을 격리해 수행한다. 이 변경은 새 제품 소스이며 기존4cc 설치본·고정 도우미를 수정하지 않는다.
+실제 장비·frozen 설치본·현장 성능 검증과 배포는 별도이고 출시 HOLD는 유지한다.

@@ -5,6 +5,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from starlette.requests import Request
+from starlette.responses import Response
 
 from backend import app as backend_app
 
@@ -219,7 +221,7 @@ class FrontendRoutingHealthTests(unittest.TestCase):
             return {"running": True}
 
         with patch.object(backend_app, "build_health_payload", side_effect=build_health):
-            payload = asyncio.run(backend_app.health())
+            payload = asyncio.run(backend_app.health(Request({"type": "http", "headers": []}), Response()))
 
         self.assertTrue(payload["running"])
         self.assertEqual(len(health_thread_ids), 1)

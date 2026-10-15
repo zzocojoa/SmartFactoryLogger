@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T00:20:48.374328+00:00",
+  "lastUpdated": "2026-10-15T00:43:49.522805+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-15T00:20:48.374328+00:00"
+        "lastUpdated": "2026-10-15T00:43:49.522805+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "The single local request trace completed with user/fixture exit0, same-run request windows and closed client/server lifetimes verified. Do not repeat R5 or the completed fixture. Preserve full tracerpt quality INCOMPLETE_OR_UNUSABLE, unhandled events and non-CPU attribution limits. Use this checked method to design the smallest bounded field diagnostic separating collector scheduling from backend response timing for the 203.1356ms health event and image overruns; require stable backend/collector generations and owned cleanup. Do not rerun unchanged 15-minute QA, relax thresholds, start canary120 or promote. Field cause remains unresolved.",
+            "nextAction": "Opt-in loopback health stage timing and ID-carrying HTTP sampling are source-tested. Preserve installed 4cc candidate and all pinned packages. Before field use, validate timing-header consumption (single header, strict schema/ID/order/clock/bounds), same-run native generation/clock binding and packaged behavior on a clean exact source. Prepare a bounded targeted diagnostic, then deliver to server local folder after remote UI becomes available. Do not repeat completed R5 or request trace, rerun unchanged 15-minute QA, relax 200ms, start120 or promote. Actual 203.1356ms cause, full field QA/data and physical boundary remain unresolved.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11711,6 +11711,31 @@
               "canary120Started": false,
               "physicalBoundary": "NOT_TESTED",
               "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "healthStageTimingStage": {
+              "recordedAt": "2026-10-15T00:43:49.522805+00:00",
+              "status": "LOCAL_SOURCE_HEALTH_TIMING_VERIFIED",
+              "focusedTests": 48,
+              "actualHttpTests": 2,
+              "samplerTests": 32,
+              "fullHealthExit": 0,
+              "backendTests": 930,
+              "backendSkippedPrivateFixture": 1,
+              "frontendTests": 437,
+              "evidence": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_TIMING_20261015_e3d88973\\verification.json",
+                "bytes": 7942,
+                "sha256": "9710323425f782947db8d6f9272e35e8844228a9a14ffc6e7bf369d3a64668a6"
+              },
+              "productSourceChanged": true,
+              "installedCandidateChanged": false,
+              "packageBuild": "NOT_RUN",
+              "fieldLatencyCause": "UNDETERMINED",
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
               "releaseGate": "HOLD",
               "promotionAllowed": false
             }

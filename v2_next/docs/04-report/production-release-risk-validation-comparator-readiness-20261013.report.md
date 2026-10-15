@@ -1948,3 +1948,33 @@ CPU 누락, 다른 PID, 생존 구간 이탈, 실행 중 아닌 경계, TID 재�
 관리자 실행 요청은 완료됐고 같은 명령을 다시 실행하지 않는다.
 다음은 이 방법의 한계 안에서 collector 스케줄링과 backend 응답 시점을 분리하는 제한된 현장 진단 준비다.
 15분FAIL·120분미시작·물리NOT_TESTED·전체 데이터 NOT_EVALUATED·출시HOLD는 유지한다.
+
+
+## 2026-10-15 health 요청별 서버 처리 구간 계측의 로컬 검증
+
+기존500ms worker 로그와 클라이언트 요청 기록만으로는 현장203.1356ms의 서버 내부 구간을
+나눌 수 없었다. `/health`에 선택적 로컬 진단 헤더를 추가하고 기존 HTTP 수집기에 요청 ID 전달을
+추가했다. 같은32자리 ID·PID·loop/worker native TID와8개 perf_counter_ns checkpoint를 반환한다.
+일반 본문·기존500ms 로그·현장200ms 기준은 유지한다. 잘못된 ID·중복 헤더·외부 peer·Origin/Referer가
+있는 요청은 일반 경로로 처리한다. 예외·취소 응답에 완료 계측을 붙이지 않는다.
+계약과 사용 예시는 설계5.16에 기록했다. 새 source이며 기존4cc 설치본과 고정 package는 변경하지 않았다.
+
+집중48검사(exit0)는 worker pool 대기, PLC/runtime/frontend 지연, event loop 복귀 지연,
+동시 요청 분리·예외·취소·일반 응답 보존을 확인했다. 실제 Uvicorn loopback 통합2검사(exit0)는
+일반1건/진단4건의 원문 헤더·본문·해시·ID·시간 순서와 서버 정상 종료를 확인했다.
+조회값을 격리하고 lifespan을 꺼 실제 장비 서비스를 시작하지 않았다. 세 처리 단계에 각각80ms를
+주입했고 해당 구간에서70ms 이상을 측정했다. 관찰 헤더375bytes는 이번 로컬 표본의 값이다.
+기존 HTTP 수집기32검사(exit0), 새 모듈 mypy와 선택 Ruff도 exit0였다.
+
+최종 제품 소스에서 `npm run health` exit0. frontend42파일437검사, backend930검사를 실행했고
+private F01 fixture 미지정으로 기존1검사는 skip이다. 의존성·Electron 시작·frontend 타입/린트·
+backend 린트/타입 및 QA selftest가 같은 명령에서 완료됐다. 패키지 빌드·설치·현장 시험은 실행하지 않았다.
+검증 소스 사본과 전체 출력/원문 응답은
+`C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_TIMING_20261015_e3d88973`에 보존했다.
+verification.json SHA256은 `9710323425f782947db8d6f9272e35e8844228a9a14ffc6e7bf369d3a64668a6`이다.
+
+구간 값은 OS scheduling·GIL/lock·계측 비용을 포함할 수 있는 벽시계 시간이며 CPU 사용량이 아니다.
+JSON 직렬화·middleware 완료·socket 전송은 route_resume 뒤라 포함하지 않는다.
+실제 지연 원인은 여전히 미확정이다. 다음은 진단 응답의 엄격한 소비 검사와 native 세대/clock 결합,
+clean source의 패키지 동작 검증 후 제한된 현장 진단 준비다. 이전 원격 UI 실패는 해결됐다고 기록하지 않는다.
+15분FAIL·120분미시작·물리NOT_TESTED·전체 데이터 NOT_EVALUATED·출시HOLD를 유지한다.
