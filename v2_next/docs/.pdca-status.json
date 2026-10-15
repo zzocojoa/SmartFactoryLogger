@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T04:15:32.641643+00:00",
+  "lastUpdated": "2026-10-15T04:54:23.164019+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Exact package and candidate/approved rollback installers are now staged at server Desktop/SmartFactory/HD29_20261015_7e735e28; 19 files/345514402 bytes from the UI-selected server-local folder were returned to a new shared folder and SHA256-matched. No server native hash command or installation was performed. Prepare and validate the 1.0.29-specific read/normal-close/fresh-stream-backup/install/preservation procedure before asking for administrator execution. Do not reuse the old1.0.28 installer helper or Sandbox request. Bind a diagnostic request only after verified1.0.29 installation with fresh native generation/configuration. Preserve server4cc,field15FAIL,200ms,120-not-started,physicalNOT_TESTED,HOLD and approved541d rollback.",
+            "nextAction": "Await one user execution of server-local HI29_20261015_9c43d21a/PINNED_HEALTH_BACKUP_COMMAND.txt in independent administrator Windows PowerShell with app Running. On READY_FOR_NORMAL_APP_EXIT, Codex performs normal application UI exit within the 450-second wait, then verifies the fresh full stream backup and same-generation close evidence. Prepare a new field close review and exact1.0.29 installation request only from those actual results; no Sandbox request or old1.0.28 install command. After separately executed pinned installation and preservation checks, start normally and bind fresh runtime/configuration attestation and health diagnostics. Do not rerun installation after a post-install verification failure; prepare verification-only continuation. Preserve current4cc, approved541d rollback, field15FAIL/200ms,120-not-started,physicalNOT_TESTED,HOLD; no automatic promotion.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -12146,11 +12146,88 @@
                 "bytes": 4895,
                 "sha256": "84752184419bef7bebdc2e002b83acb48c044d4fab6df790f41539330ad9d650"
               }
+            },
+            "healthInstallPreparationStage": {
+              "recordedAt": "2026-10-15T04:54:23.164019+00:00",
+              "status": "V1029_INSTALL_HELPER_VERIFIED_BACKUP_COMMAND_SERVER_READY_USER_EXECUTION_PENDING",
+              "helperCommit": "ad41829156f25580ae98b4ed4358b0efc076506b",
+              "candidateCommit": "acaf77d95101a050f4d3ecd76125d3502036f5a7",
+              "candidateInstallerSha256": "3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7",
+              "currentServerCandidate": "1.0.28/4cc7393e",
+              "approvedRollback": "1.0.26/541d701d",
+              "unitChecks": 35,
+              "unitActualExit": 0,
+              "backupEntryChecks": 9,
+              "backupEntryActualExit": 0,
+              "bootstrapBitnessTested": [
+                32,
+                64
+              ],
+              "pinnedCommandParseExit": 0,
+              "sandbox": {
+                "actual_cli_exit": 0,
+                "actual_guest_exit": 0,
+                "actual_installer_exit": 0,
+                "previous_files": 1815,
+                "candidate_files": 1868,
+                "synthetic_files": 4,
+                "synthetic_directories": 3,
+                "synthetic_named_streams": 3,
+                "synthetic_bytes": 210,
+                "config_original_bytes_preserved": true,
+                "result_acl_protected": true,
+                "operator_readable": true,
+                "server_guard_negative_exit": 1,
+                "app_lifecycle_tested": false,
+                "backup_close_review": "SYNTHETIC_NOT_FIELD_EVIDENCE",
+                "unchanged_transaction_function_bodies": true,
+                "host_binding": "SANDBOX_FUNCTION_INVOCATION; PRODUCTION_BOOTSTRAP_EXPECTED_REJECTION",
+                "output_files": 32,
+                "output_bytes": 2930848,
+                "disposed_after_cold_check": true
+              },
+              "preservedFailures": [
+                "unit-r1 rejected leading UTF-8 BOM before first SPOT section; fixed parser without mutating bytes",
+                "Sandbox r1 stopped before candidate install because PS5.1 parameter default used empty PSScriptRoot; moved default resolution into body",
+                "JSON PID Int64 compatibility corrected and round-trip regression added before final Sandbox run",
+                "first failed-Sandbox cleanup check had malformed output path; no stop occurred; corrected check verified cold before disposal"
+              ],
+              "verification": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_INSTALL_20261015_9c43d21a\\verification.json",
+                "bytes": 4744,
+                "sha256": "cb8a10b4edf5bc600edd4efa066655ec4997384228ac02b14d1c26de4f9dda1a"
+              },
+              "serverDelivery": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_INSTALL_20261015_9c43d21a\\server-delivery-verification.json",
+                "bytes": 1863,
+                "sha256": "aed1be3763d89621d493af7b54fbe590facf5bcd82c8bf0f64c8505492794478"
+              },
+              "serverLocalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\HI29_20261015_9c43d21a",
+              "deliveredFiles": 17,
+              "deliveredBytes": 840042,
+              "serverNativeHashCommandExecuted": false,
+              "serverBackupExecuted": false,
+              "serverInstalled": false,
+              "serverAppStopped": false,
+              "backupCommand": "PINNED_HEALTH_BACKUP_COMMAND.txt",
+              "fieldInstallRequestIssued": false,
+              "nextRequiredUserAction": "Execute the opened server-local pinned backup command once in independent administrator Windows PowerShell, keeping the app Running; report READY_FOR_NORMAL_APP_EXIT immediately.",
+              "manualExecutionReason": "computer-use guidance: Do not automate terminal applications",
+              "productCodeChanged": false,
+              "installerRebuilt": false,
+              "fullHealthRepeated": false,
+              "fullHealthRepeatReason": "Only field helper scripts/tests changed; unchanged acaf77d9 product installer retains prior final health/build evidence",
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fieldLatencyCause": "UNDETERMINED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }
       },
-      "updatedAt": "2026-10-15T04:15:32.641643+00:00"
+      "updatedAt": "2026-10-15T04:54:23.164019+00:00"
     }
   },
   "pipeline": {

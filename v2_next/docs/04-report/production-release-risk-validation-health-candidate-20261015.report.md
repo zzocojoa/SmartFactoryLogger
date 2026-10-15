@@ -431,3 +431,89 @@ exit0으로19파일의 상대경로·크기·기본 스트림 SHA256이 원본�
 않았으며 위 체크리스트의 최신 native 확인·백업·1.0.29용 교체 절차가 남아 있다.
 탐색기를 닫은13:15 KST 화면에서 앱 Running과 제품60250·금형108을 다시 관찰했다.
 이번 전달로 서버 앱을 종료하거나 설치·설정을 변경하지 않았다.
+
+## 1.0.28→1.0.29 설정 보존 설치 도우미 검증
+
+후속 helper commit ad418291에서 install-health-candidate.ps1을 추가했다. 고정된 이전
+library의 함수 정의만 재사용하며, 과거1.0.26→1.0.28 설치와 비교기 변경 코드는 실행하지
+않는다. 현재4cc/새acaf 전체 payload와 uninstaller, 미서명 installer, 최신 닫힌 백업 및
+같은 main/backend PID·UTC 생성 시각·logger를 결합한다. OFF 설정의 원본 바이트와 추가
+스트림을 보존하고 새 실행 세대 attestation은 후속 단계로 남긴다.
+
+원본 request·controller·고정 library·기준 자료를 보호 결과 폴더에 보존하며 운영 사용자
+읽기 권한도 확인한다. 설치 timeout/실패 시 강제 종료·자동 재시도·자동 복귀는 없다.
+과거 field-sequence approval은 그대로 보존하고 새 후보의 명시 승인으로 재표현하지 않는다.
+
+| 검증 | 실제 결과와 한계 |
+|---|---|
+| test_install_health_candidate.ps1 | 최종35검사 exit0. request/경로/생성 세대/설정, 실제 child exit0·17·timeout |
+| test_health_backup_entry.ps1 | 9검사 exit0. 고정 묶음, 잘못된 pin·변조·추가 파일 거부, 실제32/64비트 bootstrap→64비트 PS5.1 library-only child exit0 |
+| 오프라인 Sandbox | 실제1.0.28 installer exit0→변경 없는 transaction 함수→실제1.0.29 installer exit0. CLI/guest exit0 |
+| 설치 파일·등록 | 교체 전1,815개·후1,868개 기준 일치, 등록 버전1.0.29·설치 경로 확인 |
+| 합성 닫힌 데이터 | 4파일·3폴더·추가 스트림3개·210bytes의 원본/사본 재검산. BOM 포함 설정133bytes와 설정 ADS10bytes 보존 |
+| 서버 실행 경계 | Sandbox에서 서버 전용 top-level은 예상 exit1. 실제 서버 host/사용자 경계 통과·실제 앱 정상 종료는 미검증 |
+| 종료·보존 | 앱/backend/installer/8000 부재 후 소유 Sandbox만 정리. 출력32파일/2,930,848bytes 보존 |
+
+초기 UTF-8 BOM 파싱 실패와 PS5.1의 PSScriptRoot 기본 인수 초기화 실패를 보존하고
+수정했다. JSON PID Int64 호환성과 직렬화 왕복 검사도 추가했다. 최초 Sandbox는 후보
+설치 전에 중단됐다. 최초 cleanup 확인의 출력 경로 오류로는 Sandbox를 종료하지 않았고,
+수정된 확인에서 cold 상태를 관찰한 후 정리했다. 최종 시험은 새 Sandbox에서 수행했다.
+이를 실제 현장 정상 종료·전체 데이터 규모·성능 QA 통과로 확대하지 않는다.
+
+검증 루트: C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_INSTALL_20261015_9c43d21a.
+verification.json: 4,744bytes/SHA256
+cb8a10b4edf5bc600edd4efa066655ec4997384228ac02b14d1c26de4f9dda1a.
+설치 helper SHA256:
+f3cdf97ac9bb84fb9a8b303dab551c7d6f21becc4f0dba1ae68c76275c7b8b0b.
+고정 library SHA256:
+a95ec69d7fef3371745ad32685fa10b26f858ef9f93fe1a8669c39b25e225c1a.
+제품 acaf/installer3394는 재빌드하지 않았다. 변경은 현장 helper/test뿐이므로 기존 제품
+전체 health를 반복하지 않았다.
+
+### 최신 백업·설치 준비 묶음
+
+HI29_20261015_9c43d21a의 현재 실행 단계는 백업 준비만이다. engine/wrapper는 이전
+고정 바이트 그대로이고 scope 기대 버전은 현재 후보1.0.28이다. 승인 복귀541d와 현재
+시험 후보4cc는 별도 필드다. PINNED_HEALTH_BACKUP_COMMAND.txt는32비트 창에서도
+64비트 PS5.1을 선택하고 잠근 launcher·전체 backup manifest를 검증한다.
+
+- backup manifest: BBE23EABDCA536ED2D582674D2B77B0435AC41C51CA68604D310A84493635D00
+- launcher: 6366244f1e56c70d936cc92734e51b3b725de9cabbe65bb5a9ea5aa77105bd24
+- delivery manifest: 70ba6c2bd2be69a8617c60c2fe1e58fd8df611aea7d1ea3fce77fd48c3ba6f6a
+- 공유 send 복사17파일/840,042bytes의 상대경로·크기·SHA256 일치
+
+실행 순서:
+
+1. 서버 로컬 전달 확인 후 앱 Running 상태에서 새 백업 명령을 한 번 실행한다.
+2. READY_FOR_NORMAL_APP_EXIT 후 기존 UI로 정상 종료하고 새 Q폴더 사본을 검산한다.
+3. 콘솔 해시·사본·같은 세대 정상 종료를 검토해 새 close review와 request를 만든다.
+4. 설정 SHA와 installer를 결합한 별도 설치 명령을 발행한다. 현재 묶음에는 설치
+   request/명령이 없고 Sandbox 합성 request를 서버에 사용하지 않는다.
+5. 실제 설치·보존 검산 후 일반 사용자로 시작하고 새 세대·설정 attestation·진단 request를 확인한다.
+
+실패 후 설치를 다시 실행하지 않는다. installer 종료 후 검산에서 멈춘 경우 설치 없는
+후속 검산을 준비한다. 현장15분 FAIL·120분 미시작·물리 NOT_TESTED·출시 HOLD를 유지한다.
+
+### 서버 로컬 백업 명령 전달 완료
+
+13:53 KST 서버 탐색기에서 새 묶음의 로컬 경로와 파일 존재를 확인하고 백업 명령을
+메모장에 열었다. 앱은 Running, 화면 작업값은 제품60250·금형108이었다. 이는 현재 화면
+관찰이며 새 운영자 확인이나 변경 지시로 취급하지 않는다.
+
+- 서버 로컬: `C:/Users/user/Desktop/SmartFactory/HI29_20261015_9c43d21a`
+- 전달: `Z:/SmartFactory/20261015/send/HI29_20261015_9c43d21a`
+- 서버 로컬에서 회수: `Z:/SmartFactory/20261015/return/HI29_COPY_9c43d21a/HI29_20261015_9c43d21a`
+- 전송 기록: `Z:/SmartFactory/20261015/records/HI29_9c43d21a`
+
+`verify_server_return.py` exit0으로 서버 로컬에서 선택해 회수한17파일/840,042bytes의
+상대경로·크기·기본 스트림 SHA256이 준비 원본과 같은 것을 확인했다. 서버 native hash
+명령을 실행한 것은 아니다. 증거 루트의 `server-delivery-verification.json`은1,863bytes,
+SHA256 `aed1be3763d89621d493af7b54fbe590facf5bcd82c8bf0f64c8505492794478`이다.
+공유 records 사본도 같은 해시다. 로컬 경로·파일 목록·메모장 화면3장을 함께 보존했다.
+
+현재 상태는 **백업 명령 서버 준비 완료·사용자 실행 대기**다. 서버 백업·앱 종료·설치는
+수행하지 않았다. 서버 메모장의 `PINNED_HEALTH_BACKUP_COMMAND.txt`에서 `& {`로 시작하는
+본문 전체를 독립된 관리자 Windows PowerShell에서 한 번 실행하고 앱은 Running으로
+유지한다. `READY_FOR_NORMAL_APP_EXIT`를 즉시 알려 주면450초 대기 안에 Codex가 앱을
+정상 종료한다. 오류 시 재실행하지 않는다. 이 직접 실행 단계는 computer-use 필수
+guidance의 “Do not automate terminal applications” 규칙에 따른다.

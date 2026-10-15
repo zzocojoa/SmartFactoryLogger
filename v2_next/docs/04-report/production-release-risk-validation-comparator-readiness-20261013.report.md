@@ -2127,3 +2127,29 @@ health3건/9구간은 독립 원문 계산과 일치했고 CSV·이미지 valida
 근거 `PDCA_HEALTH_ENTRY_20261015_7e735e28/server-delivery-verification.json`, SHA256
 `84752184419bef7bebdc2e002b83acb48c044d4fab6df790f41539330ad9d650`.
 최신 정상 종료/닫힌 백업과1.0.29용 교체 절차를 준비한 뒤 새 현장 request를 발행한다.
+
+### 2026-10-15 현재 후보에서1.0.29로 교체하는 도우미
+
+helper ad418291의 새 설치 transaction을35개 검사와 실제 오프라인 NSIS1.0.28→1.0.29로
+검증했다. 단위·guest·installer exit0, 설치 전1,815파일/후1,868파일 일치다. 합성 닫힌
+4파일·3폴더·추가 스트림3개·210bytes와 설정 원문을 보존했다. 서버 host guard는 예상
+exit1이며 실제 서버 정상 종료·설치·전체 규모 보존 검사로 확대하지 않는다.
+초기 BOM·PS5.1 인수 초기화 실패와 수정 전 증거는 보존했다.
+
+새 백업 carrier9검사 exit0, 실제32/64비트 창→native64비트 PS5.1 library-only 종료0을
+확인했다. HI29_20261015_9c43d21a는 백업 준비만 실행 가능하고 현장 설치 request/명령은
+최신 백업·같은 세대 정상 종료 검토 후 따로 발행한다. 제품 acaf/installer3394 재빌드와
+제품 전체 health 반복은 없다. 현장15분 FAIL·120분 미시작·물리 NOT_TESTED·HOLD를 유지한다.
+
+근거: PDCA_HEALTH_INSTALL_20261015_9c43d21a/verification.json,
+SHA256 cb8a10b4edf5bc600edd4efa066655ec4997384228ac02b14d1c26de4f9dda1a.
+상세 절차와 실패 보존 범위는 health-candidate-20261015 보고서의 설치 도우미 절을 따른다.
+
+13:53 KST 새17파일/840,042bytes를 서버 로컬
+`C:/Users/user/Desktop/SmartFactory/HI29_20261015_9c43d21a`까지 전달하고 실제 경로·파일을
+확인했다. 서버 로컬에서 선택한 사본의 공유 회수 후 상대경로·크기·SHA256 대조는
+`verify_server_return.py` exit0이다. 서버 native hash 명령 실행과는 구분한다.
+근거 `PDCA_HEALTH_INSTALL_20261015_9c43d21a/server-delivery-verification.json`,
+1,863bytes/SHA256 `aed1be3763d89621d493af7b54fbe590facf5bcd82c8bf0f64c8505492794478`.
+서버 메모장에 백업 명령을 열었으며 사용자 관리자 실행을 기다린다. 앱 Running·작업값
+60250/108은 화면 관찰이다. 백업·정상 종료·설치는 아직 실행하지 않았고 기존 gate는 유지한다.
