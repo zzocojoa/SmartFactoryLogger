@@ -615,3 +615,51 @@ short-circuit로 실행되지 않은 `npm run health:qa:selftest`는 별도 실�
 08:14 서버 화면은 Running, 제품 60313·금형 1로 관찰했으며 값을 변경하지 않았다.
 다음 단계는 clean helper commit의 배포용 묶음 검증과 서버 최종 전달이다.
 현장 15분/120분·전체 데이터 QA·물리 경계·정식 출시/운영 승격은 계속 미완료/HOLD다.
+
+### 2026-10-16 장기 관찰 실행 파일 검증과 15분 요청 준비
+
+도우미 commit `f916961996d130b5f55b476c51a276a4f38afc9f`의 clean 소스 84파일에서
+실행 파일을 만들었다. 제품 후보는 기존 `acaf77d95101a050f4d3ecd76125d3502036f5a7`
+(1.0.29) 그대로다. 새 근거 루트는
+`Desktop/SmartFactory/PDCA_RUN129_20261016_5471c9e2`이며 빌드 전후 소스·의존성은 동일하다.
+`field_runner.exe`는 16,083,341 bytes,
+SHA256 `f5cb36098c3572144860ee61d75d9371a8b72749392b0cb9333405ff3dcfd8d4`다.
+
+`portable-r1/summary.json`은 실제 실행 파일의 합성 1.0.29 종료 자료 양성,
+실제 과거 attestation 음성, 중복 JSON 음성과 관리자·요청 해시 거부를 포함한
+native 실행 6건을 확인했다. 각 실제 종료 코드와 소유 job 정리 및 산출물 해시를 확인했고
+입력·패키지는 바뀌지 않았다. `bootstrap-r1/summary.json`은 x64/x86 각각 양성 실행,
+관리자 권한 거부, controller pin 거부, request pin 거부 총 8건이 기대 종료 코드와 일치했다.
+양성 검사는 개발용 ACL 대체 controller였으며 서버 관리자 ACL 적용이나 현장 통과가 아니다.
+생산 controller의 관리자 검사와 보호 기능은 변경하지 않았다.
+
+새 900초 observe 요청은 이전에 준비한 요청 SHA
+`35678cea550647c804ad091d33c4e5a56bc20fd87222f85ffdfcf82b1fcc5b3a`와 승인 설정 SHA
+`0680d00095d550558c09ad1287e73eabe6e2c68f3de19153caf6931673783ada`에 결합했다.
+6초 진단의 사라진 콘솔 launcher pin을 복구했다고 주장하지 않는다. 동일 런타임을 요청하되
+현재 프로세스 세대·설정·설치 바이트의 일치는 실제 collector 시작/종료 시 재확인한다.
+
+완성된 묶음은 `O1529_20261016_5471c9e2_R2`다. 개발 준비 첫 시도는 Git 저장소 내
+`v2_next/` 경로 누락으로 전달 전에 중단됐으며 미완성 폴더를 보존하고 새 폴더로 준비했다.
+최종 요청은 1,390 bytes, SHA256
+`a333800fff0e6aec251f9a5b4939003392451c12d237043af2da122755d7e498`다.
+시작 명령은 x64/x86 PowerShell parser 모두 exit 0, 준비 코드 Ruff E9/F821 exit 0이다.
+공유 전송은 `Z:/SmartFactory/20261016/send/O1529_20261016_5471c9e2_R2`이며
+13파일 42,196,356 bytes 전체가 원본 해시와 일치한다. 근거는 `observe15-preparation.json`,
+`observe15-share-transfer.json`이다. 공유 검증과 서버 로컬 전달·해시 확인은 구분한다.
+전체 health exit 1 및 원인 미확정 상태는 위 기록 그대로이며 이 실행 파일 검사로 대체하지 않는다.
+새 설치·전체 백업·서버 관찰 실행은 이 준비 단계에서 수행하지 않았다.
+
+08:34 서버 Explorer에서 최종 절대경로
+`C:/Users/user/Desktop/SmartFactory/O1529_20261016_5471c9e2_R2`와 루트 5파일,
+`package` 안의 8파일을 확인했다. `PINNED_OBSERVE15_COMMAND.txt`를 메모장으로 열고
+Explorer를 닫았다. 명령에는 고정 controller 길이 28,053 bytes와 SHA256
+`771270ca98cfea0737260c5ba72849f741f43baa091c7a059600117b66689c22`가 보인다.
+서버 로컬 해시는 아직 검산하지 않았으며 사용자 실행 시 잠긴 bootstrap/controller가 확인한다.
+화면은 Running, 제품 60313·금형 1, 최근 적용 04:06:08이며 입력값은 변경하지 않았다.
+전달 영수증 `observe15-server-delivery.json`은 2,340 bytes, SHA256
+`79ed45d21de636f6aaaae3de28c4db7c15c861ccc541b4f1e49a8e10300f3c40`이다.
+`server-delivery-path.png`, `server-package-files.png`, `server-observe15-command-ready.png`에
+화면을 보존했다. 터미널 UI 조작 금지 때문에 사용자에게 관리자 PowerShell에서 한 번 실행을
+요청했으며 아직 측정 시작/완료를 확인하지 않았다. 결과 폴더와 콘솔의 `LAUNCHER_SHA256`,
+`LAUNCH_EXIT`를 받은 뒤 회수·대조한다. 이전 6초 진단의 콘솔 미확인 기록은 그대로 보존한다.
