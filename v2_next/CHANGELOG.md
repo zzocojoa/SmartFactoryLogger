@@ -2,6 +2,25 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.29] - Candidate, 2026-10-15
+
+### Changed
+
+- Add opt-in loopback health timing that separates executor queueing, worker
+  processing and event-loop resumption while preserving the ordinary health body.
+- Bind diagnostic requests to native process/thread creation times and measured
+  performance-counter/QPC anchors. Reject malformed, mismatched or incomplete
+  timing evidence rather than attributing it to another request or process.
+
+### Validation status
+
+- This unsigned internal candidate retains the 200 ms field health limit. Native
+  clock binding is source-tested; it does not establish the cause of the earlier
+  203.1356 ms field result or prove ETW coverage or field performance.
+- Clean-source release-lock, frozen/Electron, installer, recovery and field checks
+  must identify this candidate's own commit and installer hash. Installation and
+  operating promotion are pending; the approved rollback baseline is unchanged.
+
 ## [1.0.28] - Candidate, 2026-10-13
 
 ### Changed
