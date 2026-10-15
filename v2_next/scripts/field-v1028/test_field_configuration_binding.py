@@ -69,6 +69,46 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn('pinned-reference:settings_file_sha256', result['issues'])
         observation.write_json(self.folder / 'tamper.json', result)
 
+    def test_1029_reference_requires_explicit_candidate_and_new_fingerprint(self):
+        candidate = binding.CANDIDATE_1029
+        value = dict(self.snapshot, build_git_commit=candidate.commit)
+        # A copied 1.0.28 attestation is not a 1.0.29 attestation.
+        self.assertIn('fingerprint-recomputed-mismatch',
+                      configuration.review_snapshot(value, candidate=candidate)['issues'])
+        fingerprint = configuration.canonical_fingerprint(value)
+        value.update(spot_config_fingerprint_sha256=fingerprint,
+                     spot_config_verified_fingerprint_sha256=fingerprint)
+        self.assertEqual(configuration.review_snapshot(value, candidate=candidate)['status'], 'PASS')
+        self.assertIn('candidate-build', configuration.review_snapshot(value)['issues'])
+        path = self.folder / 'new-reference.json'
+        fact = observation.write_json(path, dict(schema='sfl-field-configuration-reference-v1',
+            profile_approval_sha256=configuration.PROFILE_APPROVAL_SHA, snapshot=value))
+        with self.assertRaisesRegex(ValueError, 'configuration-reference-not-verified'):
+            with configuration.configuration_reference(path, fact['sha256']):
+                self.fail('new reference accepted by the old default')
+        with configuration.configuration_reference(path, fact['sha256'], candidate=candidate) as expected:
+            self.assertEqual(configuration.review_snapshot(value, expected, candidate=candidate)['status'], 'PASS')
+            self.assertEqual(configuration.review_snapshot(self.snapshot, expected, candidate=candidate)['status'], 'FAIL')
+        disabled = dict(value, low_signal_comparator_configured_verified=False,
+                        low_signal_comparator_verified=False)
+        fingerprint = configuration.canonical_fingerprint(disabled)
+        disabled.update(spot_config_fingerprint_sha256=fingerprint,
+                        spot_config_verified_fingerprint_sha256=fingerprint)
+        disabled_path = self.folder / 'disabled-reference.json'
+        disabled_fact = observation.write_json(disabled_path, dict(schema=configuration.DISABLED_SCHEMA,
+            profile_approval_sha256=configuration.PROFILE_APPROVAL_SHA,
+            field_sequence_approval_sha256=configuration.FIELD_SEQUENCE_APPROVAL_SHA, snapshot=disabled))
+        self.assertEqual(configuration.review_snapshot(disabled, candidate=candidate)['status'], 'FAIL')
+        with configuration.configuration_reference(disabled_path, disabled_fact['sha256'],
+                                                    candidate=candidate) as expected:
+            review = configuration.review_snapshot(disabled, expected, candidate=candidate)
+            self.assertEqual(review['status'], 'PASS', review)
+            self.assertEqual(review['physical_device_gate'], 'NOT_TESTED')
+            self.assertEqual(review['formal_qa_gate'], 'HOLD')
+            self.assertFalse(expected['low_signal_comparator_verified'])
+        observation.write_json(self.folder / 'review.json',
+                               configuration.review_snapshot(value, candidate=candidate))
+
     def test_unverified_drift_invalid_readback_and_wrong_operator_fail(self):
         cases = {
             'config_operator_verified': False, 'config_operator_verified_requested': 1,

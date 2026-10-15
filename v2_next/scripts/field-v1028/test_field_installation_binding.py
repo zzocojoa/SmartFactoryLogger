@@ -85,12 +85,53 @@ class InstallationBindingTests(unittest.TestCase):
         self.main = ProcessIdentity(100, 12.0, os.path.normcase(str(self.root / 'smart-factory.exe')))
         self.backend = ProcessIdentity(101, 13.0, os.path.normcase(str(self.root / binding.BACKEND)))
 
-    def payload(self, *, document=None, extras=None, expected=None):
+    def payload(self, *, document=None, extras=None, expected=None, candidate=binding.CANDIDATE_1028):
         reference = self.folder / ('reference-' + str(len(list(self.folder.glob('reference-*')))) + '.json')
         raw = json.dumps(self.document if document is None else document).encode()
         reference.write_bytes(raw)
         return binding.InstalledPayload(self.root, reference,
-                                        expected_reference_sha256=expected or fact(raw)['sha256'], extras=extras)
+                                        expected_reference_sha256=expected or fact(raw)['sha256'], extras=extras,
+                                        candidate=candidate)
+
+    def test_explicit_1029_identity_rejects_mixed_payload_provenance_and_runtime(self):
+        candidate = binding.CANDIDATE_1029
+        self.document.update(candidate_commit=candidate.commit, version=candidate.version,
+                             installer_sha256=candidate.installer_sha256,
+                             installer_bytes=candidate.installer_bytes)
+        raw = json.dumps(dict(schema_version='1.0.0', source='clean_git_head',
+                              git_commit=candidate.commit)).encode()
+        old = self.document['payload_files'][binding.PROVENANCE]['bytes']
+        self.document['payload_content_bytes'] += len(raw) - old
+        self.document['payload_files'][binding.PROVENANCE] = fact(raw)
+        (self.root / binding.PROVENANCE).write_bytes(raw)
+        with self.assertRaisesRegex(ValueError, 'candidate-identity'):
+            with self.payload():
+                self.fail('new reference selected old candidate implicitly')
+        health = self.health()
+        health['app_version'] = candidate.version
+        health['spot_temperature']['build_git_commit'] = candidate.commit
+        with self.payload(candidate=candidate) as payload:
+            self.assertEqual(payload.receipt['build_commit'], candidate.commit)
+            self.assertEqual(self.capture(payload, health)['binding_status'], 'PASS')
+            self.assertEqual(self.capture(payload, self.health())['binding_status'], 'FAIL')
+        wrong = dict(self.document, installer_sha256=binding.INSTALLER_SHA)
+        with self.assertRaisesRegex(ValueError, 'candidate-identity'):
+            with self.payload(candidate=candidate, document=wrong):
+                self.fail('mixed installer identity accepted')
+        old_provenance = json.dumps(dict(schema_version='1.0.0', source='clean_git_head',
+                                         git_commit=binding.BUILD)).encode()
+        (self.root / binding.PROVENANCE).write_bytes(old_provenance)
+        self.document['payload_files'][binding.PROVENANCE] = fact(old_provenance)
+        self.document['payload_content_bytes'] += len(old_provenance) - len(raw)
+        with self.assertRaisesRegex(ValueError, 'installed-provenance'):
+            with self.payload(candidate=candidate):
+                self.fail('mixed build provenance accepted')
+
+    def test_unrecognized_candidate_does_not_read_payload(self):
+        with self.assertRaisesRegex(ValueError, 'unsupported-candidate'):
+            self.payload(candidate=replace(binding.CANDIDATE_1029, commit='0' * 40))
+        with self.assertRaisesRegex(ValueError, 'candidate-identity-type'):
+            self.payload(candidate={'version': '1.0.29'})
 
     def health(self):
         return dict(app_version=binding.VERSION, runtime_kind='frozen', mode='REAL',

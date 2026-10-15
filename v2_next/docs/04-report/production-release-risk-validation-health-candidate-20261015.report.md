@@ -127,3 +127,56 @@ guest 로컬 사본을 다시 검산했다. Python3.12.6 x64/Pillow12.3.0/psutil
 실제 화면의 시각적 상태·프레임 성능·장시간 현장 QA는 확인하지 않았다.
 다음은 동일 후보에 맞춘 제한 현장 진단 준비와 서버 로컬 전달이며,
 기존 서버 설치본·운영/롤백 기준·200ms 기준·출시 HOLD는 유지한다.
+
+## 2026-10-15 제한 진단의 설치본·요청 연결 구성요소
+
+`field_installation_binding.py`와 `field_configuration_binding.py`에 위 1.0.29의 정확한
+build/installer identity를 명시적으로 선택하는 경로를 추가했다. 기존 기본값은 1.0.28이며,
+입력 manifest에서 버전을 자동 선택하지 않는다. 다른 설치본·provenance·실행 버전의 혼합은
+거부한다. 기존 파일 잠금·추가 파일·hardlink/reparse 및 설정 fingerprint 검사는 유지한다.
+기존 사용자 운영 프로파일 승인은 계속 유효하지만, 새 build의 실제 설정 확인값에는 새
+fingerprint가 필요하다. 1.0.28 확인값을 복사해서 1.0.29 확인 근거로 사용하지 않는다.
+
+새 `field_health_diagnostic.py`는 한 health 진단 요청의 전후 process/listener와 외부에서
+확인한 backend 생성 FILETIME을 대조한다. 원문 body/header·요청 ID·native 시계를 엄격히
+검사한 뒤 정확한 build와 SPOT/logger 실행 세대가 같을 때만 `REQUEST_AND_RUNTIME_BOUND`를
+기록한다. 원문은 후속 검사 실패 때도 가능한 범위에서 보존한다. 느린 요청도 증거로 남기며
+이 상태에 성능 통과 의미를 부여하지 않는다.
+
+| 실행한 검사 | 결과·범위 |
+|---|---|
+| `test_field_installation_binding` | 25검사, exit0; 실제 Windows 잠금·process/listener 및 거부 조건 |
+| `test_field_configuration_binding` | 11검사, exit0; 제품 serializer·실제 파일/HTTP 및 설정 변경 |
+| `test_field_health_diagnostic` | 6검사, exit0; native/process/HTTP 합성 입력과 실제 strict timing 소비기 |
+| `test_field_generation_binding` | 8검사, exit0; 실제 Windows 환경/인증 loopback 및 비밀값 보존 방지 |
+| `test_field_observation` | 27검사, exit0; 실제 소유 job·중단/시간 제한/장애·잔존 처리 회귀 |
+| 마지막 Low Signal OFF 검사 보완 후 해당 메서드 재실행 | 1검사, exit0; 물리 NOT_TESTED/정식 HOLD 유지 |
+| 추출된 실제 1.0.29 payload의 새 identity 경로 검산 | 1,867파일/563,455,491bytes 잠금·종료 전 재대조; 이전 기본 경로는 거부 |
+
+총77개 서로 다른 검사, 마지막 재실행을 포함한 실행 수는78개다. 출시 lock의 Python을
+사용했다. 변경6파일의 프로젝트 설정 Ruff 및 `git diff --check`도 exit0였다.
+제품 코드와 설치본은 바뀌지 않아 전체 health·빌드를 반복하지 않았다.
+검사 stdout/stderr·종료 코드·환경·최종 소스47파일 사본과 원문 해시는
+`C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_BIND_20261015_bd4e31d6`에 보존했다.
+`record_verification.py` exit0은 보존 검사 기록의 일관성 확인이다.
+`verification.json`: 9,819bytes, SHA256
+`5c2f3e9004b7335e19dbe9297f6394c610b6940a9164253fc4cbf18fda08878d`.
+시험용 junction/hardlink 디렉터리는 재귀적으로 따라가거나 정리하지 않았다.
+
+### 현장 실행 전에 남은 연결 작업
+
+이 단계는 구성요소 검증이며 새 현장 실행 명령은 아직 없다. 새 진단 함수를 실제 앱에
+호출하는 통합 검사도 미실행이다. 기존 `field_runner`/관찰/종료 경로는 기존 1.0.28 대상으로
+남아 있어 그대로 새 후보의 현장 실행기로 사용하지 않는다.
+
+1. 설정 및 인증된 실행 세대 확인과 새 요청 함수를 소유 collector의 제한 시간·출력 보존에 연결한다.
+2. 이미 실행 중인 backend thread의 생성 세대와 ETW rundown을 연결하고, 요청 구간의 trace
+   coverage를 검증한다. 앞선 짧은 fixture의 시작·종료 event 요구를 장시간 실행 thread에
+   그대로 적용하지 않는다. native 생성 FILETIME은 ETW event timestamp를 대신하지 않는다.
+3. 독립 WPR 감시 프로세스의 소유권·시간 제한·종료/정리 절차를 새 수집기와 함께 검증한다.
+   기존 8초 로컬 시험 helper의 범위·제한을 조용히 늘리지 않는다. memory trace의
+   `EventsLost=0`만으로 요청 전 구간이 남았다고 판단하지 않는다.
+4. 원격 UI 가용성을 확인하고, 검증한 전체 묶음을 서버 로컬 최종 폴더까지 전달한다.
+
+이 단계에서 실제 앱/Windows 추적 실행·서버 조작·설치본 재생성은 없었다.
+기존 15분 FAIL/120분 미시작/물리 NOT_TESTED/출시 HOLD와 이전 전체 검토의 실패 기록을 유지한다.

@@ -78,8 +78,10 @@ def utc_timestamp(value):
     return stamp.timestamp()
 
 
-def review_snapshot(snapshot, expected=None):
+def review_snapshot(snapshot, expected=None, *, candidate=binding.CANDIDATE_1028):
     """Return every observed mismatch without coercing strings/bools into numbers."""
+    binding.require(type(candidate) is binding.CandidateIdentity, 'candidate-identity-type')
+    candidate.validate()
     issues = []
     if not isinstance(snapshot, dict):
         return dict(status='FAIL', issues=['configuration-object-missing'])
@@ -97,7 +99,7 @@ def review_snapshot(snapshot, expected=None):
                    if numeric else type(actual) is type(value) and actual == value)
         check(matches, 'approved-profile:' + key)
     check(snapshot.get('spot_config_revision') == 'spot-config-provenance-v1', 'revision')
-    check(snapshot.get('build_git_commit') == binding.BUILD, 'candidate-build')
+    check(snapshot.get('build_git_commit') == candidate.commit, 'candidate-build')
     for key in ('settings_file_sha256', 'spot_config_fingerprint_sha256', 'spot_config_verified_fingerprint_sha256'):
         check(isinstance(snapshot.get(key), str) and re.fullmatch('[0-9a-f]{64}', snapshot[key]), 'sha256:' + key)
     try:
@@ -149,7 +151,7 @@ def review_snapshot(snapshot, expected=None):
 
 
 @contextmanager
-def configuration_reference(path, expected_sha256):
+def configuration_reference(path, expected_sha256, *, candidate=binding.CANDIDATE_1028):
     """Hold the externally pinned bytes across the observation; never auto-attest."""
     binding.require(isinstance(expected_sha256, str) and re.fullmatch('[0-9a-f]{64}', expected_sha256),
                     'configuration-reference-external-hash')
@@ -166,7 +168,8 @@ def configuration_reference(path, expected_sha256):
             binding.require(value.get('field_sequence_approval_sha256') == FIELD_SEQUENCE_APPROVAL_SHA
                             and isinstance(snapshot, dict), 'field-sequence-approval-binding')
             snapshot = ReferenceSnapshot(snapshot)
-        binding.require(review_snapshot(snapshot)['status'] == 'PASS', 'configuration-reference-not-verified')
+        binding.require(review_snapshot(snapshot, candidate=candidate)['status'] == 'PASS',
+                        'configuration-reference-not-verified')
         yield snapshot
         binding.require(binding.stream_fact(stream) == dict(bytes=len(raw), sha256=expected_sha256),
                         'configuration-reference-changed')
@@ -181,13 +184,14 @@ def capture_configuration(payload, main, backend, port, sessions, expected):
         binding.require(main.exe == os.path.normcase(str(payload.root / 'smart-factory.exe'))
                         and backend.exe == os.path.normcase(str(payload.root / binding.BACKEND)),
                         'installed-process-path')
-        binding.require(review_snapshot(expected)['status'] == 'PASS', 'configuration-expectation-invalid')
+        binding.require(review_snapshot(expected, candidate=payload.candidate)['status'] == 'PASS',
+                        'configuration-expectation-invalid')
         result['process_before'] = binding.read_process_binding(main, backend, port)
         record, raw = http.fetch_sample(port, http.SPOT_CONFIG)
         result.update(configuration_record=record, configuration_body_hex=raw.hex())
         binding.require(record['request_success'], 'configuration-request-failed')
         snapshot = binding.strict_json(raw).get('image')
-        result['review'] = review_snapshot(snapshot, expected)
+        result['review'] = review_snapshot(snapshot, expected, candidate=payload.candidate)
         binding.require(isinstance(snapshot, dict)
                         and snapshot.get('spot_service_instance_id') == sessions['spot_service_instance_id'],
                         'configuration-spot-session')

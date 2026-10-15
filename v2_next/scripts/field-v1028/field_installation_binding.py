@@ -7,7 +7,7 @@ Locks cover ordinary file writes/deletes, not an adversarial writable parent tre
 from contextlib import ExitStack
 import ctypes
 from ctypes import wintypes
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -31,6 +31,24 @@ REFERENCE_SHA = 'a5de26c2db81c8d69418fd3e574d4180b2dd895ab94b9cbf064959369644af5
 BACKEND = 'resources/backend/SmartFactoryBackend.exe'
 PROVENANCE = 'resources/backend/_internal/backend/build_provenance.json'
 REQUIRED_FILES = {'smart-factory.exe', BACKEND, PROVENANCE, 'resources/app.asar'}
+
+
+@dataclass(frozen=True)
+class CandidateIdentity:
+    commit: str
+    version: str
+    installer_sha256: str
+    installer_bytes: int
+
+    def validate(self):
+        require(type(self) is CandidateIdentity and self in (CANDIDATE_1028, CANDIDATE_1029),
+                'unsupported-candidate-identity')
+
+
+CANDIDATE_1028 = CandidateIdentity(BUILD, VERSION, INSTALLER_SHA, 164618981)
+CANDIDATE_1029 = CandidateIdentity(
+    'acaf77d95101a050f4d3ecd76125d3502036f5a7', '1.0.29',
+    '3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7', 164824610)
 
 
 def require(condition, reason):
@@ -146,7 +164,11 @@ class InstalledPayload:
     hashes support isolated fixtures; this class alone grants no field approval.
     NSIS extras are allowed only with externally supplied exact names/bytes/SHA.
     """
-    def __init__(self, root, reference, *, expected_reference_sha256=REFERENCE_SHA, extras=None):
+    def __init__(self, root, reference, *, expected_reference_sha256=REFERENCE_SHA, extras=None,
+                 candidate=CANDIDATE_1028):
+        require(type(candidate) is CandidateIdentity, 'candidate-identity-type')
+        candidate.validate()
+        self.candidate = candidate
         self.root = Path(root)
         self.reference = Path(reference)
         self.expected_reference_sha256 = expected_reference_sha256
@@ -168,10 +190,11 @@ class InstalledPayload:
             require(hashlib.sha256(raw).hexdigest() == self.expected_reference_sha256,
                     'external-reference-hash')
             document = strict_json(raw)
-            require(document.get('candidate_commit') == BUILD and document.get('version') == VERSION
-                    and document.get('installer_sha256') == INSTALLER_SHA
+            candidate = self.candidate
+            require(document.get('candidate_commit') == candidate.commit and document.get('version') == candidate.version
+                    and document.get('installer_sha256') == candidate.installer_sha256
                     and type(document.get('installer_bytes')) is int
-                    and document['installer_bytes'] == 164618981, 'candidate-identity')
+                    and document['installer_bytes'] == candidate.installer_bytes, 'candidate-identity')
             files = document.get('payload_files')
             require(isinstance(files, dict) and 4 <= len(files) <= 5000, 'payload-file-count')
             require(type(document.get('payload_file_count')) is int
@@ -206,9 +229,9 @@ class InstalledPayload:
             require(os.fstat(provenance.fileno()).st_size <= 65536, 'provenance-byte-budget')
             info = strict_json(provenance.read())
             require(info.get('schema_version') == '1.0.0' and info.get('source') == 'clean_git_head'
-                    and info.get('git_commit') == BUILD, 'installed-provenance')
-            self.receipt = {'root': str(self.root), 'build_commit': BUILD, 'version': VERSION,
-                            'installer_sha256': INSTALLER_SHA, 'reference_sha256': hashlib.sha256(raw).hexdigest(),
+                    and info.get('git_commit') == candidate.commit, 'installed-provenance')
+            self.receipt = {'root': str(self.root), 'build_commit': candidate.commit, 'version': candidate.version,
+                            'installer_sha256': candidate.installer_sha256, 'reference_sha256': hashlib.sha256(raw).hexdigest(),
                             'verified_files': len(files), 'verified_extras': self.extras,
                             'verified_bytes': sum(v['bytes'] for v in self.specs.values()),
                             'started_ns': started, 'finished_ns': time.perf_counter_ns(),
@@ -258,15 +281,17 @@ def read_process_binding(main, backend, port):
     return {'main': asdict(main), 'backend': asdict(backend), 'listeners': listeners}
 
 
-def runtime_sessions(health, backend):
-    require(health.get('app_version') == VERSION and health.get('runtime_kind') == 'frozen'
+def runtime_sessions(health, backend, *, candidate=CANDIDATE_1028):
+    require(type(candidate) is CandidateIdentity, 'candidate-identity-type')
+    candidate.validate()
+    require(health.get('app_version') == candidate.version and health.get('runtime_kind') == 'frozen'
             and health.get('mode') == 'REAL', 'runtime-build-kind')
     require(isinstance(health.get('executable_path'), str)
             and os.path.normcase(health['executable_path']) == backend.exe, 'runtime-executable')
     require(health.get('frontend_source') == 'resources'
             and health.get('frontend_static_ready') is True, 'runtime-frontend')
     spot = health.get('spot_temperature')
-    require(isinstance(spot, dict) and spot.get('build_git_commit') == BUILD
+    require(isinstance(spot, dict) and spot.get('build_git_commit') == candidate.commit
             and spot.get('diagnostics_available') is True, 'runtime-build-commit')
     logger = spot.get('v2_4_operational')
     require(isinstance(logger, dict) and logger.get('enabled') is True, 'runtime-logger')
@@ -298,7 +323,7 @@ def capture_runtime_binding(payload, main, backend, port, *, expected_sessions=N
         # JSON wire bytes are retained exactly as hex, including failed/partial responses.
         result['health_body_hex'] = raw.hex()
         require(record['request_success'], 'health-request-failed')
-        result['sessions'] = runtime_sessions(strict_json(raw), backend)
+        result['sessions'] = runtime_sessions(strict_json(raw), backend, candidate=payload.candidate)
         result['process_after'] = read_process_binding(main, backend, port)
         require(result['process_before'] == result['process_after'], 'runtime-process-binding-changed')
         if expected_sessions is not None:
