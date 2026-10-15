@@ -423,3 +423,47 @@ native FILETIME의 전체 정밀도를 보존하며 CIM의 밀리초 표현, 부
 `identity-review-tests-r1` 및 `identity-review-tests-r1.log`에 보존한다. 두 새 Python 파일의
 Ruff `--isolated --select E9,F821`도 exit 0이다. 합성 fixture 검사이며 실제 현장 검증은 아니다.
 프로세스 식별자가 아직 없으므로 실행 가능한 6초 진단 요청은 발행하지 않았다.
+
+### 2026-10-16 00:53 KST native 식별 검증 완료와 6초 진단 요청 전달
+
+사용자 실행 후 서버 콘솔의 `LAUNCH_EXIT=0`, 결과 폴더 `R26e1eba94756`, result SHA
+`634be85660eb3addcfecdfe614ca8884893e882c0423629c226210b29f28fd4f`를 확인했다.
+원격 탐색기로 `Z:/SmartFactory/20261016/return/RI29_83cd8e83_0033`에 회수하고 위 근거
+루트의 `runtime-identity-R26e1eba94756`으로 복사했다. 콘솔 pin과 정확한 5파일의 크기·SHA가
+일치하며 실제 `review_health_runtime_identity.py` CLI는 exit 0이었다. 결과는
+`runtime-identity-review.json`이며 `CAPTURED_NATIVE_RUNTIME_IDENTITY_VERIFIED`다.
+
+관측 시각은 `2026-10-15T15:31:56.6876936Z`다. 메인 PID 14044의 native 생성 FILETIME은
+`134365457282319973`, backend PID 11520은 `134365457289141278`이다. 실행 경로·부모
+관계·listener·health logger `5618690a-6e8b-444f-a37c-e0cd63c94c85`가 일치한다. 원문 설정
+SHA `9901d4e3c11c8e0ebe1787d84343cd6db70b7f4dce992ef23c778eca712c21ac`도 유지됐다.
+이는 그 시각의 독립 OS 식별 검증이며, 향후 실행 시 생존 재확인과 실제 종료 증거를 대신하지 않는다.
+
+00:33:25 서버 화면에서 작업 정보 60143·13의 적용을 관찰했고 Codex는 값을 입력하지 않았다.
+00:35:59의 새 6 GET도 모두 HTTP 200/exit 0이며 같은 logger·build·CSV, drift 0과 유효한
+작업 정보를 확인했다. 승인 fingerprint 재계산 일치, Low Signal OFF, comparator false를
+유지했다. 새 설정 기준 `configuration.json` 2,056바이트의 SHA는
+`5040da7889b989f102e82de3ae62b802358f973096044900d99b4678e7063b3b`다.
+
+새 6초 요청 `HQ29_20261016_8a30af82`는 이 native PID·생성 시각과 설정·설치 payload를
+결합한다. request SHA는 `e1a6d651f26eed9306b77530b8d50bb66c295e4025dc5b0a2e546cd30f92d4f3`,
+명령 SHA는 `622fb511dac48ec1dccd030ffa0b69bcde141a9cd767d2cbc532695517951cce`다.
+기존 서버 `HD29_20261015_7e735e28/package-r1`을 그대로 사용하며 package manifest SHA
+`643d2da73d0d9c55973fd7bdaf0ac9b0ab6c068cf74d4607726dd0fedb8a7f5b`를 잠금 검증한다.
+도우미·제품을 재빌드하거나 설치·종료·설정 변경·전체 백업을 수행하지 않았다.
+
+준비 스크립트 exit 0, 두 준비/시간 표현 Python 파일의 Ruff exit 0이다. frozen source의
+관련 6모듈과 현재 모듈 바이트를 대조했고 기존 11파일 package의 membership·SHA도 일치했다.
+개발 PC의 소유한 PS5.1 프로세스로 native float와 psutil 7.2.2의 생성 시각 표현이 정확히
+일치함을 확인했다(exit 0). 정수 FILETIME을 Python에서 임의 재계산하지 않고 수집된 float를
+그대로 요청에 썼다. 32/64비트 진입점은 모두 관리자 권한 부족을 예상대로 거부했다
+(outer exit 0/child exit 1). 이는 개발 사전 검사이며 서버 추적 실행 성공이 아니다.
+
+새 7파일·360,160바이트의 개발/공유 사본 해시가 일치한다. 원격 탐색기로
+`C:/Users/user/Desktop/SmartFactory/HQ29_20261016_8a30af82`까지 복사하고 최종 절대경로와
+7파일, 기존 도우미 폴더, 메모장에 열린 `PINNED_HEALTH_DIAGNOSTIC_COMMAND.txt`를 확인했다.
+`health-request-server-delivery.json` SHA는
+`765441da91624003dfbb973832c31438269cd658d82c4359523490ba45a32d08`이다. 서버 로컬 SHA를
+회수해 검증한 것은 아니며 실행 시 pinned 검사가 남아 있다. 사용자에게 관리자 PowerShell
+1회 실행만 요청했다. 실행/추적 상관 검증·15분/120분·전체 데이터 QA는 미완료다.
+물리 경계 NOT_TESTED, 정식 출시·승격 HOLD를 유지하며 이번 턴은 실제 진전으로 기록한다.
