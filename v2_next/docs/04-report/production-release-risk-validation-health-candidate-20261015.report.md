@@ -346,3 +346,88 @@ fixture의 소수 표본이며, 현장200ms 기준·기존15분 실패를 대체
 
 제품 코드·installer·서버·롤백 기준은 그대로다. 전체 health·빌드는 반복하지 않았다.
 현장15분 FAIL/120분 미시작/물리 NOT_TESTED/출시 HOLD를 유지한다.
+
+## 2026-10-15 보호된 6초 진단 실행기 검증
+
+helper commit `4cf0f26bb1825efe1c2835f5648c44893a9d1f57`에
+`field_health_runner.py`와 `invoke-health-diagnostic.ps1`을 추가했다. 원문 request·설정·
+payload·소스·추적 프로파일을 실행 전에 새 보호 결과 폴더에 복사하고 같은 잠금 바이트를
+검증한다. 수집기는 소유 job 안에서, 추적 coordinator/guard는 독립 프로세스로 실행한다.
+두 결과 작성자의 종료와 로그 닫힘을 확인한 뒤 최종 manifest를 만든다. 기존 폴더 덮어쓰기,
+앱 시작/종료·설치·장비 설정 변경은 이 실행기의 기능에 포함되지 않는다.
+
+| 최종 상태 검사 | 실제 결과 |
+|---|---|
+| `python -m unittest discover -s scripts/field-v1028 -p test_field_health_runner.py -v` | 9검사 exit0. 보존 원문 사용·잠금, 잘못된 pin/세대/계약·출력 재사용 거부, 실패 전파 |
+| `test_health_entry_validation.py --output <새 폴더>` | PS5.1 6그룹 driver exit0. 정상 소유 job 종료 및 callback 실패 시 해당 job만 정리. 일반 권한·32비트 거부는 예상 child exit1 |
+| 선택 Python 3파일 Ruff | 프로젝트 설정 사용, exit0 |
+| 고정 실행 파일 빌드·설명 | PyInstaller exit0, frozen true, 후보 commit·6초·HOLD 일치 |
+| 오프라인 Sandbox의 실제 설치 앱 | 잘못된 package pin/프로세스 생성 세대는 exit1, WPR 시작 없음. 정상 caller/worker/coordinator/guard는 모두 exit0 |
+| 동일 실행 추적 | health3건의 loop/worker/collector 총9구간을 원문 XML의 독립 계산과 대조, 정수 구간 일치 |
+| 닫힌 CSV·이미지 검사 | validator4회 모두 exit0. wide CSV52/235행, 최종 누적 관측23·이미지60. 위치 필드 미입력 경고 보존 |
+| 최종 종료 확인 | 정확한 프로세스 생성 세대6개 및 고유 WPR instance 부재. 앱/backend 정상 종료4건 exit0, 강제 앱 종료 없음 |
+
+초기 PS 구문 검사는 줄바꿈 위치 오류로 exit1이었다. 해당 실패를 보존하고 구문을 수정한
+최종 소스로 PS6그룹과 실제 frozen 실행을 검증했다. Python 소스는 그 수정 전후 동일하다.
+새 외부 실행기를 WPR 수집 중 강제 종료하는 추가 실제 시험은 수행하지 않았다. 기존
+coordinator/guard의 다섯 종료 조건 검증과 새 실행기의 정상·사전 거부·소유 job 실패 검증을
+구분하며, 모든 조합의 장애 시험을 완료했다고 주장하지 않는다.
+
+정상 요청 시간은5.2837/13.8196/5.0781ms다. 합성 loopback 장비를 사용하는 격리 시험의
+소수 표본이며 현장 성능 기준 검증이 아니다. 선택43,957이벤트(CSwitch27,812/Ready14,293/
+Thread1,852)의 값·payload·순서가 일치하고 switch chain gap은0이었다. 전체 해석 오류
+1,859개와 unhandled142개가 남아 **INCOMPLETE_OR_UNUSABLE** 상태를 유지한다.
+요청 구간 연결은 현장 지연 원인이나 정확한 CPU 작업 시간 판정이 아니다.
+
+이번 설정 reference는 실행 전에 원본2,098bytes를 보존했다(SHA256
+`664c5d43f46e03d44250749371881ae771fd980254f616408669e7d345b7dd9d`).
+payload1,867개·uninstaller1개를 다시 검산했고 출력307파일/39,784,078bytes를 보존했다.
+최종 cold check 후 해당 Sandbox만 종료하고 사본 해시를 재확인했다. 앞선 Sandbox의 종료
+원인 미확정·cold 확인 누락 기록은 그대로 남으며 이번 결과로 소급 PASS하지 않는다.
+
+증거 루트: `C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_ENTRY_20261015_7e735e28`.
+`verification.json`: 11,000bytes, SHA256
+`64fb2e7fc2f985d1dfad99d0e7a17f7ba564854a0057bed195cc2253091a87b4`.
+`export_health.py`, `verify_health_windows.py`, `review_health_capture.py`,
+`finalize_matrix.py`, `record_verification.py`는 exit0였다. native/validator 로그와 반환값을
+보존했으며 wrapper 종료 코드는 Codex 실행 도구 관측으로도 확인했다.
+
+배포 준비 파일 `package-r1/manifest.json`은1,758bytes, SHA256
+`643d2da73d0d9c55973fd7bdaf0ac9b0ab6c068cf74d4607726dd0fedb8a7f5b`다.
+frozen 도우미는16,083,544bytes, SHA256
+`c6d6f5b3f6579f03602a622180a5ea55d8d8bee94163a809a49bd9f33fa3bb7c`다.
+제품 commit `acaf77d9`와 installer `3394a23d…`는 재빌드하지 않았다.
+
+12:57 KST 서버 GET6건은 모두200이며 실행 중1.0.28/`4cc7393e`, 제품60250·금형108,
+Low Signal OFF, 설정 drift 없음으로 관찰했다. 현재 작업값은 API·화면 관찰이며 새로운
+사용자 확인을 뜻하지 않는다. 실제 native 생성 세대와 설치 파일 전체는 이번 조회에서
+재검증하지 않았다. 서버에1.0.29 설치·진단 실행은 아직 수행하지 않았다.
+
+다음 순서: 고정 묶음을 서버 로컬로 전달 → 현재 실행 세대·설치 바이트 읽기 → 정상 종료와
+최신 닫힌 백업 검산 →1.0.29용 교체·보존 확인 → 새 실행 세대/설정으로 진단 request 발행.
+이전1.0.28 설치 helper나 격리 시험 request를 새 후보에 사용하지 않는다.
+현장15분 FAIL·120분 미시작·물리 NOT_TESTED·출시 HOLD와 승인된1.0.26 복귀 기준을 유지한다.
+
+### 같은 날 서버 로컬 전달·회수 검산
+
+`prepare_delivery.py` exit0으로 진단 package·기존 후보/복귀 installer·기준 자료19파일,
+345,514,402bytes를 새 `HD29_20261015_7e735e28` 폴더에 묶고 공유 사본 해시를 대조했다.
+Chrome 원격 데스크톱의 서버 탐색기로 아래 경로에 복사했으며 기존 파일 덮어쓰기 없이
+최종 절대경로와 최상위 파일·폴더를 확인했다.
+
+- 전달: `Z:/SmartFactory/20261015/send/HD29_20261015_7e735e28`
+- 서버 로컬: `C:/Users/user/Desktop/SmartFactory/HD29_20261015_7e735e28`
+- 서버 로컬에서 회수: `Z:/SmartFactory/20261015/return/HD29_COPY_7e735e28/HD29_20261015_7e735e28`
+
+서버 로컬 폴더를 탐색기에서 선택해 새 회수 위치로 복사하고 `verify_delivery_return.py`
+exit0으로19파일의 상대경로·크기·기본 스트림 SHA256이 원본과 같음을 확인했다.
+서버에서 native hash 명령을 실행한 것은 아니다. 회수 사본 바이트 검산과 화면 관찰을
+구분한다. 전송 manifest는3,430bytes/SHA256
+`f68763a586881bc146ba7c9df8dc68198d7eb5bfa5b2f232d2fb04c39db7a311`이다.
+로컬 증거 루트의 `server-delivery-verification.json`은4,895bytes/SHA256
+`84752184419bef7bebdc2e002b83acb48c044d4fab6df790f41539330ad9d650`이며 공유 `records/HD29_7e735e28`에도 보존했다.
+
+전달 상태는 **STAGED_NOT_READY_TO_EXECUTE**다. 현장 request·설치 명령은 아직 발행하지
+않았으며 위 체크리스트의 최신 native 확인·백업·1.0.29용 교체 절차가 남아 있다.
+탐색기를 닫은13:15 KST 화면에서 앱 Running과 제품60250·금형108을 다시 관찰했다.
+이번 전달로 서버 앱을 종료하거나 설치·설정을 변경하지 않았다.

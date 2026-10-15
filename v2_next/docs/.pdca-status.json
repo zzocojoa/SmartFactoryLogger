@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T02:26:47.009372+00:00",
+  "lastUpdated": "2026-10-15T04:15:32.641643+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Prepare a protected field caller/package around the now-tested same-run health/WPR modules. Pin and archive all source/package/profile/payload/configuration references before execution; keep collector job separate from the independent guard. Validate its own preparation/capture/finalization, error propagation, artifact collection and normal cleanup. Do not rewrite the original Sandbox final-cold gap: it disappeared after saved app/guard terminals and before the final cold check, cause unknown. The local 3 requests/9 raw-crosschecked windows do not establish whole-trace quality or field latency cause. Then check remote UI/current server state and deliver the complete pinned package to the server-local final path. Product acaf77d9/installer3394a23d unchanged; keep installed4cc, original15FAIL,200ms,120-not-started,physicalNOT_TESTED,HOLD and rollback baseline.",
+            "nextAction": "Exact package and candidate/approved rollback installers are now staged at server Desktop/SmartFactory/HD29_20261015_7e735e28; 19 files/345514402 bytes from the UI-selected server-local folder were returned to a new shared folder and SHA256-matched. No server native hash command or installation was performed. Prepare and validate the 1.0.29-specific read/normal-close/fresh-stream-backup/install/preservation procedure before asking for administrator execution. Do not reuse the old1.0.28 installer helper or Sandbox request. Bind a diagnostic request only after verified1.0.29 installation with fresh native generation/configuration. Preserve server4cc,field15FAIL,200ms,120-not-started,physicalNOT_TESTED,HOLD and approved541d rollback.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -12030,10 +12030,127 @@
               "physicalBoundary": "NOT_TESTED",
               "releaseGate": "HOLD",
               "promotionAllowed": false
+            },
+            "protectedHealthEntryStage": {
+              "recordedAt": "2026-10-15T04:08:43.961557+00:00",
+              "status": "PROTECTED_FROZEN_ENTRY_VERIFIED_IN_OFFLINE_SANDBOX",
+              "helperCommit": "4cf0f26bb1825efe1c2835f5648c44893a9d1f57",
+              "candidateCommit": "acaf77d95101a050f4d3ecd76125d3502036f5a7",
+              "installerSha256": "3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7",
+              "unitTests": 9,
+              "powershellGroups": 6,
+              "unitActualExit": 0,
+              "powershellActualExit": 0,
+              "ruffActualExit": 0,
+              "frozenBuildExit": 0,
+              "packageManifestSha256": "643d2da73d0d9c55973fd7bdaf0ac9b0ab6c068cf74d4607726dd0fedb8a7f5b",
+              "diagnosticRequests": 3,
+              "independentRawWindows": 9,
+              "selectedEvents": 43957,
+              "fullTraceQuality": "INCOMPLETE_OR_UNUSABLE",
+              "processingErrors": 1859,
+              "unhandledEvents": 142,
+              "actualNegativeControls": [
+                "bad-package-pin",
+                "bad-native-generation"
+              ],
+              "negativeActualExits": [
+                1,
+                1
+              ],
+              "negativeTraceStarted": false,
+              "normalEntryAndWorkerAndCoordinatorAndGuardExits": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "originalConfigurationArchivedBeforeExecution": true,
+              "closedDataValidatorExits": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "coldNativeGenerationsAbsent": 6,
+              "coldWprInstanceAbsent": true,
+              "sandboxDisposed": true,
+              "closedOutputFiles": 307,
+              "closedOutputBytes": 39784078,
+              "evidence": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_ENTRY_20261015_7e735e28\\verification.json",
+                "bytes": 11000,
+                "sha256": "64fb2e7fc2f985d1dfad99d0e7a17f7ba564854a0057bed195cc2253091a87b4"
+              },
+              "report": "docs/04-report/production-release-risk-validation-health-candidate-20261015.report.md",
+              "serverObservation": {
+                "observed_at_utc": "2026-10-15T03:57:39.489723+00:00",
+                "api_gets": 6,
+                "http_statuses": [
+                  200,
+                  200,
+                  200,
+                  200,
+                  200,
+                  200
+                ],
+                "version": "1.0.28",
+                "build": "4cc7393e1bafbf90a329726aed9470fe0daacb21",
+                "running": true,
+                "logger_id": "5122ad44-bc29-49d3-88c7-f622a3232732",
+                "spot_id": "f1ccda6b-117e-4ec5-a4c1-b8109fd815b3",
+                "product": "60250",
+                "mold": "108",
+                "current_job_source": "CURRENT_API_AND_REMOTE_SCREEN_NOT_NEW_USER_CONFIRMATION",
+                "fingerprint": "3ddc2e9080e7d804bdb1eb784d5136b38286c92dc927850c82d16a04732c7683",
+                "low_signal_enabled": false,
+                "config_drift": false,
+                "config_attestation_status": "verified",
+                "native_process_generation": "NOT_RECHECKED",
+                "installed_payload_files": "NOT_REHASHED",
+                "server_mutation": false,
+                "receipts": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_ENTRY_20261015_7e735e28\\server-read\\current-server-read\\receipts.json",
+                  "bytes": 1729,
+                  "sha256": "4f56124554b0e27eef4d9859273c52e2731eb16beaf6dd7c82c90e29bc6baa92"
+                },
+                "ui_observations": [
+                  {
+                    "time_kst": "2026-10-15T12:30",
+                    "source": "CUA screenshot tool observation",
+                    "running": true,
+                    "product": "60250",
+                    "mold": "108"
+                  },
+                  {
+                    "time_kst": "2026-10-15T12:51",
+                    "source": "CUA screenshot tool observation",
+                    "running": true,
+                    "product": "60250",
+                    "mold": "108"
+                  }
+                ]
+              },
+              "serverDelivery": "SERVER_LOCAL_COPY_UI_OBSERVED_AND_ROUNDTRIP_BYTES_VERIFIED",
+              "productCodeChanged": false,
+              "installerRebuilt": false,
+              "serverInstalled": false,
+              "fieldLatencyCause": "UNDETERMINED",
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "serverDeliveryEvidence": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_ENTRY_20261015_7e735e28\\server-delivery-verification.json",
+                "bytes": 4895,
+                "sha256": "84752184419bef7bebdc2e002b83acb48c044d4fab6df790f41539330ad9d650"
+              }
             }
           }
         }
-      }
+      },
+      "updatedAt": "2026-10-15T04:15:32.641643+00:00"
     }
   },
   "pipeline": {

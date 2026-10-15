@@ -2101,3 +2101,29 @@ coordinator exit1로 유지하면서 guard0/추적 정리를 확인했다. 제�
 `0384e5ab4b19e0f29d1fd4122b2f7f3ae2f15110032627dc45c223505f3e9e10`.
 남은 작업은 원문 기준을 선보존하는 보호된 현장 실행기·패키지 검증 및 서버 로컬 전달이다.
 실제 현장 성능/지연 원인 판정은 없으며15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.
+
+### 2026-10-15 보호된 진단 실행기와 frozen 묶음
+
+helper `4cf0f26b`는 실행 전에 request·설정 원문과 고정 package를 보호된 결과 폴더에
+보존하고, 소유 수집 job과 독립 WPR 감시기의 종료 후 결과를 확정한다. 단위9검사·PS6그룹·
+Ruff·빌드 exit0. 실제 오프라인 설치1.0.29에 새 실행 파일을 연결해 정상 caller/worker/
+coordinator/guard exit0, 잘못된 package pin·실행 세대는 추적 시작 전에 exit1로 거부했다.
+health3건/9구간은 독립 원문 계산과 일치했고 CSV·이미지 validator4회 exit0다.
+최종 프로세스6세대·고유 추적 부재, 출력307파일/39,784,078bytes를 확인한 후 Sandbox를 종료했다.
+
+전체 추적 품질은 해석 오류1,859개/unhandled142개로 INCOMPLETE_OR_UNUSABLE이다.
+현장 지연 원인·성능 PASS를 선언하지 않는다. 앞선 Sandbox의 마지막 확인 누락도 그대로 남긴다.
+근거 `PDCA_HEALTH_ENTRY_20261015_7e735e28/verification.json`, SHA256
+`64fb2e7fc2f985d1dfad99d0e7a17f7ba564854a0057bed195cc2253091a87b4`.
+12:57 KST 서버는1.0.28/4cc7393e Running, 제품60250·금형108로 관찰했으며 설치 변경은 없다.
+서버 전달 후 현재 실행 세대·설치 파일·최신 닫힌 백업과1.0.29용 교체 절차를 확인해야 한다.
+현장15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD 및 미서명 내부 운영 정책을 유지한다.
+
+진단 묶음·후보/복귀 설치본19파일/345,514,402bytes는 서버 로컬
+`C:/Users/user/Desktop/SmartFactory/HD29_20261015_7e735e28`까지 전달했다.
+화면에서 해당 경로와 파일을 확인하고 서버 로컬 사본을 새 공유 위치로 회수해 전체 기본
+스트림 SHA256을 원본과 대조했다(`verify_delivery_return.py` exit0).
+서버 native hash 명령 실행과는 구분하며 설치·진단 실행 준비 완료를 뜻하지 않는다.
+근거 `PDCA_HEALTH_ENTRY_20261015_7e735e28/server-delivery-verification.json`, SHA256
+`84752184419bef7bebdc2e002b83acb48c044d4fab6df790f41539330ad9d650`.
+최신 정상 종료/닫힌 백업과1.0.29용 교체 절차를 준비한 뒤 새 현장 request를 발행한다.
