@@ -225,3 +225,61 @@ native 생성 FILETIME과 진단 요청 함수를 연결했다. 기존 superviso
 thread의 ETW rundown/coverage 검증과 서버 로컬 전달이다. 이번 시험에서는 WPR와 서버를
 사용하지 않았다. 미서명 후보의 build/installer와 운영/롤백 기준은 유지하며 전체 health·
 빌드를 반복하지 않았다. 기존 15분 FAIL/120분 미시작/물리 NOT_TESTED/출시 HOLD는 그대로다.
+
+## 2026-10-15 실행 중 스레드의 ETW 구간 연결 검증
+
+`field_thread_coverage.py`에 native PID/TID·생성 FILETIME·QPC 경계와 선택된 ETW 이벤트를
+연결하는 순수 분석 함수를 추가했다. 정확한 외부 process 생성 세대와 동일한 전후 thread
+생성 세대를 요구하며, 추적 중 새로 생성된 thread와 추적 전부터 존재한 thread를 구분한다.
+후자의 Start event를 만들어 내지 않고, 구간 이후의 동일 PID/TID End 또는 DCEnd 기록을
+요구한다. 중복 lifecycle·다른 PID·모순된 Start·CPU 전환 누락·동시 실행·모호한 경계를 거부한다.
+
+DCStart/DCEnd는 추적 시작/종료 시 살아 있는 thread의 열거이며 생성/종료 시각을 뜻하지 않는다.
+근거: [Microsoft Thread event 설명](https://learn.microsoft.com/en-us/windows/win32/etw/thread-v2-typegroup1).
+native 생성 FILETIME을 ETW QPC로 치환하지 않는다. 모든 CPU의 전환 기록이 구간 앞뒤를
+포함해야 하며 `EventsLost=0`만으로 ring buffer의 구간 보존을 인정하지 않는다.
+CSwitch residency에는 미측정 DPC/ISR가 포함될 수 있으므로 정확한 thread CPU 시간으로
+보고하지 않는다. [Microsoft CSwitch 분석 옵션](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/cswitch).
+
+| 실제 검증 | 결과·한계 |
+|---|---|
+| `python -m unittest -v test_field_thread_coverage` | 11검사 exit0. 새/기존 thread, End/DCEnd, 재사용·PID/시계·구간 누락·loss·CPU 연속성 거부 |
+| 기존 고정 request trace 재분석 | 31구간. 기존 30구간과 추적 전에 생성된 main thread 1구간; 후자는 실제 End event로 연결 |
+| 새 오프라인 Sandbox 첫 기록 | capture/정리 exit0, 연결 검사는 exit1. CPU7–11의 첫 전환이 구간보다 늦어 거부; 원문 보존 |
+| 입력을 바꾼 두 번째 Sandbox 기록 | capture/정리 exit0. 구간 전후에 각 CPU에서 20ms의 제한된 spin/sleep을 수행한 fixture. 분석 기준은 동일 |
+| 두 번째 기록의 실제 DCEnd 연결 | 추적이 끝난 뒤에도 살아 있는 thread의 195.0097ms 구간 연결. residency40.0874ms, 나머지154.9223ms; CPU 시간·대기 원인 판정 아님 |
+| 독립 원문 XML 재검산 | per-thread switch-in/out 계산과 per-CPU 인접 event 계산의 정수 구간이 32구간 모두 동일, exit0 |
+| 최종 소스 Ruff | 프로젝트 루트 `pyproject.toml`로 선택2파일 exit0. 앞선 잘못된 `backend/pyproject.toml` 경로 호출은 lint 실행 전 exit1 |
+
+두 번째 기록의 선택9,696이벤트는 두 해석 경로에서 값·payload·순서가 일치했고 switch chain
+gap0이었다. 전체 tracerpt 해석 오류1,430개와 TraceEvent unhandled96개는 남아 있어 전체
+추적 품질은 **INCOMPLETE_OR_UNUSABLE**다. 선택 구간 연결을 전체 추적 품질 PASS로 바꾸지 않는다.
+격리 fixture는 관리자 권한으로 동작했고 CPU 전환을 추가했으므로 실제 앱 통합·일반 요청
+성능·현장 검증을 대신하지 않는다. 실제 현장에서 CPU가 조용하면 같은 coverage 거부가 발생할
+수 있다. 첫 실패를 지우거나 현장 수집에 부하 발생 코드를 자동 추가하지 않는다.
+
+호출자는 ETL·독립 crosscheck·원문 요청과 native anchor를 같은 실행의 해시로 먼저 묶어야 한다.
+아래 함수 자체는 그 파일 provenance를 대신하지 않는다.
+
+```python
+schedule = checked_schedule(verified_selected_rows, {begin["tid"]}, header["NumberOfProcessors"])
+window = join_native_window(schedule, begin, end, header,
+    expected_pid=externally_observed_pid,
+    expected_created_filetime=externally_observed_creation_filetime)
+```
+
+관련 프로세스6개의 정확한 생성 세대와 고유 WPR instance2개가 모두 사라졌음을 확인했다.
+출력93파일/4,277,034bytes를 검산하고 이번 Sandbox만 종료한 뒤 바이트가 같은지 확인했다.
+`finalize_sandbox.py`, `record_verification.py`는 각각 exit0였다. 단위 검사와 Ruff 기록은
+Codex 실행 도구의 실제 출력/종료 코드에서 보존한 관측 기록이며 별도 raw 콘솔 파일은 없다.
+실제 capture/export/독립 검산/종료 확인은 stdout·stderr·종료 코드 파일을 보존했다.
+
+증거 루트: `C:/Users/user/Desktop/SmartFactory/PDCA_THREAD_COVERAGE_20261015_6f9c9e24`.
+`verification.json`: 21,868bytes, SHA256
+`2cea6ae8a2b3b62e2c44514e04c3c65c42efd434100b3985dc3eb2894d36b647`.
+
+다음은 **실제 설치 앱의 health 수집과 WPR를 같은 실행으로 연결하는 외부 실행기**다.
+독립 guard의 새 계약·제한 시간·원문 보존·종료/정리 및 무부하 조건의 요청 coverage를 함께
+검증한 뒤 서버 로컬 전달을 진행한다. 기존8초 로컬 helper와 고정 증거는 변경하지 않았다.
+제품/설치본/서버 변경이 없어 전체 health·빌드는 반복하지 않았다. 실제 field15 FAIL,
+120분 미시작, 물리 NOT_TESTED, 지연 원인 미확정, 출시 HOLD와 기존 롤백 기준은 유지한다.

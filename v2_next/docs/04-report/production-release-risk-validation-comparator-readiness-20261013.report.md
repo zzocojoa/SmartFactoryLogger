@@ -2063,3 +2063,21 @@ native health 요청을 연결하도록 구현했다. 합성 실패8검사 exit0
 `8eadbbba7794a003c03fded89552a4570b55623305a78e20ea1414227bdc52a3`다.
 같은 실행 WPR·기존 thread coverage·보호된 서버 실행기와 전달은 아직 남아 있다.
 현장15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.
+
+### 2026-10-15 실행 중 thread의 ETW coverage 후속 검증
+
+새 순수 분석기는 native 생성 세대와 추적 종료의 End/DCEnd를 연결하고, CPU 전환 기록이
+요청 구간 앞뒤를 포함하는지 확인한다. 11검사와 Ruff exit0, 기존 trace31구간 및 새 격리
+trace1구간을 독립 원문 XML 계산과 대조해 정수 구간32개가 모두 일치했다.
+첫 격리 기록은 CPU7–11의 시작 coverage가 부족해 exit1로 거부했다. 실패를 보존하고,
+두 번째는 격리 fixture에 구간 전후 CPU별 전환만 추가해 DCEnd 연결을 검증했다.
+분석 조건은 완화하지 않았으며 이 부하를 실제 현장에 자동 적용하지 않는다.
+
+전체 trace 해석은 여전히 INCOMPLETE_OR_UNUSABLE이다. 선택 event9,696개의 일치와
+구간 연결을 실제 앱 성능·현장 지연 원인·전체 trace 품질 PASS로 사용하지 않는다.
+소유 프로세스/trace instance 부재와 출력93파일을 검산하고 Sandbox를 종료했다.
+근거 `PDCA_THREAD_COVERAGE_20261015_6f9c9e24/verification.json`, SHA256
+`2cea6ae8a2b3b62e2c44514e04c3c65c42efd434100b3985dc3eb2894d36b647`.
+같은 실행의 실제 health 수집/WPR 통합·보호된 서버 실행기·서버 전달이 다음 단계다.
+제품/설치본/서버와 기존15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD는 유지한다.
+상세 근거·사용 예·실패 한계는 [후보 검증 보고](production-release-risk-validation-health-candidate-20261015.report.md)에 기록했다.
