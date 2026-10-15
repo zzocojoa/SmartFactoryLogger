@@ -359,3 +359,47 @@ manifest는 row 0/hash null이며 linkage manifest는 미발행이다. 이 출�
 `506b51b956f551d5a851bdc42ede39a197f7ade1ec9608f07f54db39dde3b40c`다.
 새 감사 파일의 Ruff `--isolated --select E9,F821` exit 0. 제품·서버 데이터는 변경하지 않았고
 full_data_gate NOT_EVALUATED, 출시/승격 HOLD를 유지한다.
+
+### 2026-10-16 00:19 KST 자정 CSV 전환으로 읽기 요청 갱신
+
+사용자의 RI29 실행 완료 회신 후 서버 콘솔에서 `RUNTIME_READ_HOLD=health-csv`,
+`LAUNCH_EXIT=1`을 확인했다. 실패 화면과 새 근거는
+`C:/Users/user/Desktop/SmartFactory/PDCA_RUNTIME_IDENTITY_20261016_b589d341`에 보존한다.
+도우미는 health의 CSV 이름을 검사한 뒤 결과 폴더를 생성하므로 이 실패에서는 결과 폴더를
+생성하지 않는다. 설치·설정 쓰기·앱 종료·전체 백업을 수행하는 경로에도 진입하지 않았다.
+
+00:08 KST의 읽기 수집 6 GET은 HTTP 200/exit 0이다. 전후 health의 logger ID
+`5618690a-6e8b-444f-a37c-e0cd63c94c85`, 시작 시각 `2026-10-15T13:48:50.619743Z`,
+SPOT ID `74f42667-bfd7-41aa-81fb-71f3664aa206`, build acaf77d9는 유지됐다.
+CSV만 `Factory_Integrated_Log_v2_20261015_224850.csv`에서
+`Factory_Integrated_Log_v2_20261016_000000.csv`로 바뀌었다. 이는 날짜 변경 시 파일을
+닫고 새 파일을 여는 `FacilityData/repository.py`의 daily-rollover 동작과 일치한다.
+API 관측에서의 동일 실행 확인이며, 독립 OS 프로세스 생성 식별자는 아직 미확인이다.
+
+현재 소프트웨어 설정을 기존 검증기로 다시 대조한 결과 오류 0, 승인 fingerprint 동일,
+Low Signal OFF와 comparator 미확인 조건을 유지했다. 새 제한된 설정 기준은
+`current-configuration-reference.json` 2,056바이트, SHA
+`6a1a6622236f9286f18c65836c535060d0d4a1e2dee1595de4ed42cab52d374b`다.
+원문 설정 SHA는 기존 `9901d4e3…`를 요청에 유지하며 서버 도우미가 실행 시 재검사한다.
+현재 원문을 새로 회수해 대조했다는 의미는 아니다.
+
+새 묶음 `RI29_20261016_83cd8e83`은 이전 요청에서 `csv_name`만 변경했다.
+도우미 바이트 SHA `117d4bdb08c9b8b6db35ea32be94ae9e13083a984ed60fd4cfe3acf61d4ddb5e`는
+그대로이며 CSV/설정/실행 세대 검사를 완화하지 않았다. 새 request SHA는
+`7d473cc4d8f4aa284b39360699b3d5c395d3565db33d37ce4e632bda1e5f075e`, 명령 SHA는
+`bc229fdf1905434fad22e8894b3018e2ec413698ae42e28ddea126d71770d139`다.
+준비 스크립트 exit 0, Ruff `--isolated --select E9,F821` exit 0이며, 32/64비트 진입점
+각각 개발 host를 의도대로 거부했다(outer exit 0, child exit 1). 변경 없는 도우미의 기존
+11검사를 반복 실행하지 않았다. 이는 서버 실행 성공이나 현장 QA 통과가 아니다.
+
+5파일·19,214바이트의 개발/공유 사본 SHA를 대조했다. 공유 경로는
+`Z:/SmartFactory/20261016/send/RI29_20261016_83cd8e83`, 실제 서버 경로는
+`C:/Users/user/Desktop/SmartFactory/RI29_20261016_83cd8e83`다. 원격 탐색기로 최종 복사,
+절대경로·5파일·메모장에 열린 새 명령 본문을 확인했고 `server-delivery.json`에 기록했다.
+서버 로컬 SHA 자체는 아직 회수 검증하지 않았으며 잠긴 helper/request의 실행 시 pin 검사가
+남아 있다. 사용자에게 새 명령의 1회 실행만 요청했다. 앱은 Running이고 정식 출시/승격 HOLD다.
+
+00:13 이후 화면의 작업 정보는 필수값 미입력(최근 적용 00:08:15)이다. 이전 확인값
+60365·4를 현재값으로 자동 재적용하지 않았다. 이후 생산 작업값이 필요한 현장 검증 전에
+현재 값을 확인해야 한다. 사용자 회신으로 중단 대기를 재개했으며 이전 연속 blocked 횟수를
+이어 세지 않는다. 이번 턴은 원인 확인·요청 갱신·최종 전달의 실제 진전으로 기록한다.
