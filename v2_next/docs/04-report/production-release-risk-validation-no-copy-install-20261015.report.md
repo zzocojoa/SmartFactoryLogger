@@ -7,9 +7,10 @@
 저장 형식·설정 이관 변경은 없다. 기존 백업과 복귀 설치본은 보존한다.
 원본의 전후 해시 검사는 변경을 검출하지만 손실된 데이터를 복원하지 못한다.
 
-최신 상태(20:19 KST): 기존 설치 요청은 관찰 기록의 시간 제한으로 설치 전에 HOLD됐다.
-설치 직전 전수 재검산의 완료 시각을 기준으로 하는 수정 도우미를 격리 검증하고 서버에 전달했다.
-서버 설치는 아직 시작되지 않았으며, 아래 새 `PINNED_FRESH_INSTALL_COMMAND.txt` 실행을 기다린다.
+최신 상태(21:29 KST): 새 도우미의 서버 설치·전후 원본 보존 검토를 완료했다.
+실제 installer와 launcher exit 0, 설치 파일 1,868개·원본 313,365개·추가 스트림 680개 및 설정 불변을 확인했다.
+일반 사용자 바로가기로 1.0.29를 시작했고 수집 증가를 관찰했다. 새 빌드 attestation,
+현재 실행의 native 세대·정상 종료·데이터 내용 검사와 현장 성능 QA는 남아 있어 출시·승격 HOLD다.
 
 ## 변경과 실행 조건
 
@@ -153,3 +154,66 @@ Chrome 원격 탐색기로 서버의 `C:\Users\user\Desktop\SmartFactory\HP29_20
 새 요청은 실행 중 전수 재검산 완료 후 120초 조건을 검사한다. 종료 결과를 회수·검산할 때까지
 앱은 종료 상태로 유지한다. 새 전체 백업은 만들지 않으며 기존 복구 자료를 보존한다.
 서버 설치·설치 후 런타임은 아직 미검증이고 정식 출시와 운영 승격은 계속 HOLD다.
+
+### 2026-10-15 21:29 KST 실제 설치·보존 검토와 첫 실행
+
+사용자 실행 뒤 같은 콘솔에서 전후 전수 검사를 관찰했고, 21:16 KST에
+`RESULT_PATH=C:\Users\user\Desktop\SmartFactory\J644f98ad`, `LAUNCH_EXIT=0`을 확인했다.
+실제 installer PID 10868은 20:52:01부터 20:52:44 KST까지 실행돼 exit 0으로 끝났다.
+설치 전 재검산은 20:51:58 KST 완료됐으며 freshness 영수증은 1,981ms였다.
+원래 16:51 관찰 기록과 고정 manifest를 보존하고 실제 재검산 완료 시각을 사용했다.
+
+서버 탐색기로 완료 결과 23파일·2,257,832바이트를 아래 공유 위치에 회수하고
+개발 PC 사본과 파일별 크기·SHA256 및 콘솔 result pin을 대조했다.
+
+- 공유: `Z:/SmartFactory/20261015/return/HI29_FRESH_6f267a91/J644f98ad`
+- 개발: 위 `PDCA_INSTALL_FRESH_20261015_6f267a91/field-install-J644f98ad`
+- 콘솔/회수 result SHA256: `12efb1b8ec824e1ba0d40257618b9bd05dde1ff343ff3d4f350f713e0859e047`
+- `review-health-install.py` 실제 exit 0, 입력 영수증 22개·고정 controller/library/기준 자료,
+  원래 관찰·정상 종료 세대, 설치 시각·actual exit, 전후 전체 payload·등록·원본·설정 결합.
+  별도로 전후 uninstaller의 외부 고정 크기·SHA도 대조해 exit 0이었다.
+- 검토 `field-install-review-J644f98ad.json` SHA256:
+  `8a2949ca5edbd24dfa4da0674318e273636e20b56a4b68fe6842c427ff5e53a6`.
+
+원본 파일 313,365개·폴더 245개·추가 스트림 680개·14,590,063,063바이트의
+내용·목록·메타데이터가 설치 전후 같은 manifest와 일치했다. 설정 2,671바이트의 원문 SHA는
+`2f872a957b0899858a2f71a2c8b8928f3ef9f416ed04ce2ca7282f83adaf5fb4`로 같았다.
+새 전체 백업·설정 변경·자동 복귀는 없었다. 검토기는 실제 격리 설치 영수증과
+잘못된 pin·종료 코드·변조·만료·payload/config 불일치·중복 JSON 키 8조건으로 검사해 exit 0이었다.
+
+21:23 KST 일반 사용자 바탕화면 바로가기에서 시작한 앱의 Running 화면과 제품 60365·금형 4,
+GET 6건 HTTP 200, 실제 1.0.29/acaf77d9 packaged runtime을 관찰했다.
+`first-runtime-review.json`(SHA256 `359c95655f822a3b4b549bc645b0c7a62b6d9b82a4807e607ab4789a4ce2c964`)
+검토 exit 0: 승인 프로파일 필드와 canonical settings hash가 일치하며 지문 payload에서
+build commit만 이전 4cc로 바꾸면 기존 승인 지문이 재현된다. 현재 `fingerprint_mismatch`는
+새 build attestation 미적용 상태이며 이를 설정 확인 PASS로 바꾸지 않았다.
+
+21:28 KST 같은 logger/spot 세대의 후속 GET 2건은 HTTP 200이었다. API 보고상 CSV 1,512행,
+이미지 enqueued/written 333/333·queue/drop/failure 0, observation link/write failure 0이다.
+초기 startup_pending 17행·stale 198행과 writer 초기화 33,109ms는 후속 검토 대상으로 남긴다.
+첫 startup 전체 시간·현재 native PID/생성 FILETIME·실제 CSV/이미지 내용·정상 종료는 아직 검증하지 않았다.
+추가 GET `/api/log/status`는 기록용 POST 경로라 404/reader exit 1이었으며 실패 기록을 보존했다.
+지원되는 health/config 조회로 후속 관찰을 마쳤고, 이를 전체 15분/120분 성능 통과로 확대하지 않는다.
+
+### 2026-10-15 21:53 KST 첫 실행 종료 자료 수집 준비
+
+`scripts/field-v1028/observe-health-runtime-close.ps1`와 해당 PowerShell 검사를 추가했다.
+설계 5.19와 대조해 현재 build/logger/CSV/config pin, CIM-parent/listener/native handle 결합,
+450초 정상 종료 대기, 현재 CSV·metadata·설정의 제한된 읽기와 HOLD 범위를 확인했다.
+이번 실행에 설치·설정 쓰기·전체 백업·강제 종료는 없다. 저장 worker 영수증·파일 내용 QA와
+새 build attestation은 후속 작업이며, 이 도우미의 결과만으로 해당 조건을 통과시키지 않는다.
+
+실제 native PowerShell 5.1 x64에서 `test-health-runtime-close.ps1 -OutputParent <개발 검증 폴더>`
+8검사 exit 0이었다. parser·실제 자식 exit 23·잘못된 실행 경로·덮어쓰기/크기 예산·경로/스트림·
+active process/listener·요청 build/CSV·개발 PC 실행 거부를 포함한다. 32/64비트 명령 창의
+동일 launcher는 모두 native child까지 도달해 의도한 개발 host guard/LAUNCH_EXIT=1을 출력했다.
+이는 서버 정상 종료 실행 PASS가 아니며 실제 결과를 기다린다.
+
+5파일·17,724바이트를 `Z:/SmartFactory/20261015/send/RC29_20261015_804b2fcc`에 복사해
+개발 사본과 파일별 해시를 대조했다. 원격 탐색기로 서버 로컬
+`C:/Users/user/Desktop/SmartFactory/RC29_20261015_804b2fcc`까지 복사하고 절대경로·5파일 존재와
+메모장에 열린 `PINNED_RUNTIME_CLOSE_COMMAND.txt`를 확인했다. 서버 로컬 바이트는 실행 시
+잠긴 helper SHA `24523e09c0adc3385aea3117fe3fc8353d552ad435e8e04dff0d2b11f48b6656` 및
+요청 SHA `0a48997cdc9e336265de7c3edf87e1240a7b1d37504f757d09976decde277292`로 검사한다.
+현재 앱은 Running이며 작업 정보는 최근 적용 21:38:35 이후 필수값 미입력이다.
+이전 60365·4를 재적용하지 않았고 다음 재시작 시 현재 작업값을 확인해야 한다.

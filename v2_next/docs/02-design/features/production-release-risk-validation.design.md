@@ -553,3 +553,17 @@ manifest는 운영 루트 밖 새 보호 결과 폴더에 생성하고 외부 SH
 
 새 관찰/설치 경로의 검증이 끝나기 전에는 서버 명령을 발행하지 않는다.
 현장15분/120분, 물리 경계, 전체 데이터 오류 처리와 최종 운영 승격 조건은 유지한다.
+
+### 5.19 새 빌드 첫 실행의 제한된 정상 종료 수집
+
+`observe-health-runtime-close.ps1`는 1.0.29의 현재 logger·CSV·설정 원문 SHA를 외부 요청으로 고정한다.
+서버/SID/관리자/PS5.1 x64, CIM 부모 관계, 실행 경로와 8000 listener를 확인하고,
+각 프로세스의 native handle을 보유해 생성 FILETIME과 실제 종료 코드를 같은 OS 객체에서 얻는다.
+health와 전후 OS 관찰이 일치할 때만 READY를 출력하고 최대 450초 동안 정상 UI 종료를 기다린다.
+강제 종료·앱 시작·설치·설정 변경·전체 백업은 수행하지 않는다. 타임아웃·비정상 종료는 HOLD다.
+정상 종료 뒤 process/port 부재, 설정 SHA 불변, 동일 logger/build의 finalized shutdown metadata를
+확인한 후 현재 CSV(최대 128MiB)·metadata·설정과 영수증만 새 보호 결과 폴더에 보존한다.
+기존 결과 덮어쓰기와 reparse 경로를 거부하며 운영 사용자의 읽기 접근을 유지한다.
+이 단계는 파일 내용 QA·개별 저장 worker 종료 검토·새 build attestation을 대신하지 않는다.
+검증 예: `powershell.exe -NoProfile -File scripts/field-v1028/test-health-runtime-close.ps1 -OutputParent <개발 검증 폴더>`.
+실제 짧은 자식 프로세스의 exit 23을 포함한 로컬 native/계약 검사는 현장 정상 종료 통과와 구분한다.
