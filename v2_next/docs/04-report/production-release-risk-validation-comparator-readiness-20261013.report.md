@@ -2011,3 +2011,13 @@ verification.json SHA256 `0dac9b6afe931d3a5ebc4f3646dc55558663b557d12793274557f0
 진단 자체의 native 호출 비용도 경과 시간에 포함된다. 다음 단계는 clean source의 새 패키지와
 frozen/Electron 응답·정상 종료 검증 후 제한된 현장 진단 준비다. 기존4cc 설치본은 변경하지 않았다.
 15분FAIL·120분미시작·물리NOT_TESTED·전체 데이터 NOT_EVALUATED·출시HOLD를 유지한다.
+
+## 2026-10-15 1.0.29 패키지와 frozen backend 검증
+
+clean `acaf77d95101a050f4d3ecd76125d3502036f5a7`의 새 미서명 후보를 빌드했다.
+설치본 SHA256은 `3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7`이다.
+출시 lock 전체 health exit0, 추가 진단10검사 exit0, 추출 payload1,867파일 대조와
+frozen backend 일반1/진단4요청·정상 exit0을 확인했다. 기존 private F01 skip1건은 남아 있다.
+Electron 실제 실행·설치/복구·현장 검증은 다음 단계이며 출시HOLD를 유지한다.
+상세 원문·해시·검증 한계와 실행 체크리스트는
+[1.0.29 후보 검증 보고](production-release-risk-validation-health-candidate-20261015.report.md)에 기록했다.

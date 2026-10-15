@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T00:59:37.564433+00:00",
+  "lastUpdated": "2026-10-15T01:26:20.022511+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-15T00:59:37.564433+00:00"
+        "lastUpdated": "2026-10-15T01:26:20.022511+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Native health v2 producer and strict consumer are source-verified, including separate-process external process creation checks and shared perf/QPC offset bounds. Prepare a new clean-source candidate package and validate actual frozen/Electron v2 response and normal cleanup in isolation; preserve installed 4cc candidate and all old pinned evidence. Bind eventual diagnostic to exact payload/listener/session/native backend generation and same-run ETW coverage; existing controller/request trace tests need no repetition. Remote UI availability must be restored before server-local delivery can be completed. Do not relax200ms, rerun unchanged15 merely for PASS, start120 or promote. Actual field cause and R1-R6 remain unresolved.",
+            "nextAction": "Exact clean acaf77d9 candidate 1.0.29 installer SHA3394a23d is built, payload/signature/source/release-lock and frozen backend native health/normal exit verified. Next validate this same installer in isolated install/upgrade/restart/recovery and actual Electron lifecycle; then prepare bounded field diagnostic with exact payload/listener/session/native generation and same-run ETW coverage. Preserve installed 4cc candidate and prior immutable evidence. Remote UI availability was not rechecked this turn and is needed for server-local delivery. Do not rerun completed R5/request trace or unchanged15 merely for PASS, relax200ms, start120 before prerequisites or promote. R1-R6 remain open.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11761,6 +11761,42 @@
               "packageBuild": "NOT_RUN",
               "installedCandidateChanged": false,
               "etwCoverage": "NOT_EVALUATED",
+              "fieldLatencyCause": "UNDETERMINED",
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "healthCandidateBuildStage": {
+              "recordedAt": "2026-10-15T01:26:20.022511+00:00",
+              "status": "CLEAN_V1029_PACKAGE_AND_FROZEN_HEALTH_VERIFIED",
+              "version": "1.0.29",
+              "candidateCommit": "acaf77d95101a050f4d3ecd76125d3502036f5a7",
+              "installer": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_BUILD_20261015_268acb39\\source\\v2_next\\dist\\smart-factory-logger-v2 Setup 1.0.29.exe",
+                "bytes": 164824610,
+                "sha256": "3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7"
+              },
+              "payloadFiles": 1867,
+              "backendManifestFiles": 1740,
+              "fullHealthExit": 0,
+              "backendTests": 931,
+              "privateF01Skip": 1,
+              "releaseTimingTests": 10,
+              "frozenDiagnosticRequests": 4,
+              "frozenOrdinaryRequests": 1,
+              "frozenNativeExit": 0,
+              "forceUsed": false,
+              "evidence": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_BUILD_20261015_268acb39\\candidate-verification.json",
+                "bytes": 27272,
+                "sha256": "1546a16e44dc87b665d79795d9daaf8be78edf273328b1c43e36e6d32475c21b"
+              },
+              "report": "docs/04-report/production-release-risk-validation-health-candidate-20261015.report.md",
+              "electronLifecycle": "NOT_EVALUATED",
+              "installerExecution": "NOT_RUN",
+              "serverMutation": false,
               "fieldLatencyCause": "UNDETERMINED",
               "field15Status": "FAIL",
               "canary120Started": false,

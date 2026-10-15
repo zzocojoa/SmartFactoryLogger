@@ -113,7 +113,7 @@ executor 대기/worker 처리/event loop 복귀를 새 진단 응답에서 구�
 | `scripts/validate_csv_v2_shadow.py` 및 전수 검증 도우미 | 스키마별 CSV 검증, 이미지 실물·해시·전체 디코딩·양방향 연결 검사 |
 | SPOT 이미지 큐·저장·종료·보존 기간 처리 및 관련 회귀시험 | 과거 15건 원인 추적과 확인된 원인의 재발 방지 |
 | 기존 미서명 빌드/NSIS 패키징 경로(`scripts/deploy.ps1`, `npm run dist`)·패키지 검사 도구 | 최종 clean commit·payload·provenance·installer SHA256 및 실제 `NotSigned` 상태 검증 |
-| root/frontend/backend 버전 정보 및 출시 기록 | 필요한 경우 `1.0.27` 후보의 버전 일치와 태그 충돌 검사 |
+| root/frontend/backend 버전 정보 및 출시 기록 | 후보별 버전 일치와 태그 충돌 검사. 현재 새 패키지 후보는 `1.0.29`이며 설치된 `1.0.28`과 구분 |
 | 후보 검증·실제 적용 후 보고서, 운영본·롤백 기준 문서 | 실행별 판정과 증거 연결, 최종 승격 후 기준 갱신 |
 
 위 파일명이 상대경로인 항목은 `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next` 기준이다. 보존한 서명 workflow는 상위 Git 저장소의 `.github/workflows`에 있으며 이번 내부 운영의 실행 경로에서 제외한다. 원인 분석 결과가 계획 범위를 벗어나는 변경을 요구하면 실행 전에 계획 변경 절차를 따른다.
