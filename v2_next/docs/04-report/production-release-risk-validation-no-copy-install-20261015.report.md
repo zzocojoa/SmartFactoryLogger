@@ -53,6 +53,19 @@ Chrome 원격 탐색기로 서버의 `C:\Users\user\Desktop\SmartFactory\HP29_20
 화면 확인을 서버 바이트 검산으로 표시하지 않는다. 증거는 `server-delivery-ui.json`,
 `server-local-path.jpg`, `server-observe-files.jpg`에 보존했다. 구현 commit은 `0879ff82`다.
 
-서버 앱은 Running이고 수동 관찰 명령 실행을 기다린다.
+위 전달 확인 당시 서버 앱은 Running이고 수동 관찰 명령 실행을 기다렸다.
+
+### 2026-10-15 16:16 KST 진행 기록
+
+사용자의 실행 완료 응답 뒤 서버 콘솔의 `READY_FOR_NORMAL_APP_EXIT`를 확인했다.
+앱 창의 X로 정상 종료를 요청했고 `O3aa2e84e`에서 원본 관찰 검사가 진행 중이다.
+회수한 Electron 로그에는 15:57:50 KST backend 10724의 종료 코드 0, forced=false가 기록됐다.
+종료 영수증의 이미지 76,114건은 모두 저장됐고 대기·진행 작업은 0이다.
+당일 CSV 250,085행의 순번 연속성과 마지막 순번 361155의 종료 metadata 일치를 확인했다.
+이는 회수 자료의 예비 검토이며, 아직 콘솔 고정 해시와 최종 원본 manifest에 결합하지 않았다.
+검토 도구 실제 exit 0, `field-close-preliminary-review.json` SHA256:
+`3c2d918c1e2db29f6cf4dbb461285ee5646c97dd153883cbebb09b1816664f56`.
+새 전체 백업은 만들지 않았다. 원본 검사 완료·결과 회수·정상 종료 근거의 최종 결합이 남았다.
+
 1.0.29 서버 설치·설치 전후 원본 보존은 아직 미실행이다. 현장 15분 실패 이력,
 미실행 120분, 물리 경계 미시험, 전체 데이터 QA와 운영 승격 HOLD는 유지한다.
