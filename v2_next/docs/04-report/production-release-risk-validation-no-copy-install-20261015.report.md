@@ -467,3 +467,59 @@ SHA `9901d4e3c11c8e0ebe1787d84343cd6db70b7f4dce992ef23c778eca712c21ac`도 유지
 회수해 검증한 것은 아니며 실행 시 pinned 검사가 남아 있다. 사용자에게 관리자 PowerShell
 1회 실행만 요청했다. 실행/추적 상관 검증·15분/120분·전체 데이터 QA는 미완료다.
 물리 경계 NOT_TESTED, 정식 출시·승격 HOLD를 유지하며 이번 턴은 실제 진전으로 기록한다.
+
+### 2026-10-16 07:34 KST 진단 준비 실패 회수와 제거 파일 기준 보완
+
+사용자 실행 후 콘솔의 `LAUNCH_EXIT=1`과 반환된 입력 프롬프트를 확인했다. 원격 탐색기로
+서버 `C:/Users/user/Desktop/SmartFactory/He6b46286e1a2`를 공유 return 경로로 회수했다.
+이번 근거 루트는 `C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_DIAG_REVIEW_20261016_e660e47d`다.
+`recovered-He6b46286e1a2`의 28파일·16,831,438바이트는 공유 사본과 일치하며, 내부 파일 pin과
+기존 request/package pin 대조도 통과했다(exit 0). launcher SHA는
+`e087d94c35c859e720ea09841bc3a23c791048c9ae906c7325577b0f4ebbda64`다.
+콘솔의 `RESULT_PATH`·`LAUNCHER_SHA256` 두 줄은 위쪽으로 밀려 보이지 않아 사용자에게
+복사를 요청했다. 외부 콘솔 pin 대조는 아직 미완료이며 `recovery-review-provisional.json`에
+이 한계를 명시했다. 회수 자료를 콘솔 결합 검증 완료로 취급하지 않는다.
+
+회수 자료의 worker 오류는 `ValueError: exact-installed-file-set`이다. health 표본은 0개이며
+trace coordinator 시작 전 중단됐다. worker/runner exit 1, 소유 job 정리 후 active 0,
+강제 종료 요청 false다. 성능이나 추적 품질을 판정할 수 없으며 실패를 유지한다.
+
+Codex가 작성한 기존 준비 스크립트가 `extras={}`로 요청을 만들었다. 기존 설치 검증 기록은
+payload 1,867파일 외에 NSIS가 생성한 `Uninstall smart-factory.exe` 1개를 포함한다.
+이 제거 파일의 크기 234,261바이트와 SHA
+`37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921`을 요청에서 누락했다.
+기존 설치 result/request 외부 pin과 22개 근거 파일을 실제 검토기로 재검산했다(exit 0).
+`installed-files.json` SHA는
+`e04075e539b57b26ae66b4668106a533502e8eb22187b9eb7bda2b758e9769c5`다.
+현재 서버 설치 폴더의 전체 일치는 새 실행에서 다시 확인해야 한다.
+
+새 `prepare-field-health-request-r2.py`는 이 검증된 설치 기록에서 추가 파일을 도출하고,
+정확한 이름·크기·해시와 payload 전체가 일치하는지 준비 단계에서 검사한다.
+기존 요청·도우미·제품 바이트는 보존했다. 개발 PC의 6개 검사(exit 0)는 빈 extras의 동일 오류,
+정확한 extras의 통과, 잘못된 해시·알 수 없는 추가 파일·누락 파일·허용되지 않은 extras 및
+후보 identity 혼합 거부를 확인했다. 합성 fixture 검사이며 현장 통과를 뜻하지 않는다.
+준비 스크립트 실행과 Ruff `--isolated --select E9,F821`도 exit 0이다.
+32/64비트 진입점은 관리자 권한 부족을 예상대로 거부했다(outer 0/child 1).
+
+07:28:34 KST의 6 GET은 모두 HTTP 200/exit 0이며 동일 logger·build·CSV와 drift 0을
+확인했다. 현재 작업 60313·1은 04:06:08 KST 적용된 서버 관측값이며 Codex는 변경하지 않았다.
+승인된 소프트웨어 설정 fingerprint와 Low Signal OFF, comparator false는 유지됐다.
+새 설정 기준 SHA는 `0680d00095d550558c09ad1287e73eabe6e2c68f3de19153caf6931673783ada`다.
+기존 native PID/생성 시각을 유지하되 도우미가 실행 시 생존·생성을 재검사한다.
+
+새 요청은 `HQ29R2_20261016_ba3d7ba8`, request SHA
+`35678cea550647c804ad091d33c4e5a56bc20fd87222f85ffdfcf82b1fcc5b3a`, 명령 SHA
+`55a97c2d64405bdafbb5f5f7b7f8fc5d8c7a535075c52e1c9849330e77a67b41`다.
+9파일·1,096,382바이트를 `Z:/SmartFactory/20261016/send/HQ29R2_20261016_ba3d7ba8`에
+복사하고 개발/공유 사본을 검산했다. 이 시점에는 서버 로컬 최종 전달이 남아 있다.
+설치·앱 종료·설정 변경·전체 백업은 수행하지 않았다. 현장 상관 분석과 15분/120분 QA,
+전체 데이터 QA 및 물리 경계 검증은 미완료다. 정식 출시·승격 HOLD를 유지한다.
+
+07:37 KST에 원격 탐색기로 서버의 실제
+`C:/Users/user/Desktop/SmartFactory/HQ29R2_20261016_ba3d7ba8`까지 최종 복사를 마쳤다.
+절대경로·9파일과 메모장에 열린 새 request 경로·hash를 확인했다.
+`health-request-server-delivery-r2.json` SHA는
+`2aafaed04e5322faa12549a9efcc8cbbe56880c11ea53533a7b94c3111042a33`이다.
+서버 로컬 hash 회수 검증은 아직 수행하지 않았으며 실행 시 pinned 검사가 남아 있다.
+사용자에게 R2의 관리자 실행과 결과 세 줄을 요청했다. 이전 실패 결과의 외부 콘솔 pin 확인은
+별도로 미완료로 유지한다. 이번 턴은 실제 진전이며, 재개 전의 blocked 횟수를 이어 세지 않는다.
