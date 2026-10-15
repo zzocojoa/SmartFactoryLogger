@@ -73,7 +73,15 @@ $review.schema='sfl-field-preinstall-close-review-v1';Reject {ValidateObservatio
 $review.normal_shutdown_observed=$false;Reject {ValidateObservation} 'normal-shutdown-review' 'absence-alone-not-normal-close';$review.normal_shutdown_observed=$true
 $review.failed_checks=@('worker-not-drained');Reject {ValidateObservation} 'normal-shutdown-review' 'reject-failed-close-check';$review.failed_checks=@()
 $review.logger_service_instance_id='other';Reject {ValidateObservation} 'logger-generation' 'reject-other-logger';$review.logger_service_instance_id='fixture-logger'
-$observation.time=[DateTimeOffset]::UtcNow.AddHours(-4).ToString('o');Reject {ValidateObservation} 'observation-freshness' 'reject-stale-observation';$observation.time=[DateTimeOffset]::UtcNow.ToString('o')
+$observation.time=[DateTimeOffset]::UtcNow.AddHours(-4).ToString('o');ValidateObservation;Pass $true 'old-reviewed-baseline-eligible-for-mandatory-full-reverification'
+$observation.time=[DateTimeOffset]::UtcNow.AddMinutes(5).ToString('o');Reject {ValidateObservation} 'observation-time-in-future' 'reject-future-observation';$observation.time=[DateTimeOffset]::UtcNow.ToString('o')
+$fresh=[pscustomobject]@{freshness_clock=[Diagnostics.Stopwatch]::StartNew()}
+Assert-HealthReverificationFreshness $fresh;Pass $true 'fresh-monotonic-reverification-window'
+Reject {Assert-HealthReverificationFreshness $fresh 120001} 'preinstall-reverification-freshness' 'cannot-extend-reverification-window'
+Start-Sleep -Milliseconds 20
+Reject {Assert-HealthReverificationFreshness $fresh 1} 'preinstall-reverification-freshness' 'reject-expired-monotonic-window'
+$fresh.freshness_clock.Stop();Reject {Assert-HealthReverificationFreshness $fresh} 'preinstall-reverification-freshness' 'reject-stopped-verification-clock'
+$fresh.freshness_clock=$null;Reject {Assert-HealthReverificationFreshness $fresh} 'preinstall-reverification-freshness' 'reject-missing-reverification-clock'
 $observation.totals.Files=-1;Reject {ValidateObservation} 'original-preservation-totals' 'reject-negative-count';$observation.totals.Files=4
 
 $text="[SPOT]`r`nlow_signal_alarm_enabled = false`r`nlow_signal_comparator_verified = false`r`n[OTHER]`r`nvalue = 보존 시험`r`n"

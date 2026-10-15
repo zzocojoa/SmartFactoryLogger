@@ -53,7 +53,26 @@ function Assert-ClosedObservation($Observation,$Review,[string]$Root,[string]$Re
     Require ($Review.logger_service_instance_id -ceq $Observation.preceding_logger_service_instance_id) 'close-review-logger-generation'
     Assert-HealthCloseGeneration $Observation $Review
     $age=([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($Observation.time)).TotalMinutes
-    Require ($age -ge -1 -and $age -le 180) 'observation-freshness'
+    # The original timestamp remains provenance. Installation requires a new full
+    # verification below, even when this reviewed baseline is less than 180 minutes old.
+    Require ($age -ge -1) 'observation-time-in-future'
+}
+
+function Invoke-HealthOriginalReverification($Engine,[string]$ManifestPath,[string]$ManifestSha,$ExpectedTotals) {
+    AssertCold (ColdSnapshot)
+    $started=[DateTimeOffset]::UtcNow.ToString('o')
+    $verified=$Engine.Verify($ManifestPath,$ManifestSha.ToUpperInvariant())
+    Assert-ObservationTotals $verified $ExpectedTotals
+    Require ($verified.ManifestSha256.ToLowerInvariant() -ceq $ManifestSha) 'reverification-manifest-pin'
+    AssertCold (ColdSnapshot)
+    return @{totals=$verified;started_at_utc=$started;finished_at_utc=[DateTimeOffset]::UtcNow.ToString('o');
+        freshness_clock=[Diagnostics.Stopwatch]::StartNew()}
+}
+function Assert-HealthReverificationFreshness($Verification,[int]$LimitMs=120000) {
+    Require ($LimitMs -gt 0 -and $LimitMs -le 120000 -and
+        $Verification.freshness_clock -is [Diagnostics.Stopwatch] -and
+        $Verification.freshness_clock.IsRunning -and
+        $Verification.freshness_clock.ElapsedMilliseconds -le $LimitMs) 'preinstall-reverification-freshness'
 }
 
 function Get-HealthInstallPins {
@@ -227,9 +246,10 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     $guard=[Action]{AssertCold (ColdSnapshot)}
     $progress=[Action[string,long,long,long]]{param($phase,$bytes,$files,$elapsed) Write-Host ('VERIFY phase='+$phase+' files='+$files+' bytes='+$bytes)}
     $engine=[SflColdObservationV1.Observer]::new($Roots,$guard,$progress)
-    $preverified=$engine.Verify($observationRoot+'\observed.tsv',$Request.observation_manifest_sha256.ToUpperInvariant())
-    Assert-ObservationTotals $preverified $observation.totals
-    SaveJson 'original-data-before-install' $preverified
+    $script:phase='preinstall-original-data-reverification'
+    $reverification=Invoke-HealthOriginalReverification $engine ($observationRoot+'\observed.tsv') $Request.observation_manifest_sha256 $observation.totals
+    SaveJson 'original-data-before-install' $reverification.totals
+    $script:phase='preinstall-configuration-and-freshness'
     SaveJson 'installer-inputs' @{candidate=(Fact $candidate);rollback=(Fact $Request.rollback_installer);signature_policy='UNSIGNED_INTERNAL'}
     $configPath=$Roots[0]+'\config.ini'
     Require ((Fact $configPath).sha256 -ceq $Request.config_sha256) 'preinstall-config-pin'
@@ -239,6 +259,14 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     Require ((Fact ($script:resultRoot+'\config-before.ini')).sha256 -ceq $Request.config_sha256) 'captured-config-pin'
     AssertCold (ColdSnapshot)
     Assert-ObservationInstallSpace $Factory
+    SaveJson 'original-data-before-install-freshness' @{baseline_observation_time=$observation.time;
+        baseline_observation_result_sha256=$Request.observation_result_sha256;
+        baseline_manifest_sha256=$Request.observation_manifest_sha256;
+        full_reverification_started_at_utc=$reverification.started_at_utc;
+        full_reverification_finished_at_utc=$reverification.finished_at_utc;
+        elapsed_since_reverification_ms=$reverification.freshness_clock.ElapsedMilliseconds;
+        maximum_elapsed_ms=120000;full_original_reverification_completed=$true}
+    Assert-HealthReverificationFreshness $reverification
     $script:phase='installer';Invoke-HealthInstaller $candidate
     $script:phase='installed-payload';AssertCold (ColdSnapshot)
     SaveJson 'installed-files' (Get-HealthPayloadFacts $InstallRoot $newReference '1.0.29')

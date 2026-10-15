@@ -7,6 +7,10 @@
 저장 형식·설정 이관 변경은 없다. 기존 백업과 복귀 설치본은 보존한다.
 원본의 전후 해시 검사는 변경을 검출하지만 손실된 데이터를 복원하지 못한다.
 
+최신 상태(20:19 KST): 기존 설치 요청은 관찰 기록의 시간 제한으로 설치 전에 HOLD됐다.
+설치 직전 전수 재검산의 완료 시각을 기준으로 하는 수정 도우미를 격리 검증하고 서버에 전달했다.
+서버 설치는 아직 시작되지 않았으며, 아래 새 `PINNED_FRESH_INSTALL_COMMAND.txt` 실행을 기다린다.
+
 ## 변경과 실행 조건
 
 - `cold-data-observation.cs`: 두 원본 루트의 기본/추가 NTFS 스트림, 파일/폴더 목록,
@@ -92,7 +96,60 @@ Chrome 원격 탐색기로 서버의 `C:\Users\user\Desktop\SmartFactory\HP29_20
 서버 로컬 바이트 검산은 실행 시 고정 해시 검사로 남으며 화면 관찰로 대신하지 않는다.
 전달 근거는 `server-observed-install-delivery.json`과 해당 경로/메모장 화면이다.
 
-현재 사용자 PowerShell 실행을 기다린다. 앱은 종료 상태이며 설치는 아직 시작하지 않았다.
+이 전달 당시 사용자 PowerShell 실행을 기다렸다. 앱은 종료 상태이며 설치는 시작하지 않았다.
 관찰 결과의 유효 시간 180분을 적용하므로 오늘 19:40 KST 이후에는 실행 전에 상태를 다시 확인한다.
 실패하면 자동 재실행하지 않는다. 새 전체 백업 생략은 전체 데이터 의미 검증 완료나
 현장 성능·물리 경계·출시 HOLD 해소를 뜻하지 않는다.
+
+### 2026-10-15 19:54 KST 설치 전 HOLD 확인
+
+서버 콘솔에서 `Ja72cb21d`, `INSTALL_HOLD=observation-freshness`, `LAUNCH_EXIT=1`을 확인했다.
+결과 6파일을 서버 탐색기로 `Z:/SmartFactory/20261015/return/HI29_HOLD_738bf0e0`에 회수하고
+개발 PC 사본과 크기·SHA256을 대조했다. 콘솔과 회수 `hold.json`의 SHA256은
+`ab7081d086f14e9ccd93a8af87c8499c0b6c64623d86b2046167006c28216b68`로 일치했다.
+실제 검토 exit 0이며 입력 5파일의 고정 해시도 일치했다. 설치는 시작하지 않았고 설정도 변경하지 않았다.
+실패 근거는 `field-install-hold-review-Ja72cb21d.json`, SHA256
+`8b153bc795301628e860e5f06dd88aea52144da5020af63998aeafbc41ad209a`다.
+
+### 2026-10-15 20:19 KST 전수 재검산 기준 수정·전달
+
+관찰 시각 자체는 그대로 보존하고, 설치 직전 원본의 내용·목록·추가 스트림·메타데이터를
+고정 manifest와 전수 대조하도록 했다. 재검산 전후 앱·포트 부재를 확인하며,
+재검산 완료 후 단조 시계로 120초 이내에만 설치를 시작한다. 원본 변경, 미래 관찰 시각,
+앱 실행 또는 재검산 후 지연은 설치 전에 차단한다. 구 결과의 시각이나 해시를 다시 쓰지 않는다.
+
+예: 4시간 전 정상 종료 관찰 결과라도 지금 전수 대조가 성공하면 설치할 수 있다.
+기본 파일 본문이나 NTFS 추가 스트림이 한 바이트라도 바뀌면 설치하지 않는다.
+
+근거 루트: `C:/Users/user/Desktop/SmartFactory/PDCA_INSTALL_FRESH_20261015_6f267a91`.
+
+| 검사 | 결과와 범위 |
+|---|---|
+| `test_install_health_observed.ps1` | native PS5.1 x64, exit 0, 54 checks. 미래 시각·만료/정지/누락된 단조 시계·120초 초과 한도 거부, 기존 pin·정상 종료·실제 자식 종료 코드 검사 포함 |
+| 실제 격리 설치 `trial-r2` | host CLI·guest·NSIS 모두 exit 0. 4시간 전 기준으로 1.0.28 1,815파일 → 1.0.29 1,868파일 교체 |
+| 변조 차단 | 기본 파일 본문과 이름 있는 추가 스트림 변경 2조건 모두 `preinstall-original-data-reverification`에서 설치 전 차단 |
+| 보존과 유효 시각 | 합성 파일 4개·폴더 3개·추가 스트림 3개·210바이트 및 설정 불변. 전수 재검산 뒤 460ms 시점 영수증, 허용 한도 120,000ms |
+| 격리 환경 정리 | 프로세스·포트 부재 확인 후 해당 Sandbox 종료, 62파일·5,943,516바이트 보존, 강제 앱 종료 없음 |
+| `validate-field-package.ps1` | native PS5.1 x64 exit 0. 새 6파일 pin, 실제 종료 세대/관찰 결과, request 계약, bootstrap 구문 확인 |
+
+첫 격리 시도는 기본 본문 변경 차단을 확인한 뒤 시험 파일 복원 과정에서 빈 추가 스트림이
+없어진 것을 검출해 중단됐다. 시험 fixture가 빈 스트림도 복원하도록 수정한 새 격리 환경에서
+위 두 변조 차단과 실제 설치를 완료했다. 실패 기록도 보존했다. 제품 설치본은 재빌드하지 않았다.
+이 시험은 합성 자료를 사용하므로 실제 서버 설치나 앱 시작·정상 종료 검증을 대신하지 않는다.
+
+- 최종 controller SHA256: `61dc38efee5d107e9292fb585e00cbfb6ce9b917c0abcea04c31f3d3dbcd90eb`
+- request SHA256: `ce5cc05ac641eeb40ce008ea721ae661b0f7a0261227aa8661d347d055064ee7`
+- 격리 transaction result SHA256: `3251a6f4a98738790b80c012304fd122a7ae597d7bc9ed5f0688cb6c287e8f60`
+- 격리 보존 manifest SHA256: `2c78d096842a24c34efbff189ac74fbf5c8ff7d86201f57f958c91773a9dc487`
+
+새 6파일·67,419바이트를 `Z:/SmartFactory/20261015/send/HI29_FRESH_20261015_6f267a91`에
+전달·검산한 뒤 서버 `C:/Users/user/Desktop/SmartFactory/HI29_FRESH_20261015_6f267a91`로
+탐색기 복사했다. 실제 절대경로·6파일을 확인하고 `PINNED_FRESH_INSTALL_COMMAND.txt`를 메모장에 열었다.
+서버 로컬 바이트 검산은 새 bootstrap 실행 시 수행하며 화면 확인으로 대신하지 않는다.
+증거는 `server-fresh-package-path.jpg`, `server-fresh-command-ready.jpg`, `server-delivery.json`이다.
+
+사용자 실행은 새 명령 본문 전체를 관리자 PowerShell에 붙여넣고 Enter를 한 번 누르는 단계다.
+시작 표시는 `REVERIFY_BEFORE_INSTALL_START`다. 이전 19:40 제한은 구 요청에만 적용되며,
+새 요청은 실행 중 전수 재검산 완료 후 120초 조건을 검사한다. 종료 결과를 회수·검산할 때까지
+앱은 종료 상태로 유지한다. 새 전체 백업은 만들지 않으며 기존 복구 자료를 보존한다.
+서버 설치·설치 후 런타임은 아직 미검증이고 정식 출시와 운영 승격은 계속 HOLD다.
