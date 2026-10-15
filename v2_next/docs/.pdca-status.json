@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T04:54:23.164019+00:00",
+  "lastUpdated": "2026-10-15T05:29:21.263283+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -12223,11 +12223,52 @@
               "fieldLatencyCause": "UNDETERMINED",
               "releaseGate": "HOLD",
               "promotionAllowed": false
+            },
+            "healthFieldBackupStage": {
+              "recordedAt": "2026-10-15T05:29:21.263283+00:00",
+              "status": "FIELD_BACKUP_PREFLIGHT_CAPACITY_HOLD_NO_APP_EXIT",
+              "serverResultPath": "C:\\Users\\user\\Desktop\\SmartFactory\\Qc940b7",
+              "serverBackupInvoked": true,
+              "serverBackupCompleted": false,
+              "serverAppStopped": false,
+              "serverInstalled": false,
+              "capacity": {
+                "observed_at_utc": "2026-10-15T05:14:50.0189090Z",
+                "source_files": 313731,
+                "source_directories": 245,
+                "source_named_streams": 680,
+                "source_bytes_including_named_streams": 14548242608,
+                "required_free_bytes": 29318147061,
+                "actual_free_bytes": 24326463488,
+                "copy_root": "C:\\Users\\user\\Desktop\\SmartFactory\\Qc940b7\\c",
+                "capacity_reserve_met": false,
+                "full_data_gate": "NOT_EVALUATED"
+              },
+              "shortageBytes": 4991683573,
+              "reviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_INSTALL_20261015_9c43d21a\\field-capacity-hold-review.json",
+              "reviewSha256": "91bb06ff511db82be23432ea8e07ef4a2d60ddc41ef2d7490668db372107e6ce",
+              "returnedFilesChecked": 5,
+              "serverNativeConsoleExitObserved": false,
+              "bindingScope": "UI-selected server-local folder copied to share; share and development copy default-stream hashes match",
+              "storageObservation": "Explorer This PC showed C: and NAS Z:; no other local drive shown.",
+              "largeFileSearch": "SmartFactory size:>1GB returned three spot_image_fact CSVs; no safe duplicate deletion established; not a complete disk inventory.",
+              "dataDeletedOrMoved": false,
+              "capacityRequirementReduced": false,
+              "storageQuestionPending": "Availability of server-connectable external SSD/HDD with at least 30 GB free.",
+              "jobConfirmationPending": true,
+              "observedOperatorMetadataValid": false,
+              "operatorMetadataUpdatedAt": "2026-10-15T05:01:07.785992Z",
+              "nextAction": "Resolve storage capacity/destination, validate any changed path contract, then recheck capacity in a fresh backup run. Do not close app or install before actual READY and verified cold backup. Current product/mold still required.",
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }
       },
-      "updatedAt": "2026-10-15T04:54:23.164019+00:00"
+      "updatedAt": "2026-10-15T05:29:21.263283+00:00"
     }
   },
   "pipeline": {

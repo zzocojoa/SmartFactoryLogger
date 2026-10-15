@@ -517,3 +517,54 @@ SHA256 `aed1be3763d89621d493af7b54fbe590facf5bcd82c8bf0f64c8505492794478`이다.
 유지한다. `READY_FOR_NORMAL_APP_EXIT`를 즉시 알려 주면450초 대기 안에 Codex가 앱을
 정상 종료한다. 오류 시 재실행하지 않는다. 이 직접 실행 단계는 computer-use 필수
 guidance의 “Do not automate terminal applications” 규칙에 따른다.
+
+### 서버 최신 백업: 용량 사전 검사 HOLD
+
+사용자의 실행 완료 응답 후 실제 서버 콘솔의 증가하는 inventory 진행을 확인했다.
+새 결과 `C:/Users/user/Desktop/SmartFactory/Qc940b7`은 2026-10-15 14:14:50 KST에
+`live-capacity-and-path-preflight`에서 `Single-copy capacity reserve not met before
+normal shutdown.`으로 중단됐다. 앞 절의 사용자 실행 대기는 해소됐지만 백업 완료가 아니다.
+
+| 사전 검사 | 실제 값 |
+|---|---|
+| 원본 파일 / 폴더 / 이름 있는 추가 스트림 | 313,731 / 245 / 680 |
+| 추가 스트림 포함 원본 크기 | 14,548,242,608bytes |
+| 보존 여유분 포함 필요 공간 | 29,318,147,061bytes |
+| C: 사용 가능 공간 | 24,326,463,488bytes |
+| 부족분 | 4,991,683,573bytes (약4.99GB) |
+
+기존 식 `ceil(source_bytes * 1.1 + (files + directories + streams) * 8192 + 10GiB)`을
+독립 재계산해 필요 공간과 일치함을 확인했다. 조건은 완화하지 않았다. 이는 실행 중 원본의
+이름·크기 조사이며 닫힌 사본의 내용 검증이나 전체 데이터 QA가 아니다.
+
+READY 기록과 사본 `c` 폴더가 없고 결과는 사전 검사/중단 JSON 5파일뿐이다.
+앱 정상 종료·백업 payload 복사·설치 프로그램 실행은 시작되지 않았다. hold의 일반 필드
+`partial_copy_preserved=true`를 실제 데이터 복사 근거로 사용하지 않는다. native 콘솔의
+최종 종료 코드·결과 해시는 관찰하지 못했으며 종료 코드0이나 콘솔 pin 일치를 주장하지 않는다.
+
+서버 탐색기에서 결과 폴더를 선택해 `Z:/SmartFactory/20261015/return/HB29_9c43d21a/Qc940b7`으로
+회수했다. 개발 PC의 `server-capacity-hold-Qc940b7` 사본과 공유 사본의 5파일 크기·기본 스트림
+SHA256을 대조했다. `field-capacity-hold-review.json` SHA256은
+`91bb06ff511db82be23432ea8e07ef4a2d60ddc41ef2d7490668db372107e6ce`이다.
+증거 루트는 앞 절의 `PDCA_HEALTH_INSTALL_20261015_9c43d21a`와 같다.
+`finalize_capacity_hold.py` exit0으로 회수 사본5파일·용량 식·상태 JSON 왕복을 검증하고
+기록3개를 공유 records에 같은 해시로 보존했다. `capacity-hold-verification.json` SHA256은
+`c6bc4da04f7b9569552b966280d25789b0f5add768ec0c97cfc9b0fbe9c916d3`이다.
+
+현재 앱1.0.28/4cc는 Running이다. 사전 native 기록은 main10068/backend10724 및 각각
+2026-10-14T07:43:45.0354100Z/07:43:46.1890860Z 생성 시각을 확인했다.
+14:08 KST 읽기 전용 GET6건은 모두200, logger5122ad44/SPOTf1ccda6b 세대가 유지됐다.
+작업 정보는14:01:07 KST 이후 필수값 미입력으로 관찰돼 현재 제품·금형을 사용자에게
+요청했다. 이전60250·108이나 화면의 입력 예시12345·123을 실제 작업값으로 재사용하지 않는다.
+
+탐색기의 내 PC에는 C:와 Z: NAS만 표시됐다. SmartFactory에서 `size:>1GB`로 검색한
+3파일은 `spot_image_fact` CSV로, 삭제 가능한 중복으로 검증되지 않았다. 이 UI 검색은 전체
+디스크 목록 조사나 삭제 승인 목록이 아니다. 파일 삭제·이동·권한 변경은 하지 않았다.
+여유 공간30GB 이상의 외장 SSD/하드를 서버에 연결할 수 있는지 확인 중이다. 다른 저장
+위치를 사용하려면 원본/추가 스트림/메타데이터와 새 경로 계약을 먼저 검증한다.
+
+다음 체크: 공간 확보 방법 확정 → 필요한 경로·도우미 검증 → 현재 용량 재확인 → 새 실행의
+READY 이후에만 정상 종료·전체 사본 검산 → 새 close review와 설치 request 발행.
+현재 명령을 그대로 재실행하거나 NAS를 검증 없이 사본 경로로 대체하지 않는다.
+제품 코드·installer·롤백 기준은 그대로이며 현장15분 FAIL·120분 미시작·물리 NOT_TESTED·
+출시 HOLD를 유지한다.
