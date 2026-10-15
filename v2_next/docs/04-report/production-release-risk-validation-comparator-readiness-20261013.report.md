@@ -1899,3 +1899,52 @@ fixture 실패 시 스레드 종료와 transport 복구, 다른 실행/해시/�
 coordinator SHA는 `7880ca458d06e68e472d3381e9748f20094c6572ac6a3242439aa34052a64bde`다.
 제품/설치본 변경 없음, R5 재실행 없음, 서버203ms 원인 미확정,
 15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.
+
+
+## 2026-10-15 요청9건과 같은 실행의 추적 연결 완료
+
+단일 요청·추적 시험은 사용자 LAUNCH_EXIT0, 일반 권한 fixture actualexit0로 끝났다.
+콘솔 summary SHA `418bb1e427be44bc0f72d43002973865996f2512538ad7c5a32cd74c79605f69`를
+실제 잠금 파일과 대조했다. 실행은 `T280f593dda00`, fixture40816/controller9620/guard2536이며,
+세 프로세스 부재·소유 추적 정리·WPR5명령 actualexit0·강제 종료 없음과36개 보존 사본 해시를 확인했다.
+요청9건은 동일 run ID·PID/생성 FILETIME·lease/ready/결과 해시로 결합됐다. R5 재실행은 하지 않았다.
+
+tracerpt raw/report 내보내기와 기존 TraceEvent 해독기는 각각exit0였다.
+전체107519사건 중 선택105393사건(CSwitch60904, Ready36811, thread lifecycle7678)의
+QPC·CPU·opcode/version·선택 payload/식별자가 전수 일치했고 CPU별 순서도 일치했다.
+CSwitch 연결 불일치0, 시각 역전0, 관찰 TID 재사용0이다.
+그러나 원래 tracerpt에는 processing error7685·provider GUID 누락·opaque payload가 있고,
+대체 해독기의 unhandled742도 남아 있다. 전체 품질 INCOMPLETE_OR_UNUSABLE을 보존한다.
+EventsLost/BuffersLost0은 전체 사건 누락이 없다는 증명으로 사용하지 않는다.
+
+클라이언트 TID43380과 서버 TID45656의 실제 Thread/Start·End가 동일 PID40816으로 기록됐다.
+두 스레드의 native 생성 FILETIME은 수집 시간 범위에 있고, 반복 native 식별자는 일치한다.
+각 요청의 QPC 주파수10MHz·양끝 CPU 배정 구간·스레드 생존 구간·12개 CPU의 전후 사건 포함을
+검사했다. native FILETIME을 ETW의 event timestamp와 같다고 주장하지 않는다.
+
+| 시험 조건(각3건) | 요청 벽시계 시간 ms | 클라이언트 CSwitch 배정 구간 ms | 배정 구간 밖 ms |
+| --- | ---: | ---: | ---: |
+| 일반 요청 | 1.0260–1.5887 | 0.7766–1.0331 | 0.2494–0.5556 |
+| 서버80ms대기 | 81.4734–81.8685 | 0.8964–0.9542 | 80.5770–80.9143 |
+| 클라이언트 CPU 지연 | 87.9230–90.4784 | 86.2397–89.4136 | 0.6437–1.6833 |
+
+위 배정 구간은 CSwitch 전환 사이 시간이다. DPC/ISR을 빼지 않았으므로 정확한 thread CPU
+작업 시간으로 표시하지 않는다([Microsoft CPU 분석](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/cpu-analysis)).
+배정 구간 밖 시간을 ready 대기·서버 대기·GIL/lock 대기로 자동 분류하지 않는다.
+native thread CPU 경계 카운터는 세 CPU 주입 요청 모두93.75ms로 벽시계보다 커서,
+짧은 구간의 정확한 CPU 합계로 사용할 수 없음을 실제 결과에도 명시했다.
+같은 Python GIL을 공유하는 합성 시험이며 현장203ms 지연 원인 검증을 대신하지 않는다.
+
+새 구간 계산의10개 회귀 조건이exit0였다. 누락된 switch, 시간 역전, CPU간 중복 배정,
+CPU 누락, 다른 PID, 생존 구간 이탈, 실행 중 아닌 경계, TID 재사용 등을 거부했다.
+별도로 raw XML의 대상 스레드별 in/out 전환을 누적해 JSONL의 CPU별 인접 사건 계산과
+요청/서버/주입30구간을 대조했고, 모든 세부 구간이 일치했다(exit0). 선택 Ruff exit0.
+제품 코드는 변경하지 않아 제품 전체 health/build와 설치 시험은 반복하지 않았다.
+
+증거: `C:/Users/user/Desktop/SmartFactory/PDCA_REQUEST_TRACE_20261015_5d90d5a4`.
+`request-correlation.json` SHA256은
+`d204a8e0b7ec9a9a654201930ac6910a92097c4d70f00f5936c3e7c42a02f470`이며,
+원문·해독·구간 계산·독립 검증 파일 사실은 correlation-verification.json에 기록했다.
+관리자 실행 요청은 완료됐고 같은 명령을 다시 실행하지 않는다.
+다음은 이 방법의 한계 안에서 collector 스케줄링과 backend 응답 시점을 분리하는 제한된 현장 진단 준비다.
+15분FAIL·120분미시작·물리NOT_TESTED·전체 데이터 NOT_EVALUATED·출시HOLD는 유지한다.

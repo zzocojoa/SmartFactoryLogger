@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T00:10:15.896495+00:00",
+  "lastUpdated": "2026-10-15T00:20:48.374328+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-15T00:10:15.896495+00:00"
+        "lastUpdated": "2026-10-15T00:20:48.374328+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Start the pinned unelevated nine-request fixture, bind a create-new request and admin command to its actual PID/creation FILETIME and 600-second arming deadline, then ask the user to execute the prepared command in independent administrator PowerShell. Verify the same capture, owned cleanup, hashes and native request/thread/QPC coverage before scheduler attribution. No R5 rerun or field QA pass is implied.",
+            "nextAction": "The single local request trace completed with user/fixture exit0, same-run request windows and closed client/server lifetimes verified. Do not repeat R5 or the completed fixture. Preserve full tracerpt quality INCOMPLETE_OR_UNUSABLE, unhandled events and non-CPU attribution limits. Use this checked method to design the smallest bounded field diagnostic separating collector scheduling from backend response timing for the 203.1356ms health event and image overruns; require stable backend/collector generations and owned cleanup. Do not rerun unchanged 15-minute QA, relax thresholds, start canary120 or promote. Field cause remains unresolved.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11554,6 +11554,165 @@
                   "sha256": "01283865d1993e0326a7a3761dbbbf69d5958c283da08d94da2d0f8ee5f15200"
                 }
               }
+            },
+            "requestTraceArmedStage": {
+              "status": "FIXTURE_ARMED_AWAITING_ADMIN_CAPTURE",
+              "observed_at_utc": "2026-10-15T00:11:26.049386+00:00",
+              "live_generation_verified": true,
+              "fixture_pid": 40816,
+              "fixture_created_filetime": "134364966773127817",
+              "request_expires_utc": "2026-10-15T00:20:27.560747+00:00",
+              "fixture_expires_utc": "2026-10-15T00:21:17.560747+00:00",
+              "plan": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\package-readiness-r1.json",
+                "bytes": 3619,
+                "sha256": "30d7dc46596d2083bab3bd8fb267c49d238c25df86d72d12265f9995b96b8909"
+              },
+              "armed": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\trial-e89883ec\\fixture\\armed.json",
+                "bytes": 1017,
+                "sha256": "3a62cd5885d9c6160b7d82ff88223c55b5cec7e7815252f0e1ace764fc310125"
+              },
+              "request": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\trial-e89883ec\\fixture\\join-request.json",
+                "bytes": 839,
+                "sha256": "007aa70affd35a64f42ba203917c9e07fb5bde23b97a0650532a3f10535ca334"
+              },
+              "command": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\PINNED_REQUEST_TRACE_COMMAND_R1.txt",
+                "bytes": 1513,
+                "sha256": "d5ddbd4cef02de85a868d02edfb66b76dda943602f86240cb24ed398dea34faa"
+              },
+              "actual_etw_started": false,
+              "field_gate": "NOT_EVALUATED",
+              "release_gate": "HOLD",
+              "promotion_allowed": false
+            },
+            "requestTraceCorrelationStage": {
+              "recordedAt": "2026-10-15T00:20:48.374328+00:00",
+              "status": "LOCAL_REQUEST_TRACE_CORRELATION_VERIFIED_WITH_LIMITS",
+              "runId": "e010d84cb09b4e429c9672b483108760",
+              "traceRunPath": "C:\\Users\\user\\Desktop\\SmartFactory\\T280f593dda00",
+              "userLaunchExit": 0,
+              "fixtureLaunchExit": 0,
+              "fixturePid": 40816,
+              "controllerPid": 9620,
+              "guardPid": 2536,
+              "processesAbsent": true,
+              "cleanupConfirmed": true,
+              "wprCommandExits": [
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "copiedFiles": 36,
+              "selectedEventsMatched": 105393,
+              "totalEvents": 107519,
+              "cswitchEvents": 60904,
+              "readyEvents": 36811,
+              "selectedOrderMatched": true,
+              "cswitchChainBreaks": 0,
+              "selectedTimestampReversals": 0,
+              "requestCount": 9,
+              "closedNativeClientAndServerLifetimes": true,
+              "correlationRegressions": 10,
+              "independentWindows": 30,
+              "independentSegmentsMatched": true,
+              "clientRanges": [
+                {
+                  "case": "baseline",
+                  "count": 3,
+                  "wall_ms": [
+                    1.026,
+                    1.5887
+                  ],
+                  "cswitch_residency_ms": [
+                    0.7766,
+                    1.0331
+                  ],
+                  "outside_residency_ms": [
+                    0.2494,
+                    0.5556
+                  ]
+                },
+                {
+                  "case": "server_sleep",
+                  "count": 3,
+                  "wall_ms": [
+                    81.4734,
+                    81.8685
+                  ],
+                  "cswitch_residency_ms": [
+                    0.8964,
+                    0.9542
+                  ],
+                  "outside_residency_ms": [
+                    80.577,
+                    80.9143
+                  ]
+                },
+                {
+                  "case": "client_cpu",
+                  "count": 3,
+                  "wall_ms": [
+                    87.923,
+                    90.4784
+                  ],
+                  "cswitch_residency_ms": [
+                    86.2397,
+                    89.4136
+                  ],
+                  "outside_residency_ms": [
+                    0.6437,
+                    1.6833
+                  ]
+                }
+              ],
+              "completeTraceQuality": "INCOMPLETE_OR_UNUSABLE",
+              "processingErrors": 7685,
+              "unhandledEvents": 742,
+              "declaredEventsLost": 0,
+              "declaredBuffersLost": 0,
+              "exactCpuWork": "NOT_EVALUATED",
+              "offCpuReason": "NOT_EVALUATED",
+              "fieldLatencyCause": "UNDETERMINED",
+              "nativeCpuCounterExceedsWallInThreeInjectedRequests": true,
+              "evidence": {
+                "capture": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\capture-review.json",
+                  "bytes": 17967,
+                  "sha256": "a65417604f18d702d9a5a522d4c6419736cc7c527fc59f42cb79e8741fc85661"
+                },
+                "crosscheck": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\request-crosscheck.json",
+                  "bytes": 5180,
+                  "sha256": "d1f92f547c9d8efa8bac14459fcac367238d9993d8d8442228b1f7e6e898f724"
+                },
+                "correlation": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\request-correlation.json",
+                  "bytes": 56659,
+                  "sha256": "d204a8e0b7ec9a9a654201930ac6910a92097c4d70f00f5936c3e7c42a02f470"
+                },
+                "independent": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\correlation-independent-verification.json",
+                  "bytes": 1105,
+                  "sha256": "46a250e0de99501b7831c98e5bb230f171ad7c0ed892c3393048694fae814355"
+                },
+                "verification": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\correlation-verification.json",
+                  "bytes": 4282,
+                  "sha256": "2cbbb2bf03029ca3a250c1c05f2da65a43715f91ff23b16a96b12faaabc84397"
+                }
+              },
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }
