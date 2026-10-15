@@ -328,3 +328,34 @@ request SHA `911ae16bf5bc6836cccf27bb902f457ee7c5edef895c5b1c38adabaf2a4a4857`�
 서버 로컬 SHA는 아직 회수 검증하지 않았으며 사용자 실행 시 helper/request pin으로 검사한다.
 앱 Running을 유지한 채 읽기 명령 1회 실행을 요청했다. `git diff --check`와 두 준비/검토
 Python 파일의 Ruff `--isolated --select E9,F821`도 exit 0이었다.
+
+### 2026-10-15 23:06 KST 실행 입력 대기 중 닫힌 CSV의 의미 규칙 검사
+
+서버 RI29 읽기 명령의 완료 출력은 아직 관찰하지 못했다. 이 대기와 독립적으로 이미 회수한
+첫 1.0.29 실행의 CSV 12,386행·metadata·이미지 최종 manifest를 변경 없이 검사했다.
+`audit-first-runtime-semantics.py`는 기존 `validate_csv_v2_shadow.py`를 실제 CLI로 실행하고,
+같은 입력에 대한 기간/enum/순번/origin/sentinel/운영 상태/TTL/closeout/설정 규칙 9그룹을
+별도로 호출했다. 9그룹의 오류는 0이다. 전체 헤더·스키마·행 수·sample_seq도 기존 CLI 출력과
+대조했고 원본 입력 및 validator 소스의 검사 전후 SHA는 같다. 이 검사는 이미지 실물·fact
+연결·OS exit·전체 과거 데이터 QA의 통과를 뜻하지 않는다.
+
+전체 CLI는 exit 1이며 사본이 없는 경로에 대해 5개 실패를 출력했다. 개발 PC의 같은 이름
+AppData 자료를 잘못 읽지 않도록 모든 fact 위치를 명시적으로 존재하지 않는 로컬 경로로
+지정했다. 그중 실제 닫힌 snapshot의 필수 누락 입력은 다음 두 파일이다.
+
+- 관찰 fact: 400,833행, metadata SHA `0bc2679fb7f424fd30f42b37f83af09e29883f98b1c6295f5bdd8a7bd9c23f7a`.
+- 이미지 fact: 최종 manifest 4,316,517행, SHA `1c8c69e3ca5d123b778a578ce2468b3db0960c7841dc04a6d1eddf0685e6e4de`.
+
+나머지 세 실패는 명시한 미존재 posthoc/linkage override에서 발생했다. 원래 두 posthoc
+manifest는 row 0/hash null이며 linkage manifest는 미발행이다. 이 출력을 서버 원본 유실이나
+손상 증거로 해석하지 않는다. 향후 전체 양방향 연결 검사와 사후처리 생성 여부는 별도로 판단한다.
+기존 CSV는 탐색기 회수 사본으로 독립 콘솔 pin이 없고, metadata만 이후 서버 attestation
+도우미에서 고정 hash로 검증됐다는 출처 제한도 유지했다.
+
+근거 루트의 `first-runtime-semantics-r1`에 CLI 전체 stdout 6,198바이트/stderr 0바이트,
+실제 명령·종료 코드·소스/입력 hash·범위 판정을 기록했다. 감사 실행 자체는 exit 0이며
+전체 CLI의 exit 1을 그대로 보존한다. 요약 SHA
+`605e54f2527c8be5c90f7ab7a1190d4bbd786c7b598f5f1220434276637d27b1`, 범위 판정 SHA
+`506b51b956f551d5a851bdc42ede39a197f7ade1ec9608f07f54db39dde3b40c`다.
+새 감사 파일의 Ruff `--isolated --select E9,F821` exit 0. 제품·서버 데이터는 변경하지 않았고
+full_data_gate NOT_EVALUATED, 출시/승격 HOLD를 유지한다.
