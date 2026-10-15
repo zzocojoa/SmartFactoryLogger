@@ -17,6 +17,8 @@ import uvicorn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backend import app as backend_app
 import field_http_sampling as sampling
+import field_health_timing as health_timing
+import field_native_timing
 
 
 class FieldHealthTimingTests(unittest.TestCase):
@@ -42,6 +44,7 @@ class FieldHealthTimingTests(unittest.TestCase):
             worker = threading.Thread(target=server.run, kwargs={'sockets': [listener]})
             worker.start()
             records = []
+            expected = field_native_timing.capture()['identity']
             try:
                 deadline = time.monotonic() + 5
                 while not server.started and worker.is_alive() and time.monotonic() < deadline:
@@ -77,6 +80,10 @@ class FieldHealthTimingTests(unittest.TestCase):
                         self.assertNotIn('x-sfl-health-timing', headers)
                         self.assertNotIn('health_probe_id', record)
                         continue
+                    bound = health_timing.validate_health_sample(record, raw, probe_id=probe,
+                        backend_pid=expected['pid'], backend_created_filetime=expected['process_created_filetime'])
+                    self.assertEqual(bound['status'], 'REQUEST_AND_NATIVE_CLOCK_BOUND', bound)
+                    record['timing_validation'] = bound
                     timing = json.loads(headers['x-sfl-health-timing'])
                     self.assertEqual(timing['probe_id'], probe)
                     self.assertEqual(record['health_probe_id'], probe)
@@ -87,7 +94,7 @@ class FieldHealthTimingTests(unittest.TestCase):
                     self.assertEqual(list(points.values()), sorted(points.values()))
                     self.assertLessEqual(record['started_ns'], points['route_enter'])
                     self.assertLessEqual(points['route_resume'], record['response_finished_ns'])
-                    self.assertLess(len(headers['x-sfl-health-timing'].encode('ascii')), 2048)
+                    self.assertLess(len(headers['x-sfl-health-timing'].encode('ascii')), 4096)
                     if service is not None:
                         self.assertGreaterEqual(points[after] - points[before], 70_000_000)
             finally:

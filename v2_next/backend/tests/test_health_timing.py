@@ -43,9 +43,9 @@ class HealthTimingTests(unittest.IsolatedAsyncioTestCase):
 
     def read_timing(self, response, probe=PROBE):
         raw = response.headers[TIMING_HEADER]
-        self.assertLess(len(raw.encode("ascii")), 2048)
+        self.assertLess(len(raw.encode("ascii")), 4096)
         timing = json.loads(raw)
-        self.assertEqual(timing["v"], 1)
+        self.assertEqual(timing["v"], 2)
         self.assertEqual(timing["probe_id"], probe)
         self.assertEqual(timing["clock"], "perf_counter_ns")
         self.assertEqual(timing["pid"], os.getpid())
@@ -56,6 +56,7 @@ class HealthTimingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tuple(points), POINTS)
         self.assertTrue(all(type(value) is int and value > 0 for value in points.values()))
         self.assertEqual(list(points.values()), sorted(points.values()))
+        self.assertEqual(set(timing["native"]), {"loop_begin", "worker_begin", "worker_end", "loop_end"})
         return timing
 
     async def test_http_opt_in_preserves_body_and_trace_id(self):
@@ -183,6 +184,15 @@ class HealthTimingTests(unittest.IsolatedAsyncioTestCase):
         self.plc.side_effect = None
         self.assertEqual(await backend_app.health(request(), response), BODY)
         self.read_timing(response)
+
+    async def test_native_failure_preserves_health_and_marks_anchors_unavailable(self):
+        with patch("backend.Observability.health_clock._api", side_effect=OSError("private provider text")):
+            response = Response()
+            self.assertEqual(await backend_app.health(request(), response), BODY)
+            timing = self.read_timing(response)
+        self.assertTrue(all(value == {"status": "UNAVAILABLE", "error_type": "OSError"}
+                            for value in timing["native"].values()))
+        self.assertNotIn("private provider", response.headers[TIMING_HEADER])
 
     async def test_cancelled_request_does_not_emit_timing_when_worker_finishes(self):
         entered, release, finished = threading.Event(), threading.Event(), threading.Event()

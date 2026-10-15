@@ -437,6 +437,8 @@ stdout/stderr를 새 파일로 저장하고 시간·출력·잔류 자손·실�
 
 ### 5.16 요청별 health 처리 구간의 선택적 계측
 
+이 절은 최초 v1 계측의 범위다. 현장 연결에 사용할 현재 계약은 아래5.17의 native anchor를 포함한 v2다.
+
 현장203.1356ms 표본은 기존500ms worker 로그에 남지 않으며 executor 대기와 event loop 복귀를
 분리할 수 없다. `/health`의 기존 응답 본문·500ms 로그·200ms 실패 기준은 유지한다.
 명시적인 로컬 진단 요청에만 `X-SFL-Health-Timing` 응답 헤더를 추가한다.
@@ -476,3 +478,43 @@ ETW QPC와 직접 같은 수치라고 가정하지 않고 같은 실행의 clock
 각 처리 단계와 event loop 복귀 지연을 포함한다. 실제 loopback HTTP 시험은 장비 서비스 lifespan을
 끄고 조회값을 격리해 수행한다. 이 변경은 새 제품 소스이며 기존4cc 설치본·고정 도우미를 수정하지 않는다.
 실제 장비·frozen 설치본·현장 성능 검증과 배포는 별도이고 출시 HOLD는 유지한다.
+
+### 5.17 health v2의 native 생성 식별자와 시계 연결
+
+v1의 PID/TID 숫자만으로는 재사용을 판별할 수 없고 perf_counter_ns와 ETW QPC를 직접 같다고
+해석할 수 없다. 명시적 진단 요청의 v2 헤더에 loop_begin/worker_begin/worker_end/loop_end
+네 native anchor를 추가한다. 각 anchor는 현재 process/thread의 GetProcessTimes/GetThreadTimes
+생성 FILETIME, PID/TID, QueryPerformanceCounter/Frequency와 그 호출 전후 perf_counter_ns다.
+현재 process/thread pseudo-handle만 사용하며 새 handle·trace session·writer를 만들지 않는다.
+일반 health에는 native 호출이 없다. native API 실패는 status=UNAVAILABLE와 오류 타입만 반환하고
+health 본문/HTTP 성공 여부를 바꾸지 않는다. 진단의 완료 여부는 수집기에서 별도로 판정한다.
+
+`field_health_timing.validate_health_sample(record, raw_body, probe_id=..., backend_pid=...,
+backend_created_filetime=...)`의 입력 backend 세대는 외부에서 확인한 값이어야 한다.
+응답 헤더의 PID/생성 시각을 그대로 기대값으로 복사하면 외부 세대 검증이 되지 않는다.
+프로세스/설치본 선택·listener·세션·고정 payload 검사는 기존 외부 수집 흐름의 책임이다.
+로컬 별도 프로세스 시험에서는 자식 PID와 WindowsProcessReader의 요청 전후 생성 FILETIME을 대조한다.
+
+소비 검사는 원문 본문·헤더의 크기/SHA, 단일 timing 헤더(ASCII4096bytes 이하), 정확한 v2 필드,
+중복 JSON key/비유한 수 거부, 소문자32자리 요청 ID, 정수 PID/TID/시각,8개 checkpoint 순서를 요구한다.
+native 네 anchor의 process 생성 시각은 외부 기대값과 같아야 하고, loop/worker 각각 전후 thread
+생성 시각이 같아야 한다. 각 anchor는 대응 처리 단계 안에 있어야 한다. collector의 기존 native
+begin/end도 원본에서 다시 검증하며 결과에 적힌 CORRELATABLE_BOUNDARIES만 신뢰하지 않는다.
+
+여섯 anchor 모두 같은 QPC frequency를 요구하고 각 대응점에서 얻은 offset 구간의 교집합을 구한다.
+QPC 환산에는 정수 나눗셈의 보수적 floor/ceil을 사용한다. 교집합이 없거나 시간 순서가 뒤집히면
+NOT_CORRELATABLE이며 stage 값·QPC 연결을 노출하지 않는다. 성공 이름은
+REQUEST_AND_NATIVE_CLOCK_BOUND다. 정확한 CPU 시간, ETW coverage, 특정 지연 원인 또는 현장 QA PASS를
+뜻하지 않는다. 이전 v1 원문은 보존하고 v2 소비기의 입력으로 재해석하지 않는다.
+
+검증 예시: 유효한 요청을 복제해 worker_end의 thread 생성 FILETIME만 바꾸거나 QPC를 다른 epoch로
+옮긴다. 헤더 SHA를 그 변형 바이트에 맞춰 갱신해도 각각 세대/clock 검사에서 거부돼야 한다.
+같은 PID·TID를 적은 것, HTTP200, 해시 일치만으로 이 조건을 대신할 수 없다.
+clock의 FILETIME은 생성 식별자이며 ETW event timestamp나 QPC의 epoch가 아니다.
+native 조회 비용은 진단 요청의 경과 시간에 포함되고 worker_begin의 조회는 PLC 구간에 포함된다.
+loop_end 조회와 헤더 직렬화 이후 전송 시간은8개 checkpoint 밖이다. 이 비용과 한계를 결과 해석에 유지한다.
+
+근거: [Python3.12 시간 함수](https://docs.python.org/3.12/library/time.html#time.perf_counter),
+[Windows GetThreadTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes).
+문서의 system-wide 성질만으로 과거 다른 실행을 연결하지 않고, 실제 같은 요청에서 수집한 native
+대응점과 프로세스 생성 식별자를 확인한다. 최종 패키지와 현장 적용은 별도 검증한다.

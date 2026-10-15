@@ -110,6 +110,7 @@ from backend.Observability.metrics_logger import comm_metrics_logger_service
 from backend.Observability.memory_service import estimate_size_bytes, memory_service
 from backend.Observability.service import observability_service
 from backend.Observability.health_timing import HealthTiming, TIMING_HEADER, start_health_timing
+from backend.Observability.health_clock import capture_health_clock
 from backend.Configuration.Configuration_DB_Manager import config_manager
 from backend.launcher_policy import is_embedded_electron
 from backend.Configuration.Configuration_Logic_Layout import (
@@ -2519,13 +2520,16 @@ async def health(request: Request, response: Response):
     def build_timed_health():
         diagnostic.worker_tid = threading.get_native_id()
         diagnostic.mark("worker_enter")
+        diagnostic.native["worker_begin"] = capture_health_clock()
         payload = build_health_payload(diagnostic=diagnostic)
         diagnostic.mark("worker_exit")
+        diagnostic.native["worker_end"] = capture_health_clock()
         return payload
 
     diagnostic.mark("submitted")
     payload = await asyncio.to_thread(build_timed_health)
     diagnostic.mark("route_resume")
+    diagnostic.native["loop_end"] = capture_health_clock()
     # Serialization, middleware completion and socket writes occur after this point.
     response.headers[TIMING_HEADER] = diagnostic.header()
     return payload

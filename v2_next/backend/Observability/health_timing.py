@@ -8,6 +8,7 @@ import threading
 import time
 
 from starlette.requests import Request
+from backend.Observability.health_clock import capture_health_clock
 
 
 PROBE_HEADER = "X-SFL-Health-Probe"
@@ -21,6 +22,7 @@ class HealthTiming:
     loop_tid: int = field(default_factory=threading.get_native_id)
     worker_tid: int = 0
     checkpoints: dict[str, int] = field(default_factory=dict)
+    native: dict[str, dict] = field(default_factory=dict)
 
     def mark(self, name: str) -> None:
         self.checkpoints[name] = time.perf_counter_ns()
@@ -28,9 +30,10 @@ class HealthTiming:
     def header(self) -> str:
         # All names are fixed by the health route; only a validated hex ID is echoed.
         return json.dumps({
-            "v": 1, "probe_id": self.probe_id, "pid": self.pid,
+            "v": 2, "probe_id": self.probe_id, "pid": self.pid,
             "loop_tid": self.loop_tid, "worker_tid": self.worker_tid,
             "clock": "perf_counter_ns", "checkpoints": self.checkpoints,
+            "native": self.native,
         }, separators=(",", ":"), ensure_ascii=True)
 
 
@@ -48,4 +51,5 @@ def start_health_timing(request: Request) -> HealthTiming | None:
         return None
     timing = HealthTiming(values[0])
     timing.mark("route_enter")
+    timing.native["loop_begin"] = capture_health_clock()
     return timing

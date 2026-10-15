@@ -1978,3 +1978,36 @@ JSON 직렬화·middleware 완료·socket 전송은 route_resume 뒤라 포함�
 실제 지연 원인은 여전히 미확정이다. 다음은 진단 응답의 엄격한 소비 검사와 native 세대/clock 결합,
 clean source의 패키지 동작 검증 후 제한된 현장 진단 준비다. 이전 원격 UI 실패는 해결됐다고 기록하지 않는다.
 15분FAIL·120분미시작·물리NOT_TESTED·전체 데이터 NOT_EVALUATED·출시HOLD를 유지한다.
+
+
+## 2026-10-15 health v2의 native 세대·시계 연결 검증
+
+v1의 PID/TID·perf_counter_ns 숫자만으로는 재사용과 시계 기준 불일치를 검사할 수 없었다.
+선택적 health 진단의 v2에 loop/worker 전후4개 native anchor를 추가했다. 각 anchor는 Windows
+process/thread 생성 FILETIME과 QPC/Frequency·호출 전후 perf_counter_ns를 포함한다.
+일반 health에는 native 호출이 없고, 조회 실패는 UNAVAILABLE로 표시하며 health 본문은 유지한다.
+소비기는 외부에서 확인한 backend 세대·요청 ID, 원문 본문/헤더 해시, 정확한 v2 schema·단조 순서,
+anchor의 단계 포함·thread 생성 시각·collector와의 시계 offset 교집합을 검사한다.
+부적합 자료는 NOT_CORRELATABLE이며 시간0 또는 QA PASS로 바꾸지 않는다. 설계5.17에 계약을 기록했다.
+
+집중49검사, 소비기7그룹, 실제 loopback HTTP2검사, 별도 프로세스1통합검사 모두 exit0였다.
+소비기에는 중복/누락/과대 헤더·중복 JSON key·NaN·bool/float 시각·잘못된 해시·다른 요청/세대·
+시계 epoch/주파수 불일치·역전·범위 이탈·native 누락을 주입했다. 마지막 생성 시각 경계 보완 뒤
+소비기/실제 HTTP/별도 프로세스를 새 결과 폴더에서 재검증했다. 새2모듈 mypy와 선택 Ruff exit0.
+기존 v1 보존 응답4건은 v2 검증에서 모두 거부됐으며 원문은 변경하지 않았다.
+
+별도 프로세스 시험은 장비 lifespan을 끈 합성 health 서버와 실제 Windows API를 사용했다.
+부모의 WindowsProcessReader에서 child PID/생성 FILETIME을 요청 전후 확인했고, 서버 응답의 native
+생성 시각과 일치했다. 일반진단/PLC80ms/runtime80ms/frontend80ms 총4요청이 연결됐다.
+각 주입 구간70ms 이상과 양쪽 process의 QPC frequency/offset 교집합을 검산했다.
+child 정상 exit0·잔존 없음·강제 종료 없음이다. native 생성 시각을 ETW event timestamp로 대체하지 않았다.
+
+제품 코드 변경 후 최종 `npm run health` exit0: frontend437검사, backend931검사 중 기존
+private F01 fixture1건 skip, 나머지 의존성/Electron/타입/린트/QA selftest 완료.
+검증 소스와 원문 증거: `C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_CLOCK_20261015_652e0d2c`.
+verification.json SHA256 `0dac9b6afe931d3a5ebc4f3646dc55558663b557d12793274557f0f97f2e6937`.
+
+이번 결과는 요청·native 시계 연결이며 실제 ETW coverage·정확한 CPU 시간·현장 지연 원인 검증이 아니다.
+진단 자체의 native 호출 비용도 경과 시간에 포함된다. 다음 단계는 clean source의 새 패키지와
+frozen/Electron 응답·정상 종료 검증 후 제한된 현장 진단 준비다. 기존4cc 설치본은 변경하지 않았다.
+15분FAIL·120분미시작·물리NOT_TESTED·전체 데이터 NOT_EVALUATED·출시HOLD를 유지한다.
