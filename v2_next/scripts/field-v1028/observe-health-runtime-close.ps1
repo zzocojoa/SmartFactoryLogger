@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$RequestPath='', [string]$ExpectedRequestSha256='', [switch]$LibraryOnly)
+param([string]$RequestPath='', [string]$ExpectedRequestSha256='', [switch]$LibraryOnly, [switch]$IdentityOnly)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
@@ -121,6 +121,14 @@ function Assert-RuntimeRequest($Request) {
     Require-Runtime ($Request.logger_service_instance_id -cmatch '^[a-f0-9-]{36}$' -and $Request.csv_name -cmatch '^Factory_Integrated_Log_v2_[0-9]{8}_[0-9]{6}\.csv$') 'request-generation'
     Require-Runtime ($Request.config_sha256 -cmatch '^[a-f0-9]{64}$') 'request-config-pin'
 }
+function Write-RuntimeIdentityResult([string]$Root,[string]$RequestSha256,$Files) {
+    return Write-RuntimeJson ($Root+'\result.json') ([ordered]@{
+        schema='sfl-health-runtime-identity-result-v1';status='RUNNING_IDENTITY_CAPTURED_REQUIRES_REVIEW'
+        request_sha256=$RequestSha256;files=$Files;configuration_changed=$false
+        application_started=$false;application_shutdown_performed=$false;actual_process_exit_observed=$false
+        full_backup_created=$false;field_gate='NOT_EVALUATED';release_gate='HOLD';promotion_allowed=$false
+    })
+}
 if($LibraryOnly){return}
 $resultRoot=$null;$held=[Collections.Generic.List[object]]::new();$phase='preflight';$files=[ordered]@{}
 try{
@@ -160,6 +168,15 @@ try{
     $files['request.json']=Write-RuntimeBytes ($resultRoot+'\request.json') $requestBytes
     $files['health-before.json']=Write-RuntimeBytes ($resultRoot+'\health-before.json') $health
     $files['runtime-before.json']=Write-RuntimeJson ($resultRoot+'\runtime-before.json') ([ordered]@{observed_at_utc=[DateTime]::UtcNow.ToString('o');main_pid=$mains[0].ProcessId;backend_pid=$backend.ProcessId;processes=@($held|ForEach-Object{$_.identity});observation=$before})
+    if($IdentityOnly){
+        $phase='running-identity-read'
+        $configAfter=Read-RuntimeBytes ($data+'\config.ini')
+        Require-Runtime ((Hash-Runtime $configAfter) -ceq $request.config_sha256) 'config-after-pin'
+        foreach($one in $held){Require-Runtime (-not $one.process.HasExited) 'runtime-exited-during-read'}
+        $files['config.ini']=Write-RuntimeBytes ($resultRoot+'\config.ini') $configAfter
+        $receipt=Write-RuntimeIdentityResult $resultRoot $ExpectedRequestSha256 $files
+        Write-Host ('RESULT_PATH='+$resultRoot);Write-Host ('RESULT_SHA256='+$receipt.sha256);exit 0
+    }
     $phase='wait-normal-exit'
     Write-Host ('RESULT_PATH='+$resultRoot);Write-Host 'READY_FOR_NORMAL_APP_EXIT'
     Wait-RuntimeProcesses $held

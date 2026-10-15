@@ -587,3 +587,13 @@ settings hash를 보였다. build 식별자만 바뀐 fingerprint mismatch인 �
 실행 전후 프로세스와 8000 listener 부재를 확인하며 기존 물리 경계 NOT_TESTED·정식 QA HOLD는
 그대로다. 설정 파일 쓰기 복구용 사본만 보존하고 전체 백업·설치·자동 시작은 하지 않는다.
 이 변경은 이전 실행의 OS exit 증거 누락을 해소하지 않으며 다음 실행의 native 관찰은 별도다.
+
+### 5.21 재시작 후 독립된 native 실행 식별자 읽기
+
+6초 health 진단의 요청은 재시작 이후의 실제 OS PID/생성 FILETIME과 부모·listener를 요구한다.
+`observe-health-runtime-close.ps1 -IdentityOnly`는 5.19와 같은 서버·설정·logger·CSV·native
+검사를 사용하고 현재 실행 식별자, health, 고정 설정 원문만 새 결과에 기록한 뒤 끝난다.
+READY 출력·종료 대기·앱 종료·설정 쓰기·전체 백업은 하지 않는다. 결과는
+`RUNNING_IDENTITY_CAPTURED_REQUIRES_REVIEW`이며 실제 exit 관찰은 false, 현장 QA는 미평가다.
+독립 회수 검토 뒤에만 이 값으로 6초 진단 요청을 준비한다. 이전 실행의 식별자는 재사용하지 않는다.
+검증 예: 같은 native 계약 테스트에서 읽기 결과의 hash/request 연결과 미종료 범위를 확인한다.

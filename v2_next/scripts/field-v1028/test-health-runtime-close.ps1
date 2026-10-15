@@ -79,6 +79,15 @@ Check 'real-controller-development-host-denied' {
     $output=& $native -NoProfile -NonInteractive -File $source -RequestPath ($root+'\missing.json') -ExpectedRequestSha256 ('a'*64)
     Require-Runtime ($LASTEXITCODE -eq 1 -and ($output -join "`n") -match 'server-operator-admin-required') 'controller-host-guard'
 }
+Check 'identity-only-result-preserves-running-and-unverified-exit-scope' {
+    $identityRoot=Join-Path $root 'identity-only';$null=New-Item -ItemType Directory -Path $identityRoot
+    $files=[ordered]@{'config.ini'=@{bytes=7;sha256=('c'*64)}}
+    $fact=Write-RuntimeIdentityResult $identityRoot ('b'*64) $files
+    $bytes=Read-RuntimeBytes ($identityRoot+'\result.json');$value=Read-RuntimeJson $bytes
+    Require-Runtime ((Hash-Runtime $bytes) -ceq $fact.sha256) 'identity-result-pin'
+    Require-Runtime ($value.status -ceq 'RUNNING_IDENTITY_CAPTURED_REQUIRES_REVIEW' -and $value.request_sha256 -ceq ('b'*64) -and $value.files.'config.ini'.bytes -eq 7) 'identity-result-binding'
+    Require-Runtime (-not $value.application_shutdown_performed -and -not $value.actual_process_exit_observed -and -not $value.configuration_changed -and -not $value.full_backup_created -and -not $value.promotion_allowed -and $value.release_gate -ceq 'HOLD') 'identity-scope-escalated'
+}
 $null=Write-RuntimeJson ($root+'\summary.json') ([ordered]@{status='PASS';scope='LOCAL_NATIVE_AND_CONTRACT_CHECKS_NOT_SERVER_LIFECYCLE';checks=$checks;server_execution=$false;release_gate='HOLD'})
 Write-Output ('TEST_RESULT_PATH='+$root)
 Write-Output ('CHECKS='+$checks.Count)

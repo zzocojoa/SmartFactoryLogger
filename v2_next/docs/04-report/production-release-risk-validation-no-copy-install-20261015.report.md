@@ -276,3 +276,55 @@ active process/listener 거부 및 32/64비트 bootstrap의 개발 host 실행 �
 `health-attestation-server-delivery.json`, 화면은 `server-health-attestation-command-open.jpg`다.
 앱은 종료 상태로 유지하며 사용자에게 명령 본문 1회 실행을 요청했다. 이전 종료 도우미나
 설치 프로그램은 재실행하지 않는다. 전체 PDCA는 진행 중이며 출시/승격 HOLD다.
+
+### 2026-10-15 22:54 KST 설정 확인 적용·재시작 검산
+
+사용자 실행 후 콘솔에서 `LAUNCH_EXIT=0`과 서버 결과 `A32088b67`을 확인했다.
+결과 SHA는 `1e74d55e6870294eea82238d7a4a99c39ffc76303393bf55f372eb543da0858e`다.
+최초 화면 전사값은 두 군데 오독으로 복사 전 hash 검사에서 거부됐다. 보존 화면을 확대해
+위 값을 다시 읽었고, 회수한 result 및 모든 하위 증거 hash와 정확한 6파일 목록이 일치했다.
+공유 회수 위치는 `Z:/SmartFactory/20261015/return/AT29_ae932846_2244/A32088b67`,
+개발 사본은 근거 루트의 `attestation-A32088b67`이다. `health-attestation-recovery-review.json`에
+검산을 남겼으며 실제 검산 명령 exit 0이다.
+
+전후 설정을 네 attestation 키만 마스킹해 바이트에 해당하는 전체 텍스트를 비교했다.
+실제 값이 바뀐 것은 확인 시각·fingerprint 두 항목이고, operator true/USER_SELF는 유지됐다.
+설정 SHA는 `2f872a95…`에서 `9901d4e3c11c8e0ebe1787d84343cd6db70b7f4dce992ef23c778eca712c21ac`로
+바뀌었다. 전후 OS snapshot의 앱 프로세스와 port 8000 listener는 모두 비어 있었다.
+이 관찰은 이전 프로세스의 누락된 실제 exit code를 대신하지 않는다.
+
+22:48 KST 일반 사용자 바탕화면 바로가기로 앱을 시작했다. 화면은 Running, 작업 정보
+60365·4(기존 적용 22:04:47)였으며 Codex는 작업값을 수정하지 않았다. 두 차례 읽기 수집의
+각 6 GET은 모두 HTTP 200/exit 0이었다. `review-post-attestation.py` exit 0 검토 결과:
+
+- 실제 build acaf77d9, `runtime_config_attestation / verified`, USER_SELF,
+  fingerprint `14b58a8cf9dec3669c475776c99d6cc62f19f9caebf6fad8b33267b774d36431` 재계산 일치.
+  drift false/빈 목록, Low Signal OFF, comparator 미확인 false를 유지한다.
+- 새 logger `5618690a-6e8b-444f-a37c-e0cd63c94c85`, SPOT
+  `74f42667-bfd7-41aa-81fb-71f3664aa206`, CSV `Factory_Integrated_Log_v2_20261015_224850.csv`.
+  API rows 1→430, 상태 startup_pending 10/stale 229/valid 191. 시작 구간 stale을 숨기지 않는다.
+- 이미지 enqueue/written 95/95, queue/failure/drop 0. 이는 해당 API 관측이며 파일 내용 QA가 아니다.
+- 제한된 설정 기준 1,808바이트 SHA
+  `24d7c58826e31d60ce80c0a728fa5e718967eb274d6912cf901ef67c18afe757`.
+  경로 `post-attestation-configuration-reference-r2.json`이며 기존 승인 두 hash를 포함한다.
+  최초 생성본은 전체 image 응답을 포함해 32KiB 제한으로 거부됐고 진단 입력으로 사용하지 않는다.
+  R2는 계약상 설정 필드와 실행 식별 필드만 선택해 기존 기준 검증기를 통과했다.
+
+다음 6초 진단 요청에 필요한 독립 OS 식별자를 위해 기존 native 수집기에 `-IdentityOnly`를
+추가했다. 닫기 대기 전에 현재 프로세스·health·원문 설정 증거를 쓰고 끝나며 종료/설치/설정
+변경/전체 백업을 하지 않는다. native PS5.1 `test-health-runtime-close.ps1` 11검사 exit 0,
+32/64비트 launcher의 개발 host 거부도 확인했다. 검사 기록은
+`runtime-close-tests-3279e18ac8784f1a9b46bc8685833a5d/summary.json`이다.
+새 묶음은 `RI29_20261015_cd4a5f22`, helper SHA `117d4bdb08c9b8b6db35ea32be94ae9e13083a984ed60fd4cfe3acf61d4ddb5e`,
+request SHA `911ae16bf5bc6836cccf27bb902f457ee7c5edef895c5b1c38adabaf2a4a4857`이다.
+현재 앱은 Running으로 유지한다. 독립 native 읽기·6초 추적·현장 성능·전체 데이터 QA·정식
+운영 승격은 아직 완료되지 않았다. 전체 PDCA/출시 HOLD를 유지한다.
+
+최종 전달: 5파일·19,214바이트를 공유 send에 복사하고 파일별 SHA를 대조했다.
+원격 탐색기로 서버 로컬 `C:/Users/user/Desktop/SmartFactory/RI29_20261015_cd4a5f22`까지
+복사한 뒤 절대경로·5파일·열린 `PINNED_RUNTIME_IDENTITY_COMMAND.txt`를 확인했다.
+`runtime-identity-server-delivery.json` SHA는
+`99da277dd2fd46c31c587fec5e5cd980ef865b91cd0b8bdf0964ccf8806c76e9`다.
+서버 로컬 SHA는 아직 회수 검증하지 않았으며 사용자 실행 시 helper/request pin으로 검사한다.
+앱 Running을 유지한 채 읽기 명령 1회 실행을 요청했다. `git diff --check`와 두 준비/검토
+Python 파일의 Ruff `--isolated --select E9,F821`도 exit 0이었다.
