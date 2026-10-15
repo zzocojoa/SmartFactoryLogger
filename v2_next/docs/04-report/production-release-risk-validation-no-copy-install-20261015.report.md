@@ -69,3 +69,30 @@ Chrome 원격 탐색기로 서버의 `C:\Users\user\Desktop\SmartFactory\HP29_20
 
 1.0.29 서버 설치·설치 전후 원본 보존은 아직 미실행이다. 현장 15분 실패 이력,
 미실행 120분, 물리 경계 미시험, 전체 데이터 QA와 운영 승격 HOLD는 유지한다.
+
+### 2026-10-15 16:51 KST 원본 재검산 완료·설치 요청 전달
+
+같은 `O3aa2e84e` 검사가 정상 종료됐고 콘솔 `LAUNCH_EXIT=0`을 확인했다.
+파일 313,365개·폴더 245개·추가 스트림 680개, 총 14,590,063,063바이트의
+내용·목록·메타데이터를 관찰 후 재검산했다. 새 전체 백업은 만들지 않았다.
+결과 9파일을 서버 탐색기로 회수하고 공유→개발 PC 사본의 크기·SHA256을 대조했다.
+
+- 콘솔/회수 `result.json` SHA256: `be923dd734b3346cf045c05d4825230b2254f8ee7e2fd6beec0938fb6abe6e23`
+- 콘솔/회수 `observed.tsv` SHA256: `2183acb7a5aca7d5107c22d104b40e5ed47797ae684157cf9e0a8dd37e06b886`
+- `review-field-close.py` 실제 exit 0. 종료 전 native PID·생성 시각·logger와 정상 종료,
+  현재 CSV 250,085행·마지막 순번 361155·이미지 drain 76,114건 및 회수 자료 34파일을
+  원본 manifest에 결합했다. `field-observed-close-review.json` SHA256:
+  `56fe651507460c2db7c0a04f61b01961b067abc92ae34e81e20b79578048e344`.
+
+실제 결과를 사용하는 설치 request 생성은 exit 0이며, native PS5.1 x64에서 request 계약,
+정상 종료·원본 결과·실행 세대·관찰 유효 시간과 bootstrap 구문/요청 해시를 검사해 exit 0이었다.
+17:02 KST까지 새 4파일을 `Z:/SmartFactory/20261015/send/HI29_OBS_20261015_738bf0e0`로
+전달·검산하고 서버 `C:/Users/user/Desktop/SmartFactory/HI29_OBS_20261015_738bf0e0`에 복사했다.
+절대경로·파일 존재를 화면에서 확인하고 `PINNED_OBSERVED_INSTALL_COMMAND.txt`를 메모장에 열었다.
+서버 로컬 바이트 검산은 실행 시 고정 해시 검사로 남으며 화면 관찰로 대신하지 않는다.
+전달 근거는 `server-observed-install-delivery.json`과 해당 경로/메모장 화면이다.
+
+현재 사용자 PowerShell 실행을 기다린다. 앱은 종료 상태이며 설치는 아직 시작하지 않았다.
+관찰 결과의 유효 시간 180분을 적용하므로 오늘 19:40 KST 이후에는 실행 전에 상태를 다시 확인한다.
+실패하면 자동 재실행하지 않는다. 새 전체 백업 생략은 전체 데이터 의미 검증 완료나
+현장 성능·물리 경계·출시 HOLD 해소를 뜻하지 않는다.
