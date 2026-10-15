@@ -72,6 +72,13 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(raw['health_record']['client_request_and_body_ms'], 250)
         self.assertEqual(result['etw_coverage'], 'NOT_EVALUATED')
 
+    def test_diagnostic_default_is_1029_and_mixed_candidate_prevents_collection(self):
+        self.assertEqual(self.spec.candidate, collection.binding.CANDIDATE_1029)
+        self.spec = replace(self.spec, candidate_commit=collection.binding.BUILD)
+        with self.assertRaisesRegex(ValueError, 'diagnostic-candidate-required'):
+            self.run_collection()
+        self.assertFalse((self.folder/'evidence').exists())
+
     def test_initial_configuration_or_control_failure_prevents_probes(self):
         for kind, failed in (('configuration', {'configuration_status': 'FAIL'}),
                              ('control', {'generation_status': 'FAIL'})):

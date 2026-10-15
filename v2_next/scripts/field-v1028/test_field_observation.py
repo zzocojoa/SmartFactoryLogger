@@ -87,8 +87,8 @@ def configuration_closeout_failure_worker(spec, output, duration, stop, sender):
     original = configuration.configuration_reference
 
     @contextmanager
-    def fail_closeout(*args):
-        with original(*args) as expected:
+    def fail_closeout(*args, **kwargs):
+        with original(*args, **kwargs) as expected:
             yield expected
             raise OSError('injected-configuration-closeout-read-failure')
 
@@ -130,7 +130,8 @@ class Handler(BaseHTTPRequestHandler):
    logger='22222222-2222-4222-8222-222222222222'
    if mode=='changed-service' and count>=3: logger='33333333-3333-4333-8333-333333333333'
    seq=0 if mode=='invalid-shutdown' and count>=3 else count
-   body=json.dumps(dict(app_version='1.0.28',runtime_kind='frozen',mode='REAL',executable_path=sys.executable,frontend_source='resources',frontend_static_ready=True,spot_temperature=dict(build_git_commit='4cc7393e1bafbf90a329726aed9470fe0daacb21',diagnostics_available=True,spot_service_instance_id='11111111-1111-4111-8111-111111111111',v2_4_operational=dict(enabled=True,logger_service_instance_id=logger,schema_version='2.5.2',current_v2_csv_file_name='Factory_Integrated_Log_v2_fixture.csv',last_sample_seq=seq)))).encode()
+   build='0'*40 if mode=='changed-build' and count>=3 else '4cc7393e1bafbf90a329726aed9470fe0daacb21'
+   body=json.dumps(dict(app_version='1.0.28',runtime_kind='frozen',mode='REAL',executable_path=sys.executable,frontend_source='resources',frontend_static_ready=True,spot_temperature=dict(build_git_commit=build,diagnostics_available=True,spot_service_instance_id='11111111-1111-4111-8111-111111111111',v2_4_operational=dict(enabled=True,logger_service_instance_id=logger,schema_version='2.5.2',current_v2_csv_file_name='Factory_Integrated_Log_v2_fixture.csv',last_sample_seq=seq)))).encode()
   elif self.path=='/api/control/health':
    control_count+=1
    if mode=='slow-control': time.sleep(.25)
@@ -164,11 +165,11 @@ def raw_fact(raw):
     return dict(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
 
 
-def configuration_snapshot():
+def configuration_snapshot(*, candidate=binding.CANDIDATE_1028):
     """Synthetic attestation for isolated tests only; never a field approval."""
     stamp = datetime.now(timezone.utc).isoformat()
     snapshot = dict(configuration.PROFILE, spot_config_revision='spot-config-provenance-v1',
-        build_git_commit=binding.BUILD, settings_file_sha256='a' * 64, spot_ip='192.0.2.1',
+        build_git_commit=candidate.commit, settings_file_sha256='a' * 64, spot_ip='192.0.2.1',
         low_signal_comparator='lt', low_signal_comparator_configured_verified=True,
         low_signal_comparator_verified=True, diagnostics_collection_mode='async_fact_only',
         config_source='runtime_config_attestation', config_operator_verified_requested=True,
@@ -181,9 +182,10 @@ def configuration_snapshot():
     return snapshot
 
 
-def configuration_reference(folder, name='fixture-configuration-reference.json', *, disabled_low_signal=False):
+def configuration_reference(folder, name='fixture-configuration-reference.json', *, disabled_low_signal=False,
+                            candidate=binding.CANDIDATE_1028):
     path = folder / name
-    snapshot = configuration_snapshot()
+    snapshot = configuration_snapshot(candidate=candidate)
     approval = {}
     schema = 'sfl-field-configuration-reference-v1'
     if disabled_low_signal:
@@ -199,7 +201,8 @@ def configuration_reference(folder, name='fixture-configuration-reference.json',
 
 
 @contextmanager
-def fixture_app(folder, mode='normal', *, disabled_low_signal=False):
+def fixture_app(folder, mode='normal', *, disabled_low_signal=False, candidate=binding.CANDIDATE_1028):
+    candidate.validate()
     root = folder / 'app'
     root.mkdir()
     source = Path(sys._base_executable).parent
@@ -216,20 +219,21 @@ def fixture_app(folder, mode='normal', *, disabled_low_signal=False):
             origin_files.append(dict(source=str(original), target=str(target), **raw_fact(target.read_bytes())))
     provenance = root / binding.PROVENANCE
     provenance.parent.mkdir(parents=True)
-    observation.write_json(provenance, dict(schema_version='1.0.0', source='clean_git_head', git_commit=binding.BUILD))
+    observation.write_json(provenance, dict(schema_version='1.0.0', source='clean_git_head', git_commit=candidate.commit))
     (root / 'resources/app.asar').write_bytes(b'SYNTHETIC TEST ONLY; no Electron app')
     (root / 'main.py').write_text(MAIN_SOURCE, encoding='utf-8')
-    (root / 'backend.py').write_text(BACKEND_SOURCE, encoding='utf-8')
+    backend_source = BACKEND_SOURCE.replace(binding.BUILD, candidate.commit).replace("app_version='1.0.28'", f"app_version='{candidate.version}'")
+    (root / 'backend.py').write_text(backend_source, encoding='utf-8')
     configuration_path, configuration_fact, snapshot = configuration_reference(
-        folder, disabled_low_signal=disabled_low_signal)
+        folder, disabled_low_signal=disabled_low_signal, candidate=candidate)
     observation.write_json(root / 'fixture-configuration.json', snapshot)
     picture = io.BytesIO()
     Image.new('RGB', (32, 24), (20, 80, 120)).save(picture, 'JPEG')
     (root / 'image.jpg').write_bytes(picture.getvalue())
     files = {p.relative_to(root).as_posix(): raw_fact(p.read_bytes()) for p in root.rglob('*') if p.is_file()}
     reference = folder / 'fixture-reference.json'
-    reference_fact = observation.write_json(reference, dict(candidate_commit=binding.BUILD, version=binding.VERSION,
-        installer_sha256=binding.INSTALLER_SHA, installer_bytes=164618981, payload_files=files,
+    reference_fact = observation.write_json(reference, dict(candidate_commit=candidate.commit, version=candidate.version,
+        installer_sha256=candidate.installer_sha256, installer_bytes=candidate.installer_bytes, payload_files=files,
         payload_file_count=len(files), payload_content_bytes=sum(x['bytes'] for x in files.values())))
     observation.write_json(folder / 'synthetic-provenance.json', dict(classification='PYTHON_PROCESS_AND_HTTP_FIXTURE_NOT_PRODUCT',
                                                                    origins=origin_files))
@@ -247,7 +251,8 @@ def fixture_app(folder, mode='normal', *, disabled_low_signal=False):
                                            ProcessIdentity.read(ready['backend']['pid']), ready['backend']['port'],
                                            reference_sha256=reference_fact['sha256'],
                                            configuration_reference=str(configuration_path),
-                                           configuration_reference_sha256=configuration_fact['sha256'])
+                                           configuration_reference_sha256=configuration_fact['sha256'],
+                                           candidate_commit=candidate.commit)
         observation.write_json(folder / 'fixture-ready.json', dict(main_pid=process.pid, ready=ready))
         yield spec
     finally:

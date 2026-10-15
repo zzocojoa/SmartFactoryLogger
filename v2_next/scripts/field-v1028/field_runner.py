@@ -29,8 +29,8 @@ MODE_FIELDS = {
 
 def validate_request(value):
     binding.require(isinstance(value, dict) and value.get('schema') == SCHEMA
-                    and value.get('candidate_commit') == binding.BUILD
                     and value.get('signature_policy') == 'UNSIGNED_INTERNAL', 'request-identity-policy')
+    candidate = binding.candidate_from_commit(value.get('candidate_commit'))
     mode = value.get('mode')
     binding.require(isinstance(mode, str) and mode in MODE_FIELDS
                     and set(value) == COMMON | MODE_FIELDS[mode], 'request-mode-fields')
@@ -39,9 +39,14 @@ def validate_request(value):
         binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] in durations,
                         'duration-does-not-match-request-mode')
         data = value['spec']
-        binding.require(isinstance(data, dict) and set(data) == {f.name for f in fields(observation.ObservationSpec)},
+        spec_fields = {f.name for f in fields(observation.ObservationSpec)}
+        binding.require(isinstance(data, dict) and set(data) in (spec_fields, spec_fields - {'candidate_commit'}),
                         'observation-spec-fields')
-        binding.require(data['reference_sha256'] == binding.REFERENCE_SHA, 'production-payload-reference-pin')
+        binding.require(data.get('candidate_commit', binding.BUILD) == candidate.commit,
+                        'observation-candidate-mismatch')
+        reference_sha = (binding.REFERENCE_SHA if candidate == binding.CANDIDATE_1028
+                         else binding.REFERENCE_SHA_1029)
+        binding.require(data['reference_sha256'] == reference_sha, 'production-payload-reference-pin')
         for role in ('main', 'backend'):
             binding.require(isinstance(data[role], dict)
                             and set(data[role]) == {f.name for f in fields(ProcessIdentity)}, 'process-identity-fields')
@@ -57,6 +62,7 @@ def validate_request(value):
 
 def execute_phase(request, folder, package):
     mode = validate_request(request)
+    candidate = binding.candidate_from_commit(request['candidate_commit'])
     if mode in ('observe', 'host-diagnostic'):
         data = dict(request['spec'])
         data['main'] = ProcessIdentity(**data['main'])
@@ -71,7 +77,7 @@ def execute_phase(request, folder, package):
                              request['expected_files'], package / 'validate_csv_v2_shadow.exe')
     result = qa.validate_closed_data(bound, request['image_files'], package / 'validate_spot_image_files.exe',
         folder / 'closed-data', request['shutdown_expectation'], request['configuration_reference'],
-        request['configuration_reference_sha256'], timeout=request['validator_timeout_seconds'])
+        request['configuration_reference_sha256'], timeout=request['validator_timeout_seconds'], candidate=candidate)
     return result, result['closed_data_status'] == 'PASS'
 
 
@@ -140,6 +146,7 @@ def main(argv=None):
         if args.describe:
             binding.require(not any(supplied), 'describe-with-run-arguments')
             print(json.dumps(dict(schema=SCHEMA, modes=list(MODE_FIELDS), candidate_commit=binding.BUILD,
+                supported_candidate_commits=[binding.CANDIDATE_1028.commit, binding.CANDIDATE_1029.commit],
                 frozen=bool(getattr(sys, 'frozen', False)), signature_policy='UNSIGNED_INTERNAL',
                 release_gate='HOLD', promotion_allowed=False)))
             return 0

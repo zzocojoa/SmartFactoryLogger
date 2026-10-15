@@ -158,6 +158,7 @@ class RunnerTests(unittest.TestCase):
         spec={f.name:None for f in runner.fields(runner.observation.ObservationSpec)}
         for role in ('main','backend'):spec[role]={f.name:None for f in runner.fields(runner.ProcessIdentity)}
         spec['reference_sha256']=runner.binding.REFERENCE_SHA
+        spec['candidate_commit']=runner.binding.BUILD
         request=dict(schema=runner.SCHEMA,mode='observe',candidate_commit=runner.binding.BUILD,
                      signature_policy='UNSIGNED_INTERNAL',duration_seconds=900,spec=spec)
         self.assertEqual(runner.validate_request(request),'observe')
@@ -167,6 +168,39 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaises(ValueError):runner.validate_request(request)
         request['duration_seconds']=900;spec['reference_sha256']='a'*64
         with self.assertRaises(ValueError):runner.validate_request(request)
+
+    def test_candidate_1029_closed_copy_and_mixed_metadata_rejection(self):
+        candidate=runner.binding.CANDIDATE_1029
+        request,path,output,package=self.prepare(True, disabled_low_signal=True)
+        request['candidate_commit']=candidate.commit
+        request['shutdown_expectation']['build_git_commit']=candidate.commit
+        reference=Path(request['configuration_reference'])
+        config=json.loads(reference.read_bytes())
+        config['snapshot']['build_git_commit']=candidate.commit
+        fingerprint=fixtures.inputs.configuration.canonical_fingerprint(config['snapshot'])
+        for key in ('spot_config_fingerprint_sha256','spot_config_verified_fingerprint_sha256'):
+            config['snapshot'][key]=fingerprint
+        if config['snapshot']['device_config_readback_status']=='matched':
+            config['snapshot']['device_config_fingerprint_sha256']=fingerprint
+        fixtures.save(reference,config)
+        request['configuration_reference_sha256']=fixtures.fact(reference)['sha256']
+        metadata_path=Path(request['data_root'])/request['roles']['metadata']
+        metadata=json.loads(metadata_path.read_bytes())
+        metadata['schema_metadata']['git_commit']=candidate.commit
+        metadata['spot_configuration_snapshot']=config['snapshot']
+        fixtures.save(metadata_path,metadata)
+        request['expected_files'][metadata_path.name]=fixtures.fact(metadata_path)
+        fixtures.save(path,request)
+        code,receipt=self.invoke(path,output,package)
+        self.assertEqual(code,0,receipt)
+        self.assertEqual(receipt['formal_qa_gate'],'HOLD')
+        self.assertFalse(receipt['promotion_allowed'])
+        mixed=self.folder/'mixed';mixed.mkdir()
+        request['shutdown_expectation']['build_git_commit']=runner.binding.BUILD
+        fixtures.save(path,request)
+        code,receipt=self.invoke(path,mixed,package)
+        self.assertEqual(code,1,receipt)
+        self.assertFalse((mixed/'session/closed-data/checks').exists())
 
 
 if __name__ == '__main__':

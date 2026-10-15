@@ -284,13 +284,14 @@ def check_bound_data(bound, image_files, image_executable, output, *, timeout=12
 
 
 def validate_closed_data(bound, image_files, image_executable, output, expected_shutdown,
-                         configuration_path, configuration_sha256, *, timeout=120):
+                         configuration_path, configuration_sha256, *, timeout=120, candidate=binding.CANDIDATE_1028):
     """Require shutdown identity/configuration, both validators and clean context closeout."""
     output = new_directory(output, bound.root)
     result = dict(closed_data_status='FAIL', full_data_gate='NOT_EVALUATED', release_gate='HOLD',
                   promotion_allowed=False, errors=[])
     try:
-        with csv_inputs.shutdown_csv_inputs(bound, expected_shutdown, configuration_path, configuration_sha256):
+        with csv_inputs.shutdown_csv_inputs(bound, expected_shutdown, configuration_path, configuration_sha256,
+                                           candidate=candidate):
             review = bound.receipt['shutdown_review']['configuration_review']
             result.update({key: review[key] for key in
                            ('validation_scope', 'physical_device_gate', 'formal_qa_gate')})

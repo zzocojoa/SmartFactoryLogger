@@ -22,10 +22,12 @@ def positive_sequence(value):
     return type(value) is int and 0 < value <= 2**63 - 1
 
 
-def validate_expectation(expected):
+def validate_expectation(expected, *, candidate=binding.CANDIDATE_1028):
+    binding.require(type(candidate) is binding.CandidateIdentity, 'candidate-identity-type')
+    candidate.validate()
     binding.require(isinstance(expected, dict) and expected.get('schema') == SCHEMA,
                     'shutdown-expectation-schema')
-    binding.require(expected.get('build_git_commit') == binding.BUILD, 'shutdown-expectation-build')
+    binding.require(expected.get('build_git_commit') == candidate.commit, 'shutdown-expectation-build')
     for key in ('logger_service_instance_id', 'spot_service_instance_id'):
         value = expected.get(key)
         binding.require(isinstance(value, str) and str(UUID(value)) == value, 'shutdown-expectation-uuid')
@@ -42,7 +44,7 @@ def validate_expectation(expected):
                     'shutdown-expectation-future-time')
 
 
-def expectation_from_boundary(boundary, backend):
+def expectation_from_boundary(boundary, backend, *, candidate=binding.CANDIDATE_1028):
     """Use the exact final health bytes, not a second unbound HTTP request."""
     binding.require(boundary.get('binding_status') == 'PASS', 'shutdown-boundary-not-passed')
     raw = bytes.fromhex(boundary['health_body_hex'])
@@ -51,22 +53,22 @@ def expectation_from_boundary(boundary, backend):
                     and hashlib.sha256(raw).hexdigest() == record.get('body_sha256'),
                     'shutdown-health-body-binding')
     health = binding.strict_json(raw)
-    sessions = binding.runtime_sessions(health, backend)
+    sessions = binding.runtime_sessions(health, backend, candidate=candidate)
     binding.require(sessions == boundary.get('sessions'), 'shutdown-boundary-sessions')
     operational = health['spot_temperature']['v2_4_operational']
-    expected = dict(schema=SCHEMA, build_git_commit=binding.BUILD, **sessions,
+    expected = dict(schema=SCHEMA, build_git_commit=candidate.commit, **sessions,
                     schema_version=operational.get('schema_version'),
                     csv_file_name=operational.get('current_v2_csv_file_name'),
                     minimum_sample_seq=operational.get('last_sample_seq'),
                     health_body_sha256=record['body_sha256'], observed_at=boundary.get('observed_at'))
-    validate_expectation(expected)
+    validate_expectation(expected, candidate=candidate)
     return expected
 
 
-def review_metadata(metadata, expected, expected_configuration):
+def review_metadata(metadata, expected, expected_configuration, *, candidate=binding.CANDIDATE_1028):
     """Check metadata claims. CSV contents and actual process exit remain gates."""
-    validate_expectation(expected)
-    binding.require(configuration.review_snapshot(expected_configuration)['status'] == 'PASS',
+    validate_expectation(expected, candidate=candidate)
+    binding.require(configuration.review_snapshot(expected_configuration, candidate=candidate)['status'] == 'PASS',
                     'shutdown-configuration-reference-invalid')
     issues = []
     if not isinstance(metadata, dict):
@@ -105,7 +107,7 @@ def review_metadata(metadata, expected, expected_configuration):
               'closeout-persistence-future')
     except (ValueError, OverflowError):
         issues.append('closeout-persistence-time')
-    config_review = configuration.review_snapshot(snapshot, expected_configuration)
+    config_review = configuration.review_snapshot(snapshot, expected_configuration, candidate=candidate)
     return dict(status='PASS' if not issues and config_review['status'] == 'PASS' else 'FAIL',
                 identity_status='FAIL' if issues else 'PASS', issues=issues,
                 configuration_review=config_review, field_gate='NOT_EVALUATED',
@@ -113,7 +115,7 @@ def review_metadata(metadata, expected, expected_configuration):
                 release_gate='HOLD', promotion_allowed=False)
 
 
-def review_shutdown_files(data_directory, expected, reference_path, reference_sha256):
+def review_shutdown_files(data_directory, expected, reference_path, reference_sha256, *, candidate=binding.CANDIDATE_1028):
     """Read exact names under locks; only publish PASS after all contexts close.
 
     No scan for a replacement sidecar and no app/process/setting mutations.
@@ -124,11 +126,11 @@ def review_shutdown_files(data_directory, expected, reference_path, reference_sh
                   release_gate='HOLD', promotion_allowed=False,
                   scope='OBSERVED_IDENTITY_AND_CONFIGURATION_TO_DEFAULT_STREAM_FILES')
     try:
-        validate_expectation(expected)
+        validate_expectation(expected, candidate=candidate)
         directory = binding.plain_path(data_directory)
         csv_path = directory / expected['csv_file_name']
         metadata_path = csv_path.with_suffix('.metadata.json')
-        with configuration.configuration_reference(reference_path, reference_sha256) as config, \
+        with configuration.configuration_reference(reference_path, reference_sha256, candidate=candidate) as config, \
                 binding.locked_read(csv_path) as csv_stream, binding.locked_read(metadata_path) as metadata_stream:
             streams = [(csv_path, csv_stream, 2 * 1024**3), (metadata_path, metadata_stream, 4 * 1024**2)]
             identities = {}
@@ -139,7 +141,7 @@ def review_shutdown_files(data_directory, expected, reference_path, reference_sh
                 result['files'][path.name] = dict(path=str(path), **binding.stream_fact(stream))
             metadata_stream.seek(0)
             metadata = binding.strict_json(metadata_stream.read(4 * 1024**2 + 1))
-            result['review'] = review_metadata(metadata, expected, config)
+            result['review'] = review_metadata(metadata, expected, config, candidate=candidate)
             for path, stream, _ in streams:
                 current = binding.plain_path(path).stat()
                 binding.require((current.st_dev, current.st_ino, current.st_size) == identities[path],

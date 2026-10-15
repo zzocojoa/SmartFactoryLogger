@@ -54,6 +54,7 @@ class RunnerTests(unittest.TestCase):
 
         def fixture(spec, output):
             seen.append(spec)
+            self.assertEqual(spec.candidate, runner.binding.CANDIDATE_1029)
             self.assertEqual(spec.reference, str(self.archive/'candidate-payload.json'))
             self.assertEqual(spec.configuration_reference, str(self.archive/'configuration.json'))
             contract = json.loads(Path(spec.trace_contract_path).read_bytes())
@@ -84,6 +85,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_spec_rejects_changed_pins_extra_fields_and_native_identity(self):
         for key, value in [('reference_sha256', runner.binding.REFERENCE_SHA),
+                           ('candidate_commit', runner.binding.BUILD), ('candidate_commit', None),
                            ('configuration_reference_sha256', 'bad'), ('backend_created_filetime', True),
                            ('backend_created_filetime', 0), ('backend_created_filetime', '134365056356121274'),
                            ('extra', 1), ('main', {'pid': 100})]:
@@ -92,6 +94,16 @@ class RunnerTests(unittest.TestCase):
                 changed['spec'][key] = value
                 with self.assertRaises(ValueError):
                     runner.validate_request(changed)
+
+    def test_explicit_candidate_and_legacy_request_both_bind_1029(self):
+        for explicit in (False, True):
+            with self.subTest(explicit=explicit):
+                if explicit:
+                    self.setUp()
+                    self.request['spec']['candidate_commit'] = runner.binding.CANDIDATE_1029.commit
+                result, _, seen = self.invoke()
+                self.assertEqual(result['status'], 'PASS')
+                self.assertEqual(seen[0].candidate, runner.binding.CANDIDATE_1029)
 
     def test_archived_references_used_and_locked_before_collection(self):
         result, saved, seen = self.invoke()

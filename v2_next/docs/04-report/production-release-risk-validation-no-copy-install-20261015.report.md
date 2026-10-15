@@ -581,3 +581,37 @@ ReadyThread 45,179, thread 2,881건이며 선택 기록의 순서 단절·역전
 고정됨을 확인했다. 이 도우미를 1.0.29에 그대로 적용하지 않고 후보 식별 지원과 영향 검사를
 보완해야 한다. 15분/120분·전체 데이터 QA·물리 경계와 정식 출시/운영 승격은 미완료/HOLD다.
 이번 턴은 실제 진전이며 목표는 active로 유지한다.
+
+### 2026-10-16 1.0.29 장기 관찰 도우미의 후보 전달 보완
+
+설계 5.22에 따라 기존 `field_runner`가 알려진 1.0.28/1.0.29 후보만 명시적으로 선택하게 했다.
+외부 요청·관찰 spec·payload reference SHA를 대조하고 같은 후보를 설정, 모든 health 원문,
+종료 기대값, 종료 metadata 및 CSV 검증까지 전달한다. 기존 1.0.28 요청과 1.0.29 전용 6초
+진단 요청의 호환성은 유지한다. 알려지지 않은 후보·버전 혼합·느린 첫 health의 거부와
+물리 NOT_TESTED/정식 QA HOLD 조건은 유지한다. 제품 설치본은 재빌드하거나 교체하지 않았다.
+
+근거 루트는 `Desktop/SmartFactory/PDCA_OBSERVE29_20261016_2975e4a1`이다.
+첫 회귀 121개 중 새 합성 종료 자료 1건은 commit 변경 뒤 fingerprint를 갱신하지 않아
+정상 거부됐다. 합성 자료를 수정하고 영향받은 runner 및 6초 진단/추적 검사 40개를 다시
+실행해 exit 0을 확인했다. 두 실행의 최종 결과를 대조한 고유 검사 149개가 통과했다.
+처음 환경 설정을 잘못 읽은 후속 실행은 import 단계에서 exit 1이며 원문을 보존했다.
+native PowerShell 도우미 14개 계약 검사도 exit 0이다(ACL descriptor만 검증, 관리자 적용 아님).
+
+시작 명령은 32비트 창의 `Sysnative`, 64비트 창의 `System32`에서 64비트 PowerShell 5.1을
+선택한다. 실제 두 아키텍처에서 정상 probe와 잘못된 controller SHA 거부 4건을 확인했다.
+이는 시작 경로 검사이며 배포용 실행 파일·최종 패키지·서버 실행 검증은 별도다.
+
+`npm run health`는 exit 1이다. backend 932개 중
+`test_cancel_pending_peer_wait_cannot_exit_successfully`가 receipt 준비 대기 3초에서
+TimeoutError였고 기존 비공개 F01 fixture 1개는 skip이다. 변경된 field 도우미를 import하지
+않는 기존 종료 시험이며, 해당 모듈 단독 31개 재실행은 exit 0이다. 이번 실패 순간의 세부
+I/O 증거가 없어 원인은 미확정이다. 과거 receipt 시간 의존성 기록과 연결하되 이번 실패를
+수정/통과로 바꾸지 않는다. 제품 코드와 시간 제한도 변경하지 않았다.
+
+앞선 health의 의존성·Electron·frontend 타입/린트/437검사·backend Ruff/mypy 단계는 통과했다.
+short-circuit로 실행되지 않은 `npm run health:qa:selftest`는 별도 실행해 exit 0,
+`npm --prefix frontend run build`도 exit 0이다. 빌드는 Zod 주석 경고 2건을 남겼다.
+변경 Python의 Ruff E9/F821은 exit 0이다. 전체 health의 성공을 주장하지 않는다.
+08:14 서버 화면은 Running, 제품 60313·금형 1로 관찰했으며 값을 변경하지 않았다.
+다음 단계는 clean helper commit의 배포용 묶음 검증과 서버 최종 전달이다.
+현장 15분/120분·전체 데이터 QA·물리 경계·정식 출시/운영 승격은 계속 미완료/HOLD다.

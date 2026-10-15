@@ -133,13 +133,13 @@ class ShutdownTests(unittest.TestCase):
         data, reference, sha = self.prepare_files()
         original = shutdown.review_metadata
 
-        def under_locks(*args):
+        def under_locks(*args, **kwargs):
             for path in data.iterdir():
                 with self.assertRaises(PermissionError):
                     path.write_bytes(b'changed')
                 with self.assertRaises(PermissionError):
                     path.unlink()
-            return original(*args)
+            return original(*args, **kwargs)
 
         with patch.object(shutdown, 'review_metadata', side_effect=under_locks):
             result = shutdown.review_shutdown_files(data, self.expected, reference, sha)
@@ -164,8 +164,8 @@ class ShutdownTests(unittest.TestCase):
         original = configuration.configuration_reference
 
         @contextmanager
-        def fail_closeout(*args):
-            with original(*args) as snapshot:
+        def fail_closeout(*args, **kwargs):
+            with original(*args, **kwargs) as snapshot:
                 yield snapshot
                 raise OSError('injected-shutdown-reference-closeout')
 

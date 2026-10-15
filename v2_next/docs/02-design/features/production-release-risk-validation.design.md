@@ -609,3 +609,30 @@ FILETIME/UTC/초 값, CIM 생성 시각·부모·실행 경로, backend의 8000 
 --result-sha256 <콘솔 SHA> --request-sha256 <전달한 요청 SHA> --launch-exit 0
 --output <회수 폴더 밖 새 JSON>`을 한 줄로 실행한다. fixture/CLI 검사는
 `test_review_health_runtime_identity.py`이며 실제 서버 결과 검토를 대신하지 않는다.
+
+### 5.22 1.0.29 장기 관찰과 종료 데이터의 후보 식별 전달
+
+6초 현장 진단 다음 단계의 900/7200초 관찰에는 같은 `acaf77d` 설치본을 사용한다.
+도우미의 후보 식별을 명시적으로 전달하며 제품을 재빌드하지 않는다. 허용 후보는 기존
+`CandidateIdentity`의 1.0.28/1.0.29 두 값뿐이다. 외부 요청의 commit, 관찰 spec의
+`candidate_commit`, 고정 payload reference SHA가 일치해야 한다. 이전 1.0.28 요청은 spec의
+새 필드가 없어도 같은 1.0.28 기본값으로 해석하며, 1.0.29 요청에서 필드 누락은 거부한다.
+
+선택한 후보는 설치 payload·모든 health 원문·설정 기준·마지막 health에서 만드는 종료 기대값,
+종료 metadata와 CSV 입력 잠금·검증기에 전달한다. host 진단도 같은 관찰 경로를 사용한다.
+commit 문자열만 허용하거나 payload/설정/metadata에서 후보를 자동 추론하지 않는다.
+각 단계의 hash, 정확한 파일 목록, 실행 세대, 처음/마지막 health의 200ms 조건, 시간 제한,
+소유 프로세스 정리와 HOLD/미평가 gate는 유지한다. UI·packet·물리 시험도 별도 조건이다.
+
+검증은 실제 격리 Python 프로세스와 loopback fixture를 사용해 두 후보의 관찰 및 종료
+기대값을 확인하고, 후보 혼합·기준 SHA 혼합·잘못된 설정/metadata·느린 첫 health를 거부한다.
+기존 관찰/runner/종료/CSV/닫힌 데이터 회귀도 실행한다. 이 검사는 합성 개발 검증이며
+서버 전달·동일 설치본의 실제 15분/120분과 전체 데이터 QA를 대신하지 않는다.
+
+6초 전용 `HealthCollectionSpec`은 기존처럼 1.0.29만 허용한다. 상위 spec의 새 필드가
+기존 6초 요청을 깨뜨리지 않도록 이 전용 경로의 기본값은 1.0.29로 고정하고,
+명시된 다른 후보는 수집 전에 거부한다. 기존 고정 요청 파일은 변경하지 않는다.
+
+사용자가 32비트 PowerShell에서 시작해도 launcher는 `Sysnative`를 통해 64비트
+Windows PowerShell 5.1을 선택한다. 64비트 시작 창에서는 `System32`를 사용한다.
+패키지 시험에서 두 시작 창의 실제 실행·종료 코드와 잘못된 hash 거부를 확인한다.

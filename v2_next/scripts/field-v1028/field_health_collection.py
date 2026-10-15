@@ -22,10 +22,12 @@ from field_host_sampling import WindowsProcessReader
 
 @dataclass(frozen=True)
 class HealthCollectionSpec(observation.ObservationSpec):
+    candidate_commit: str = binding.CANDIDATE_1029.commit
     backend_created_filetime: int = 0
 
     def validate(self):
         super().validate()
+        binding.require(self.candidate == binding.CANDIDATE_1029, 'diagnostic-candidate-required')
         binding.require(type(self.backend_created_filetime) is int
                         and 0 < self.backend_created_filetime < 2**64,
                         'external-backend-native-generation-required')

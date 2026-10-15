@@ -220,18 +220,18 @@ class CsvInputs:
 
 
 @contextmanager
-def shutdown_csv_inputs(bound, expected_shutdown, configuration_path, configuration_sha256):
+def shutdown_csv_inputs(bound, expected_shutdown, configuration_path, configuration_sha256, *, candidate=binding.CANDIDATE_1028):
     """Check the observed shutdown and pinned attestation against the SAME held metadata.
 
 The caller must authenticate expected_shutdown's observation provenance and
 record the consumer's real exit. No process exit or physical QA is inferred.
     """
-    with bound, configuration.configuration_reference(configuration_path, configuration_sha256) as reference:
-        shutdown.validate_expectation(expected_shutdown)
+    with bound, configuration.configuration_reference(configuration_path, configuration_sha256, candidate=candidate) as reference:
+        shutdown.validate_expectation(expected_shutdown, candidate=candidate)
         binding.require(bound.roles['v2'] == expected_shutdown['csv_file_name'], 'observed-csv-input-name')
         stream = bound.held[bound.paths['metadata']][0]
         stream.seek(0)
-        review = shutdown.review_metadata(binding.strict_json(stream.read()), expected_shutdown, reference)
+        review = shutdown.review_metadata(binding.strict_json(stream.read()), expected_shutdown, reference, candidate=candidate)
         bound.receipt.update(shutdown_review=review, shutdown_expectation=deepcopy(expected_shutdown),
                              configuration_reference_sha256=configuration_sha256)
         binding.require(review['status'] == 'PASS', 'shutdown-csv-identity-or-configuration-failed')

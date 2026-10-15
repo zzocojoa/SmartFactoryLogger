@@ -34,8 +34,11 @@ def validate_request(value):
     binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] == 6,
                     'health-request-fixed-six-seconds')
     data = value['spec']
-    binding.require(isinstance(data, dict) and set(data) == {f.name for f in fields(collection.HealthCollectionSpec)},
+    spec_fields = {f.name for f in fields(collection.HealthCollectionSpec)}
+    binding.require(isinstance(data, dict) and set(data) in (spec_fields, spec_fields - {'candidate_commit'}),
                     'health-request-spec-members')
+    binding.require(data.get('candidate_commit', binding.CANDIDATE_1029.commit)
+                    == binding.CANDIDATE_1029.commit, 'health-request-spec-candidate')
     binding.require(data['reference_sha256'] == PAYLOAD_SHA256
                     and trace.digest(data['configuration_reference_sha256']), 'health-request-reference-pins')
     for role in ('main', 'backend'):

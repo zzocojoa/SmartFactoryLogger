@@ -1,7 +1,9 @@
 & {
     Set-StrictMode -Version Latest
     $ErrorActionPreference='Stop'
-    $fieldNative=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+    if(-not [Environment]::Is64BitOperatingSystem){throw '64-bit-Windows-required'}
+    $fieldSystem=if([Environment]::Is64BitProcess){'System32'}else{'Sysnative'}
+    $fieldNative=[IO.Path]::Combine([Environment]::GetFolderPath('Windows'),$fieldSystem,'WindowsPowerShell\v1.0\powershell.exe')
     $fieldSavedModules=$env:PSModulePath
     $fieldSavedPath=$env:PATH
     $fieldBootstrap=@'

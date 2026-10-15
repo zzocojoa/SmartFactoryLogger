@@ -49,6 +49,14 @@ CANDIDATE_1028 = CandidateIdentity(BUILD, VERSION, INSTALLER_SHA, 164618981)
 CANDIDATE_1029 = CandidateIdentity(
     'acaf77d95101a050f4d3ecd76125d3502036f5a7', '1.0.29',
     '3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7', 164824610)
+REFERENCE_SHA_1029 = '658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
+
+
+def candidate_from_commit(commit):
+    for candidate in (CANDIDATE_1028, CANDIDATE_1029):
+        if type(commit) is str and commit == candidate.commit:
+            return candidate
+    raise ValueError('unsupported-candidate-commit')
 
 
 def require(condition, reason):

@@ -39,8 +39,14 @@ class ObservationSpec:
     extras: dict = field(default_factory=dict)
     configuration_reference: str = ''
     configuration_reference_sha256: str = ''
+    candidate_commit: str = binding.BUILD
+
+    @property
+    def candidate(self):
+        return binding.candidate_from_commit(self.candidate_commit)
 
     def validate(self):
+        self.candidate.validate()
         binding.plain_path(self.root)
         binding.plain_path(self.reference)
         self.main.validate()
@@ -215,7 +221,8 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
         binding.require(len(raw) == row['body_bytes']
                         and hashlib.sha256(raw).hexdigest() == row['body_sha256'], 'health-body-binding')
         try:
-            if not row['request_success'] or binding.runtime_sessions(binding.strict_json(raw), spec.backend) != sessions:
+            if not row['request_success'] or binding.runtime_sessions(
+                    binding.strict_json(raw), spec.backend, candidate=spec.candidate) != sessions:
                 issues.append(f'health-{sequence}-session')
         except Exception as error:
             issues.append(f'health-{sequence}-{type(error).__name__}')
@@ -281,9 +288,10 @@ def run_observation(spec, output, duration_seconds, stop, notify):
               'started_utc': datetime.now(timezone.utc).isoformat()}
     try:
         with binding.InstalledPayload(spec.root, spec.reference,
-                                      expected_reference_sha256=spec.reference_sha256, extras=spec.extras) as payload, \
+                                      expected_reference_sha256=spec.reference_sha256, extras=spec.extras,
+                                      candidate=spec.candidate) as payload, \
                 configuration_binding.configuration_reference(spec.configuration_reference,
-                    spec.configuration_reference_sha256) as expected_configuration:
+                    spec.configuration_reference_sha256, candidate=spec.candidate) as expected_configuration:
             result.update(configuration_binding.scope_fields(expected_configuration))
             initial = binding.capture_runtime_binding(payload, spec.main, spec.backend, spec.port)
             write_json(output / 'initial.json', initial)
@@ -337,7 +345,8 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                 reference_sha256=spec.configuration_reference_sha256, scope='REPORTED_CONFIGURATION_BOUNDARIES')
             result['closeout'] = payload.recheck()
             result['review'] = review_window(spec, output, origin, duration_seconds, sessions, [initial, final])
-            result['shutdown_expectation'] = shutdown_binding.expectation_from_boundary(final, spec.backend)
+            result['shutdown_expectation'] = shutdown_binding.expectation_from_boundary(
+                final, spec.backend, candidate=spec.candidate)
             result['shutdown_expectation_file'] = write_json(output / 'shutdown-expectation.json',
                                                             result['shutdown_expectation'])
             if (result['review']['status'] == 'PASS' and not stop.is_set()
