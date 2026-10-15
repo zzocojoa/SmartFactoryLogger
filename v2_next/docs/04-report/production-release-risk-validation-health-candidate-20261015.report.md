@@ -1,6 +1,6 @@
 # 1.0.29 health 진단 후보 패키지 검증
 
-작성일: 2026-10-15. 상태: **패키지·frozen backend 진단 검증 완료, 출시 HOLD**.
+작성일: 2026-10-15. 상태: **패키지·격리 설치/lifecycle/데이터 검증 기록 확보, 기존 버전 오류로 전체 검토 HOLD, 출시 HOLD**.
 
 현장 `/health` 203.1356ms 실패의 내부 처리 구간을 구분하기 위해 추가한 선택적 진단을
 새 후보에 포함했다. 이전 1.0.28 설치본과 구별하도록 버전만 1.0.29로 갱신했다.
@@ -56,14 +56,74 @@
 처음 C: 여유 공간이0.9GB까지 관찰돼 빌드를 보류했으며 이후24.9GB 확인 뒤 시작했다.
 공간이 회복된 원인은 확인하지 않았고 이번 작업에서 기존 파일을 삭제하거나 이동하지 않았다.
 
-## 남은 실행 체크리스트
+## 실행 상태와 남은 체크리스트
 
-1. 이 **동일 installer SHA**로 격리 설치·업그레이드·재시작·복구와 Electron 실제 lifecycle을 검증한다.
+1. 이 **동일 installer SHA**의 격리 설치·업그레이드·재시작·복구와 Electron 실제 lifecycle 검증을 수행했다.
+   아래 후속 결과의 기존 1.0.26 오류를 보존하며, 전체 검토를 PASS로 바꾸지 않는다.
 2. 새 candidate에 맞춘 제한 진단을 exact payload/listener/session/native generation 및 같은 실행 ETW와
    연결하고, 원격 UI 가용성을 확인한 뒤 서버 로컬 최종 폴더까지 전달한다.
 3. 실제 현장 지연 원인을 확인·보완한 뒤 영향받은 현장 QA를 수행한다. 같은15분 시험을 통과할 때까지
    반복하거나200ms 기준을 늘리지 않는다. 선행 조건 전120분 시험과 운영 승격은 진행하지 않는다.
 
-Electron 코드 일치는 확인했지만 이번에는 Electron 앱 실행·설치·복구를 수행하지 않았다.
-서버 접근·변경, 실제 장비 물리 시험도 수행하지 않았다. 설치본 QA/현장15분 FAIL/120분 미시작/
-물리 경계 NOT_TESTED/전체 데이터 미결/R1–R6 및 출시 HOLD는 계속 열려 있다.
+위 빌드 단계에서는 Electron 코드 일치만 확인했다. 이후 실제 실행·설치·복구 결과는 아래에
+구분해 기록한다. 서버 접근·변경, 실제 장비 물리 시험은 수행하지 않았다.
+현장15분 FAIL/120분 미시작/물리 경계 NOT_TESTED/전체 데이터 미결/R1–R6 및 출시 HOLD는 유지한다.
+
+## 2026-10-15 동일 설치본의 격리 설치·실행·복구
+
+네트워크·클립보드·장치 전달을 차단한 새 Windows Sandbox에서 실행했다.
+입력805파일/378,494,001bytes는 읽기 전용이며 실행별 새 출력 폴더만 쓰기 가능했다.
+guest의 WDAGUtilityAccount/Virtual Machine/IPv4 loopback과 입력 전체 해시를 확인한 뒤
+guest 로컬 사본을 다시 검산했다. Python3.12.6 x64/Pillow12.3.0/psutil7.2.1을 사용했다.
+실제 장비 대신 loopback 통신 응답을 제공했으며 제품 driver/lifecycle 코드는 교체하지 않았다.
+
+| 실제 절차 | 결과 |
+|---|---|
+| 1.0.29 새 설치 및 앱 실행 전 제거 | NSIS/제거 각각 exit0, payload1,867파일·등록·바로가기 일치 |
+| 1.0.26 설치 → 수집 → 정상 종료 | installer0, Electron0/backend0, CSV321행·이미지66개 |
+| 1.0.29 업그레이드 → 수집 → 정상 종료 | installer0, Electron0/backend0, CSV322행·이미지67개 추가 |
+| 1.0.29 재시작 → 수집 → 정상 종료 | Electron0/backend0, CSV314행·이미지67개 추가, 이전 history cursor reset 확인 |
+| 1.0.26 복구 설치 → 수집 → 정상 종료 | installer0, Electron0/backend0, CSV315행·이미지66개 추가 |
+
+업그레이드와 복구 설치 전후의 설정·프로필·데이터 바이트가 동일했다.
+각 앱 실행은 약74–75초이며 건강 상태/API/이미지/작업 정보 표본15개씩 총60개를 확인했다.
+이는 현장15분 성능 시험이 아니다. 네 실행 모두 잔존 프로세스·8000수신 포트가 없었고,
+강제 종료를 사용하지 않았다. 후보 두 실행은 renderer의 요청 정리 완료가 backend 종료 시작보다 앞섰다.
+
+### 보관 결과 재검산과 실패 범위
+
+- `execute_matrix.py`: host CLI/guest/native child 모두 exit0, 전체408.265초.
+  의도적으로 exit7을 반환한 대조 실행으로 종료 코드 수집도 확인했다.
+- `review_matrix.py`: **exit1, HOLD_REVIEW_FINDINGS**, 140항목 중136통과/4실패.
+  실패는 네 단계의 누적 ERROR 로그 검사다. 1.0.26 최초 실행 종료 때
+  `/api/spot/live_image.jpg`의 `502 / shutdown` 기록1개, 복구 후 종료 때2개가 추가됐다.
+  후보1.0.29 두 실행의 추가 ERROR/traceback은 각각0이다. 기존 기록을 지우거나
+  누적 검사 기준을 완화하지 않았다. 이는 네 개의 독립된 후보 결함이라는 뜻도 아니다.
+- 동일 clean 후보 소스의 `validate_csv_v2_shadow.py`4회와
+  `validate_spot_image_files.py`4회가 모두 exit0였다. CSV1,272행,
+  SPOT observation98행, 최종 이미지266개를 대조했다. 이전 CSV/metadata/이미지와
+  fact append prefix 보존, manifest/hash, 저장 완료 및 writer failure/drop/잔여 queue0을 확인했다.
+- CSV 검사는 위치 항목 `MainRamPosition_D0010`, `ContainerPosition_D0012`가 비었다는
+  경고를 남겼다. 제품 교체·공정 단계 event fact는 이번 입력에서0행으로 실측 검증하지 못했다.
+  이미지 연결 후처리와 실제 서버 전체 데이터 판정도 이번 검사의 범위 밖이다.
+- 후보 실행 두 차례의 일반 health2건에는 timing 헤더가 없었다. 진단8건은 외부에서 읽은
+  backend PID/생성 FILETIME과 전후 listener 소유자를 확인하고 raw body/header를 보관했다.
+  보관 원문을 다시 읽은 strict consumer8회가 모두 `REQUEST_AND_NATIVE_CLOCK_BOUND`였고
+  실행 시 결과와 같았다. ETW coverage·정확한 CPU 시간·현장 지연 원인 판정은 아니다.
+- `finalize_matrix.py` exit0: 앱/backend/fixture Python과 관련 포트가 모두 없는 상태를 확인했다.
+  출력1,002파일/12,979,519bytes를 해시로 보존한 뒤 이번 Sandbox만 종료했고,
+  종료 후에도 모든 결과 파일이 동일했다. `record_verification.py` exit0은 위 증거의
+  일관성 확인이며 전체 검토 exit1을 덮어쓰지 않는다.
+
+원문 실행 루트: `C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_NSIS_20261015_38b56536`.
+`matrix-verification.json`: 51,737bytes, SHA256
+`05672d116ad5e93ee147b091f13dcec563fd0239bc47740c61f97e5c1e66c65a`.
+`closed-output-manifest.json`: SHA256
+`36462e705b51d853aeee842be58392c31b850f262d6b67afc107dcacf2abfa44`.
+
+제품 코드·설치본을 변경하거나 다시 빌드하지 않았다. 빌드 checkout은 여전히 clean
+`acaf77d9`다. 따라서 제품 전체 health 검사를 중복 실행하지 않았고 앞선 실제 결과를 연결했다.
+이번 작업의 도우미 구문/import·실제 guest 실행·검산은 변경한 최종 바이트로 수행했다.
+실제 화면의 시각적 상태·프레임 성능·장시간 현장 QA는 확인하지 않았다.
+다음은 동일 후보에 맞춘 제한 현장 진단 준비와 서버 로컬 전달이며,
+기존 서버 설치본·운영/롤백 기준·200ms 기준·출시 HOLD는 유지한다.

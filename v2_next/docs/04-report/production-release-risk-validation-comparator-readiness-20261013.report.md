@@ -2021,3 +2021,19 @@ frozen backend 일반1/진단4요청·정상 exit0을 확인했다. 기존 priva
 Electron 실제 실행·설치/복구·현장 검증은 다음 단계이며 출시HOLD를 유지한다.
 상세 원문·해시·검증 한계와 실행 체크리스트는
 [1.0.29 후보 검증 보고](production-release-risk-validation-health-candidate-20261015.report.md)에 기록했다.
+
+### 2026-10-15 동일 1.0.29 설치본의 실제 격리 lifecycle 후속 결과
+
+오프라인 Windows Sandbox에서 새 설치/제거, 1.0.26→1.0.29 업그레이드, 재시작,
+1.0.26 복구와 네 차례 실제 Electron/backend 정상 종료를 수행했다. 설치·실행 도우미 exit0,
+각 native 종료0, 업그레이드/복구의 설정·프로필·데이터 바이트 보존을 확인했다.
+CSV/이미지 validator8회 exit0, 후보 진단8건의 raw 요청/native 시계 재검산도 일치했다.
+
+별도 검토는140항목 중136통과/4실패로 **exit1/HOLD_REVIEW_FINDINGS**다.
+실패4개는 기존1.0.26 종료 시 생긴 이미지502/shutdown 기록의 누적 검사이며,
+새 후보 두 실행에는 추가 ERROR/traceback이 없다. 원본 오류·검사 기준을 보존했다.
+게스트 종료 전 프로세스/포트 부재와 출력1,002파일 전체 해시를 확인하고 Sandbox를 종료했다.
+근거는 `PDCA_HEALTH_NSIS_20261015_38b56536/matrix-verification.json`,
+SHA256 `05672d116ad5e93ee147b091f13dcec563fd0239bc47740c61f97e5c1e66c65a`다.
+실행별 약74–75초의 합성 장비 검증이며 현장15분/120분·물리 시험을 대신하지 않는다.
+상세 실패·경고·범위와 다음 체크리스트는 위 후보 검증 보고에 반영했다.
