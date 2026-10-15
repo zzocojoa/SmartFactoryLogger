@@ -1,0 +1,186 @@
+"""Handshake tests with real files/native locks and synthetic coordinator inputs."""
+from dataclasses import replace
+import hashlib
+import json
+import os
+from pathlib import Path
+import threading
+import unittest
+from unittest.mock import patch
+
+import field_health_trace as trace
+from field_resource_sampling import ProcessIdentity
+
+
+ROOT = Path(os.environ['SFL_HEALTH_TRACE_TEST_ROOT'])
+
+
+class TraceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        ROOT.mkdir()
+
+    def setUp(self):
+        self.root = ROOT/str(len(list(ROOT.iterdir())))
+        self.root.mkdir()
+        self.channel = self.root/'trace-channel'
+        self.channel.mkdir()
+        for name in ('payload.json', 'config.json'):
+            (self.root/name).write_text('{}')
+        self.contract = dict(schema='sfl-health-trace-contract-v1', scope=trace.SCOPE, run_id='b'*32,
+            channel_path=str(self.channel), package_sha256='c'*64, backend_pid=101,
+            backend_created_filetime=1000, main_pid=100, duration_seconds=6, guard_seconds=30,
+            release_gate='HOLD', promotion_allowed=False)
+        self.path = self.channel/'contract.json'
+        trace.observation.write_json(self.path, self.contract)
+        self.spec = trace.TracedHealthCollectionSpec(str(self.root), str(self.root/'payload.json'),
+            ProcessIdentity(100, 1.0, os.path.normcase(str(self.root/'smart-factory.exe'))),
+            ProcessIdentity(101, 2.0, os.path.normcase(str(self.root/'backend.exe'))), 8000,
+            configuration_reference=str(self.root/'config.json'), configuration_reference_sha256='a'*64,
+            backend_created_filetime=1000, trace_contract_path=str(self.path),
+            trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+        self.evidence = self.root/'evidence'
+        self.evidence.mkdir()
+        self.handshake = trace.HealthTraceHandshake(self.spec, 6, self.evidence)
+        self.stop = threading.Event()
+
+    def test_contract_pin_scope_budget_reuse_and_no_replacement(self):
+        for key, value in [('scope', 'FIELD_QA'), ('guard_seconds', 8), ('duration_seconds', True),
+                           ('backend_pid', 102), ('backend_created_filetime', 1001), ('promotion_allowed', True)]:
+            self.setUp()
+            changed = dict(self.contract, **{key: value})
+            self.path.write_text(json.dumps(changed))
+            spec = replace(self.spec, trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                with trace.HealthTraceHandshake(spec, 6, self.evidence):
+                    pass
+        self.setUp()
+        with self.assertRaises(ValueError):
+            with trace.HealthTraceHandshake(replace(self.spec, trace_contract_sha256='0'*64), 6, self.evidence):
+                pass
+        self.setUp()
+        trace.publish(self.channel, 'existing.json', {'value': 1})
+        with self.assertRaisesRegex(ValueError, 'trace-channel-already-used'):
+            with self.handshake:
+                pass
+        with self.assertRaisesRegex(ValueError, 'trace-publication-already-exists'):
+            trace.publish(self.channel, 'existing.json', {'value': 2})
+        self.assertEqual(json.loads((self.channel/'existing.json').read_bytes()), {'value': 1})
+
+    def test_wait_stop_deadline_and_coordinator_failure(self):
+        with self.handshake as h:
+            with self.assertRaisesRegex(ValueError, 'trace-handshake-deadline'):
+                h.wait('missing.json', self.stop, 0)
+            self.stop.set()
+            with self.assertRaises(InterruptedError):
+                h.wait('missing.json', self.stop, 1)
+            self.stop.clear()
+            trace.publish(self.channel, 'capture-failed.json', dict(schema='sfl-health-trace-failed-v1', **h.common()))
+            with self.assertRaisesRegex(ValueError, 'trace-coordinator-failed'):
+                h.wait('missing.json', self.stop, 1)
+
+    def test_wait_rejects_different_run_and_boolean_promotion(self):
+        with self.handshake as h:
+            trace.publish(self.channel, 'wrong.json', dict(h.common(), run_id='d'*32))
+            with self.assertRaisesRegex(ValueError, 'trace-handshake-run-binding'):
+                h.wait('wrong.json', self.stop, 1)
+            trace.publish(self.channel, 'numeric-gate.json', dict(h.common(), promotion_allowed=0))
+            with self.assertRaisesRegex(ValueError, 'trace-gate-claim'):
+                h.wait('numeric-gate.json', self.stop, 1)
+
+    def coordinator_go(self, handshake):
+        directory = self.root/'SmartFactory'/('T'+'d'*12)
+        directory.mkdir(parents=True)
+        lease = dict(schema='sfl-health-trace-lease-v1', scope=trace.SCOPE, run_id=self.contract['run_id'],
+            run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=30, capture_seconds=6,
+            stop_timeout_seconds=60, profile_sha256=trace.PROFILE_SHA256,
+            contract_sha256=self.spec.trace_contract_sha256, package_sha256=self.contract['package_sha256'],
+            parent_pid=200, parent_created_filetime='2000', release_gate='HOLD', promotion_allowed=False)
+        lease_fact = trace.observation.write_json(directory/'lease.json', lease)
+        ready = dict(instance=lease['instance'], lease_sha256=lease_fact['sha256'])
+        ready_fact = trace.observation.write_json(directory/'ready.json', ready)
+        trace.observation.write_json(directory/'start-intent.json', dict(lease_sha256=lease_fact['sha256'],
+            manifest_sha256=self.contract['package_sha256'], instance=lease['instance'], observed_before_start='ABSENT',
+            guard_pid=300, guard_created_filetime='3000'))
+        go = dict(schema='sfl-health-trace-go-v1', **handshake.common(),
+            collector_ready_sha256=handshake.ready_fact['sha256'], worker=handshake.worker,
+            trace_run_path=str(directory), lease_sha256=lease_fact['sha256'], trace_ready_sha256=ready_fact['sha256'],
+            instance=lease['instance'], guard=dict(pid=300, created_filetime='3000'))
+        trace.publish(self.channel, 'capture-go.json', go)
+        return go, trace.observation.file_fact(self.channel/'capture-go.json')
+
+    def bind(self, handshake, mutation=None):
+        def go_wait(name, stop, seconds):
+            value, fact = self.coordinator_go(handshake)
+            if mutation:
+                mutation(value)
+            return value, fact
+        with patch.object(trace, 'WindowsProcessReader') as reader, patch.object(handshake, 'wait', side_effect=go_wait), \
+                patch.object(trace, 'generation_alive') as alive:
+            reader.return_value.read.return_value = dict(status='CAPTURED', pid=os.getpid(), created_100ns=1234)
+            value = handshake.begin({}, self.stop)
+        self.assertEqual(alive.call_count, 2)
+        return value
+
+    def test_begin_binds_guard_lease_ready_and_native_generation(self):
+        with self.handshake as h:
+            value = self.bind(h)
+            self.assertEqual(value['go']['instance'], value['lease']['instance'])
+            ready = json.loads((self.channel/'collector-ready.json').read_bytes())
+            self.assertEqual(ready['evidence_directory'], str(self.evidence))
+            with self.assertRaises(OSError):
+                with self.path.open('w'):
+                    pass
+
+    def test_begin_rejects_changed_ready_worker_or_lease(self):
+        for key, value in [('collector_ready_sha256', '0'*64), ('worker', {'pid': 1}),
+                           ('lease_sha256', '0'*64), ('trace_ready_sha256', '0'*64), ('instance', 'wrong')]:
+            self.setUp()
+            with self.subTest(key=key), self.handshake as h, self.assertRaises(ValueError):
+                self.bind(h, lambda go: go.update({key: value}))
+
+    def stopped(self, handshake, mutation=None):
+        directory = Path(handshake.binding['trace_run_path'])
+        raw = b'FAKE_ETL_FOR_CONTRACT_UNIT_TEST_ONLY'
+        (directory/'trace.etl').write_bytes(raw)
+        etl = trace.observation.file_fact(directory/'trace.etl')
+        result = dict(status='CONTROL_FLOW_COMPLETE', lease_sha256=handshake.binding['lease_sha256'],
+            instance=handshake.binding['instance'], cleanup_confirmed=True, trace_saved=True,
+            cancelled_without_trace=False, reason='controller-requested-stop', errors=[], etl=etl)
+        if mutation:
+            mutation(result)
+        fact = trace.observation.write_json(directory/'result.json', result)
+        ended = dict(schema='sfl-health-trace-stopped-v1', **handshake.common(),
+            window_sha256=trace.observation.file_fact(self.channel/'capture-complete.json')['sha256'],
+            guard_exit=0, trace_result=fact, etl=etl)
+        return ended, trace.publish(self.channel, 'capture-stopped.json', ended)
+
+    def test_finish_requires_saved_trace_and_expected_stop_reason(self):
+        with self.handshake as h:
+            self.bind(h)
+            with patch.object(h, 'wait', side_effect=lambda *args: self.stopped(h)):
+                result = h.finish({'probe-000.json': {'sha256': 'f'*64, 'bytes': 1}}, self.stop)
+            self.assertGreater(result['etl']['bytes'], 0)
+        for key, value in [('reason', 'guard-deadline'), ('cleanup_confirmed', False), ('trace_saved', False),
+                           ('cancelled_without_trace', True), ('errors', ['failure'])]:
+            self.setUp()
+            with self.subTest(key=key), self.handshake as h:
+                self.bind(h)
+                with patch.object(h, 'wait', side_effect=lambda *args: self.stopped(h, lambda r: r.update({key: value}))), \
+                        self.assertRaisesRegex(ValueError, 'trace-terminal-status'):
+                    h.finish({}, self.stop)
+
+    def test_abort_and_wrong_native_generation_do_not_claim_success(self):
+        with self.handshake as h:
+            h.abort('ValueError')
+            first = (self.channel/'capture-abort.json').read_bytes()
+            h.abort('OtherError')
+            self.assertEqual(first, (self.channel/'capture-abort.json').read_bytes())
+        with patch.object(trace, 'WindowsProcessReader') as reader:
+            reader.return_value.read.return_value = dict(status='UNAVAILABLE')
+            with self.assertRaisesRegex(ValueError, 'trace-owner-generation-unavailable-or-changed'):
+                trace.generation_alive(20, 1000)
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

@@ -2081,3 +2081,23 @@ trace1구간을 독립 원문 XML 계산과 대조해 정수 구간32개가 모�
 같은 실행의 실제 health 수집/WPR 통합·보호된 서버 실행기·서버 전달이 다음 단계다.
 제품/설치본/서버와 기존15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD는 유지한다.
 상세 근거·사용 예·실패 한계는 [후보 검증 보고](production-release-risk-validation-health-candidate-20261015.report.md)에 기록했다.
+
+### 2026-10-15 실제 health/WPR 동일 실행 통합
+
+별도6초 수집/30초 guard 계약으로 실제 설치1.0.29의 health3건과 Windows 추적을 연결했다.
+수집 worker·coordinator·guard 모두 exit0, 실제 앱/backend 정상 종료0이다. 선택48,813이벤트를
+대조하고 loop/worker/collector9구간을 원문 XML의 별도 계산과 재검산했다. 단위17검사,
+PS6그룹, Ruff, 닫힌 CSV/이미지 validator4회 모두 exit0다. 합성 수집기 종료/중단은
+coordinator exit1로 유지하면서 guard0/추적 정리를 확인했다. 제어 프로세스 종료·시간 제한
+조건도 실제 추적 정리를 확인했다. 기존8초 도우미와 제품 installer는 바꾸지 않았다.
+
+전체 trace 품질은 INCOMPLETE_OR_UNUSABLE(해석 오류1,792/unhandled309)이다.
+첫 Sandbox가 최종 cold 확인 전에 사라져 원인 미확정·마지막 확인 미실행으로 남겼다.
+저장된 앱 정상 종료/guard 정리 근거는 보존했고, 추가 실패 시험은 별도 Sandbox에서
+프로세스·trace 부재 확인 후 종료했다. 첫 출력291파일과 추가 출력96파일을 재검산했다.
+소실된 work의 합성 설정 reference는 원문과 시각으로 재구성해 기존 고정 해시와 대조했다.
+
+근거 `PDCA_HEALTH_TRACE_20261015_07559ba3/verification.json`, SHA256
+`0384e5ab4b19e0f29d1fd4122b2f7f3ae2f15110032627dc45c223505f3e9e10`.
+남은 작업은 원문 기준을 선보존하는 보호된 현장 실행기·패키지 검증 및 서버 로컬 전달이다.
+실제 현장 성능/지연 원인 판정은 없으며15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.

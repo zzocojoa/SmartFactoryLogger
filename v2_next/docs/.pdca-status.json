@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Build and validate a same-run WPR coordinator around the installed-app health collector. Local preexisting thread End/DCEnd and selected CSwitch coverage are now verified on 32 raw-crosschecked windows; first quiet-CPU Sandbox recording correctly failed coverage and remains preserved. Do not transfer the added per-CPU fixture load into field capture or claim whole-trace quality. Use an explicit new guard/lease budget contract, validate preparation/capture/finalization ownership and cleanup, and test actual installed health requests with same-run native anchors. Then check remote UI availability and deliver the complete pinned package to the server-local path. Product acaf77d9/installer3394a23d unchanged. Keep installed4cc, original15FAIL,200ms,120-not-started,physicalNOT_TESTED,HOLD and existing rollback baseline.",
+            "nextAction": "Prepare a protected field caller/package around the now-tested same-run health/WPR modules. Pin and archive all source/package/profile/payload/configuration references before execution; keep collector job separate from the independent guard. Validate its own preparation/capture/finalization, error propagation, artifact collection and normal cleanup. Do not rewrite the original Sandbox final-cold gap: it disappeared after saved app/guard terminals and before the final cold check, cause unknown. The local 3 requests/9 raw-crosschecked windows do not establish whole-trace quality or field latency cause. Then check remote UI/current server state and deliver the complete pinned package to the server-local final path. Product acaf77d9/installer3394a23d unchanged; keep installed4cc, original15FAIL,200ms,120-not-started,physicalNOT_TESTED,HOLD and rollback baseline.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11959,6 +11959,71 @@
               "productCodeChanged": false,
               "installerRebuilt": false,
               "serverAccessed": false,
+              "fieldLatencyCause": "UNDETERMINED",
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "sameRunHealthTraceStage": {
+              "recordedAt": "2026-10-15T03:28:29.806676+00:00",
+              "status": "LOCAL_HEALTH_REQUEST_TRACE_WINDOWS_VERIFIED",
+              "unitTests": 17,
+              "unitActualExit": 0,
+              "powershellGroups": 6,
+              "powershellActualExit": 0,
+              "ruffActualExit": 0,
+              "installedRequests": 3,
+              "independentRawWindows": 9,
+              "selectedEvents": 48813,
+              "actualTraceCleanupConditions": 5,
+              "collectorFailureCoordinatorExits": [
+                1,
+                1
+              ],
+              "collectorFailureGuardExits": [
+                0,
+                0
+              ],
+              "closedDataValidatorExits": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "fullTraceQuality": "INCOMPLETE_OR_UNUSABLE",
+              "processingErrors": 1792,
+              "unhandledEvents": 309,
+              "originalSandboxFinalCold": "NOT_EXECUTED_SANDBOX_ALREADY_ABSENT_REASON_UNKNOWN",
+              "originalSavedAppExits": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "additionalSandboxColdVerified": true,
+              "additionalSandboxDisposed": true,
+              "closedOutputFiles": [
+                291,
+                96
+              ],
+              "closedOutputBytes": [
+                17033168,
+                4291863
+              ],
+              "referenceReconstructedExactOriginalPin": true,
+              "evidence": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_TRACE_20261015_07559ba3\\verification.json",
+                "bytes": 27588,
+                "sha256": "0384e5ab4b19e0f29d1fd4122b2f7f3ae2f15110032627dc45c223505f3e9e10"
+              },
+              "report": "docs/04-report/production-release-risk-validation-health-candidate-20261015.report.md",
+              "scope": "LOCAL_INSTALLED_APP_WITH_SYNTHETIC_LOOPBACK_DEVICES_AND_ATTESTATION",
+              "protectedFieldLauncher": "NOT_IMPLEMENTED",
+              "serverAccessed": false,
+              "productCodeChanged": false,
+              "installerRebuilt": false,
               "fieldLatencyCause": "UNDETERMINED",
               "field15Status": "FAIL",
               "canary120Started": false,

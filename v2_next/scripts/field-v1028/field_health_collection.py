@@ -36,7 +36,7 @@ def validate_duration(duration):
                     and 0 < duration <= 30, 'diagnostic-duration-budget')
 
 
-def collect(spec, output, duration, stop, notify):
+def collect(spec, output, duration, stop, notify, *, _trace=None):
     """Run only inside the owned worker; the supervisor bounds blocking calls."""
     spec.validate()
     validate_duration(duration)
@@ -78,6 +78,8 @@ def collect(spec, output, duration, stop, notify):
             save('configuration-initial.json', initial_configuration)
             binding.require(initial_configuration['configuration_status'] == 'PASS', 'initial-configuration-binding')
             require_running()
+            if _trace is not None:
+                save('trace-binding.json', _trace.begin(dict(files), stop))
             origin = time.perf_counter_ns() + 250_000_000
             expected_slots = math.ceil(duration / 2)
             result.update(origin_ns=origin, expected_slots=expected_slots, sessions=sessions)
@@ -104,6 +106,8 @@ def collect(spec, output, duration, stop, notify):
             if stop.wait(max(0, (origin + round(duration * 1e9) - time.perf_counter_ns()) / 1e9)):
                 raise InterruptedError('diagnostic-stop-requested')
             notify(dict(phase='finalizing', origin_ns=origin))
+            if _trace is not None:
+                save('trace-completion.json', _trace.finish(dict(files), stop))
             final_control = generation.capture_generation(payload, spec.main, spec.backend, spec.port,
                 expected_identity=initial_control['identity'])
             save('control-final.json', final_control)
@@ -125,6 +129,11 @@ def collect(spec, output, duration, stop, notify):
         # Existing owned-worker IPC field: PASS means collector completion only.
         result['observation_status'] = 'PASS'
     except Exception as error:
+        if _trace is not None:
+            try:
+                _trace.abort(type(error).__name__)
+            except Exception as publication_error:
+                result['errors'].append(dict(type=type(publication_error).__name__, reason='trace-abort-publication-failed'))
         result['errors'].append(dict(type=type(error).__name__,
             reason=str(error) if type(error) in (ValueError, InterruptedError) else 'diagnostic-collection-failed'))
         stop.set()

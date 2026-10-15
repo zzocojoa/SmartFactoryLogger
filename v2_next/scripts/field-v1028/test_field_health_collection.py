@@ -34,7 +34,7 @@ class CollectionTests(unittest.TestCase):
             configuration_reference_sha256='a'*64, backend_created_filetime=1000)
 
     def run_collection(self, *, configuration=None, control=None, probes=None, native=None,
-                       closeout_error=False, stop=None, duration=.01):
+                       closeout_error=False, stop=None, duration=.01, trace=None):
         @contextmanager
         def reference(*args, **kwargs):
             yield {}
@@ -58,7 +58,7 @@ class CollectionTests(unittest.TestCase):
                 side_effect=configuration or [{'configuration_status': 'PASS'}]*2))
             call = stack.enter_context(patch.object(collection.diagnostic, 'capture_health_probe',
                 side_effect=probes or [probe]))
-            result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append)
+            result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append, _trace=trace)
         self.assertEqual(result['field_gate'], 'NOT_EVALUATED')
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
@@ -126,6 +126,35 @@ class CollectionTests(unittest.TestCase):
         with patch.object(collection.observation, 'verify_component_manifest', tampered):
             with self.assertRaisesRegex(ValueError, 'component-file-hash'):
                 self.run_collection()
+
+    def test_trace_begin_and_finish_failures_are_durable_incomplete(self):
+        for stage, count in (('begin', 0), ('finish', 1)):
+            self.setUp()
+            aborted = []
+            def fail(*args):
+                raise ValueError('injected-trace-'+stage)
+            trace = SimpleNamespace(begin=fail if stage == 'begin' else lambda *args: {'bound': True},
+                finish=fail if stage == 'finish' else lambda *args: {'stopped': True}, abort=aborted.append)
+            result, _, actual = self.run_collection(trace=trace)
+            self.assertEqual((result['collection_status'], actual, aborted), ('INCOMPLETE', count, ['ValueError']))
+            self.assertIn('injected-trace-'+stage, json.dumps(result))
+
+    def test_trace_stop_precedes_final_control_and_preserves_binding(self):
+        phases = []
+        def begin(files, stop):
+            self.assertEqual(set(files), {'native-initial.json', 'runtime-initial.json', 'control-initial.json', 'configuration-initial.json'})
+            phases.append('begin')
+            return {'bound': True}
+        def finish(files, stop):
+            self.assertIn('probe-000.json', files)
+            self.assertNotIn('control-final.json', files)
+            phases.append('finish')
+            return {'stopped': True}
+        trace = SimpleNamespace(begin=begin, finish=finish, abort=phases.append)
+        result, _, count = self.run_collection(trace=trace)
+        self.assertEqual((result['collection_status'], count, phases), ('BOUND_WINDOW_CAPTURED', 1, ['begin', 'finish']))
+        for name in ('trace-binding.json', 'trace-completion.json'):
+            self.assertTrue((self.folder/'evidence'/name).is_file())
 
 
 if __name__ == '__main__':

@@ -283,3 +283,66 @@ Codex 실행 도구의 실제 출력/종료 코드에서 보존한 관측 기록
 검증한 뒤 서버 로컬 전달을 진행한다. 기존8초 로컬 helper와 고정 증거는 변경하지 않았다.
 제품/설치본/서버 변경이 없어 전체 health·빌드는 반복하지 않았다. 실제 field15 FAIL,
 120분 미시작, 물리 NOT_TESTED, 지연 원인 미확정, 출시 HOLD와 기존 롤백 기준은 유지한다.
+
+## 2026-10-15 실제 health 요청과 동일 실행 WPR 연결
+
+`field_health_trace.py`와 `invoke-health-trace.ps1`에 별도 실행 계약을 추가했다. 기존 수집기의
+설정·실행 세대 확인 뒤 WPR 준비 신호를 받고, 6초/3요청을 기록한 뒤 추적 저장·정리를
+확인해야 최종 설정·payload 재검산으로 진행한다. 수집기는 기존 job 안에 있고 WPR 감시기는
+독립 프로세스로 동작한다. 고정30초 guard, 정확한 native 생성 세대, 고유 instance와 고정
+package/contract/ready/lease/ETL 해시로 연결한다. 이전8초 helper·프로파일·증거는 바꾸지 않았다.
+앱 시작·종료·설치를 제어하는 현장 실행기는 아직 아니며 현재 API 범위는 로컬 통합 진단이다.
+
+| 최종 검증 | 실제 결과 |
+|---|---|
+| 수집기·연결 단위 검사 | `python -m unittest -v test_field_health_collection test_field_health_trace`, 17검사 exit0 |
+| PS5.1 계약/실패 전파 검사 | `test_health_trace_validation.py --output <새 폴더>`, 6그룹 driver exit0. 일반 권한·32비트 실행 거부의 child exit1은 예상 결과 |
+| 변경 Python 5파일 Ruff | 프로젝트 `pyproject.toml` 사용, exit0 |
+| 실제 동일1.0.29 설치 앱과 추적 | installer0, host/guest0, 수집 worker0, trace coordinator/guard0. 앱/backend 두 실행의 정상 종료 각각0 |
+| 독립 guard 실제 시험 | 제어 프로세스 exit23·30초 시간 제한 모두 추적 저장/정리 확인 |
+| 수집기 실패 실제 시험 | 합성 collector의 exit23 및 중단 통보 각각 coordinator exit1, `health-trace-window-incomplete`; guard0/정리 완료, 성공 통보 없음 |
+| 요청·스케줄링 연결 | 실제 health3건의 loop/worker/collector 총9구간. native 생성 세대·QPC·DCEnd 연결 및 원문 XML의 별도 per-thread 계산과 정수 구간 일치, exit0 |
+| 닫힌 데이터 검증 | 실제 candidate 소스의 CSV2회·이미지2회 validator 모두 exit0. 새 wide CSV55/165행, 최종 누적 관측17·이미지45 |
+
+첫 PowerShell 합성 검사는 fixture의 `$state`가 기존 lifecycle 함수의 지역 변수와 충돌해
+exit1이었다. fixture 이름만 바꾼 최종6그룹 결과를 확인했고 이전 실패를 보존했다.
+전체 요청 시간은7.7410/5.9310/7.1928ms다. 별도 CPU 부하를 추가하지 않은 오프라인 장비
+fixture의 소수 표본이며, 현장200ms 기준·기존15분 실패를 대체하지 않는다. 선택 이벤트
+48,813개(CSwitch31,970/Ready15,058/Thread1,785)의 값·payload·순서가 두 해석 경로에서
+일치했고 CPU 전환 chain gap은0이었다. 전체 tracerpt 해석 오류1,792개와 unhandled309개는
+남아 있어 전체 추적 품질은 **INCOMPLETE_OR_UNUSABLE**다. 정확한 CPU 시간·지연 원인은 미판정이다.
+
+원문 설정 응답·실행 세대·manifest를 다시 검산했고 payload1,867개와 고정 uninstaller1개를
+수집기 종료 전에 재대조했다. 두 앱 실행의 ERROR/traceback0·crash log0bytes와 정상 종료
+영수증을 확인했다. CSV의 두 위치 필드 미입력 경고와 미대상 fact의 unknown은 보존했다.
+
+**첫 Sandbox의 마지막 종료 확인에는 한계가 있다.** 실제 앱 정상 종료와 guard 두 시험의
+정리 결과가 저장된 뒤, 추가 collector 시험을 시작할 때 해당 Sandbox가 목록에서 사라져
+있었다. 종료 원인은 미확정이며 마지막 cold check는 미실행이다. 실패한 CLI dispatch와
+관측을 `original-disposal-observation.json`에 남겼고 첫 환경 전체 종료를 PASS로 표시하지 않는다.
+소실된 work의 합성 설정 reference는 보존한 초기 snapshot과 설정 시각으로 재구성한 뒤
+원래 수집기에 고정한 SHA256과 정확히 일치함을 확인했다. 원본 회수와 재구성 사본을 구분한다.
+
+추가 collector 실패 두 조건은 앱 설치 없이 별도 Sandbox에서 실행했다. 관련7개 native
+프로세스 생성 세대와 고유 WPR instance2개의 부재를 확인한 뒤 해당 환경만 종료했다.
+첫 환경 출력291파일/17,033,168bytes, 추가 환경96파일/4,291,863bytes를 보존·재해시했다.
+두 번째 환경의 최종 cold 확인·종료는 exit0이며 첫 환경의 누락을 대신하지 않는다.
+
+증거 루트: `C:/Users/user/Desktop/SmartFactory/PDCA_HEALTH_TRACE_20261015_07559ba3`.
+`verification.json`: 27,588bytes, SHA256
+`0384e5ab4b19e0f29d1fd4122b2f7f3ae2f15110032627dc45c223505f3e9e10`.
+`verify_health_windows.py`, `review_health_capture.py`, `finalize_failure.py`,
+`record_verification.py`는 각각 exit0였다. 앞의 세 wrapper 종료는 Codex 도구 관측 기록이며
+내부 native/validator 명령은 별도 stdout·stderr·종료 코드도 보존했다.
+
+다음 현장 묶음 체크리스트:
+
+1. 검증된 모듈을 보호된 외부 실행기에 연결하고 실행 전에 소스·프로파일·payload·설정 기준
+   원문을 결과 묶음에 보존한다. UI/controller/collector 권한과 소유 프로세스 경계를 검증한다.
+2. 새 실행기의 시간 제한·실패·실제 정상 종료와 결과 회수 경로를 검증한다. 기존 조각의
+   PASS로 새 실행기 전체를 통과 처리하지 않으며, 같은 제품 installer를 재빌드하지 않는다.
+3. 원격 UI 가용성 및 현장 현재 앱/제품·금형을 확인하고 검증 묶음을 서버 로컬 최종 폴더까지
+   전달한다. 미확인 과거 작업번호를 강제로 적용하지 않는다.
+
+제품 코드·installer·서버·롤백 기준은 그대로다. 전체 health·빌드는 반복하지 않았다.
+현장15분 FAIL/120분 미시작/물리 NOT_TESTED/출시 HOLD를 유지한다.
