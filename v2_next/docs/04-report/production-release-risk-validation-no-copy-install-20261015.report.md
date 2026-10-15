@@ -663,3 +663,9 @@ Explorer를 닫았다. 명령에는 고정 controller 길이 28,053 bytes와 SHA
 화면을 보존했다. 터미널 UI 조작 금지 때문에 사용자에게 관리자 PowerShell에서 한 번 실행을
 요청했으며 아직 측정 시작/완료를 확인하지 않았다. 결과 폴더와 콘솔의 `LAUNCHER_SHA256`,
 `LAUNCH_EXIT`를 받은 뒤 회수·대조한다. 이전 6초 진단의 콘솔 미확인 기록은 그대로 보존한다.
+
+08:55 후속 로컬 검증에서 같은 clean 소스의 `npm.cmd run health`는 exit 0으로 완료됐다.
+문제의 종료 취소 시험 100회와 계측한 전체 backend 932개에서도 오류가 재현되지 않았다.
+앞선 health exit 1의 원인은 계속 미확정이며 제품·시험 소스나 시간 제한을 바꾸지 않았다.
+범위·skip·원문 해시는 [종료 시험 후속 조사](production-release-risk-validation-receipt-test-20261013.report.md)에 기록했다.
+서버의 15분 관찰 실행은 아직 확인되지 않았고 정식 출시/운영 승격은 HOLD다.
