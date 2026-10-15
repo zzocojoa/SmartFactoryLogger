@@ -568,3 +568,23 @@ READY 이후에만 정상 종료·전체 사본 검산 → 새 close review와 �
 현재 명령을 그대로 재실행하거나 NAS를 검증 없이 사본 경로로 대체하지 않는다.
 제품 코드·installer·롤백 기준은 그대로이며 현장15분 FAIL·120분 미시작·물리 NOT_TESTED·
 출시 HOLD를 유지한다.
+
+### 2026-10-15 생산 정보 확정·외장 저장장치 준비 재개
+
+사용자는 앞선 미입력 시점에는 생산 중이 아니었고, 현재 제품60365·금형4로 생산 중이라고
+확인했다. 서버 화면은14:47:28 KST 적용됨이며14:52:57 KST 읽기 전용 GET6건 모두200,
+`Product_No_operator=60365`, `Mold_No_operator=4`, `operator_metadata_valid=true`가 일치했다.
+Codex가 입력값을 변경하지 않았다. 앱1.0.28/4cc와 logger5122ad44 세대는 유지됐다.
+
+여유 공간30GB 이상의 외장 SSD/하드를 연결할 수 있다는 사용자 답변을 받았다. 실제 서버
+연결을 요청했으며 드라이브 문자·볼륨 identity·파일시스템·여유 공간은 아직 확인되지 않았다.
+현재 고정 copy wrapper는 Desktop/SmartFactory 결과만 생성하고 engine은 Fixed NTFS를
+요구한다. 설치 consumer도 같은 Desktop 아래 Q폴더를 요구하므로 외장 목적지의 단순 경로
+치환으로 실행하지 않는다. 실제 디스크를 확인한 뒤 영향받는 경로/보존 계약을 검증하고
+새 묶음으로 준비한다. 기존 파일을 포맷·삭제하거나 보호 조건을 낮추지 않는다.
+
+상태 기록 `PDCA_HEALTH_INSTALL_20261015_9c43d21a/external-storage-readiness.json`, SHA256
+`4ff90fd7b23503c356188a3127da73fb8fe7153fbc54aa451c152ed6fd4edbab`.
+GET 수집·응답6개 해시·작업값 대조·상태 JSON 검증은 exit0다. 제조사 thread는 여전히
+발신1건이며 답변이 없다. 코드/installer 변경·백업 재실행·앱 종료·설치는 수행하지 않았다.
+전체 목표는 재개했지만 현장15분 FAIL·120분 미시작·물리 NOT_TESTED·출시 HOLD를 유지한다.

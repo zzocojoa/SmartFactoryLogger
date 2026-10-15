@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-15T05:29:21.263283+00:00",
+  "lastUpdated": "2026-10-15T05:54:33.885531+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -12264,11 +12264,37 @@
               "physicalBoundary": "NOT_TESTED",
               "releaseGate": "HOLD",
               "promotionAllowed": false
+            },
+            "externalStorageReadinessStage": {
+              "recordedAt": "2026-10-15T05:54:33.885531+00:00",
+              "status": "USER_CONFIRMED_JOB_AND_EXTERNAL_STORAGE_AVAILABLE_CONNECTION_PENDING",
+              "job": {
+                "product": "60365",
+                "mold": "4",
+                "exact_user_reply": "생산 중이 아니였으나 지금은 60365, 4 로 생산 중이다",
+                "operator_metadata_valid": true,
+                "operator_metadata_updated_at": "2026-10-15T05:47:28.755478Z",
+                "agent_entered_values": false,
+                "screen_matches_reply": true,
+                "api_matches_reply": true,
+                "data_path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_INSTALL_20261015_9c43d21a\\external-storage-readiness-read\\current-server-read\\data.json",
+                "data_sha256": "5456974965997e96f6d3997f630a74e7f27fbb74f2fb086f6760c2a4d331ba94",
+                "screenshot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_INSTALL_20261015_9c43d21a\\server-job-60365-4.jpg"
+              },
+              "externalStorageAvailableByUser": true,
+              "connectedDriveVerified": false,
+              "storageContractValidated": false,
+              "reviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HEALTH_INSTALL_20261015_9c43d21a\\external-storage-readiness.json",
+              "reviewSha256": "4ff90fd7b23503c356188a3127da73fb8fe7153fbc54aa451c152ed6fd4edbab",
+              "sourceCodeChanged": false,
+              "serverInstalled": false,
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }
       },
-      "updatedAt": "2026-10-15T05:29:21.263283+00:00"
+      "updatedAt": "2026-10-15T05:54:33.885531+00:00"
     }
   },
   "pipeline": {
