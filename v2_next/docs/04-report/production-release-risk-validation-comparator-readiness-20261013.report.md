@@ -1870,3 +1870,32 @@ coverage-audit.json의 overlaps_with_r4는 숫자 QPC 범위 비교만 뜻하며
 coverage audit/7개 회귀 조건 및 선택 Ruff exit0, 문서 과거 단계 보존 검사를 수행했다.
 이제 종료 코드 대기 대신 같은 실행의 요청·추적 연결 시험을 준비한다.
 제품/설치본 변경 없음, 서버 지연 원인 미확정,15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.
+
+
+## 2026-10-15 같은 실행의 요청·추적 시험 준비
+
+개발 PC에서 HTTP 요청과 Windows 추적을 같은 실행으로 연결하기 위한 도우미를 추가했다.
+`field_trace_request_fixture.py`는 일반 권한으로 loopback 서버와 클라이언트를 실행한다.
+기존 HTTP 수집기·native timing 소스는 변경하지 않고, 시험 안에서만 연결 클래스를 바꿔
+일반 요청·서버 대기80ms·클라이언트 thread CPU80ms를 각각3회 기록한다.
+두 스레드는 같은 Python GIL을 공유하므로 이 결과를 운영 서버 지연 원인으로 직접 확대하지 않는다.
+
+`invoke-request-trace-validation.ps1`은 이미 검증한 R5 Guard와8초/stop60초 계약을 그대로 쓴다.
+일반 권한 fixture의 실제 PID/생성 FILETIME·소스 해시·600초 만료를 확인한 후,
+새 추적의 lease/ready 해시를 결합해 요청을 시작한다. 완료 결과 해시 확인 후 소유 추적을 정리한다.
+외부 명령에서 새 coordinator 바이트를 잠금·고정 해시로 확인하며, R5 기준 manifest와3개 파일은
+기존 바이트 그대로 포함한다. 만료되거나 이미 사용한 요청은 거부한다.
+사용자 절차: Codex가 fixture를 준비한 뒤 발행한 명령 본문을 독립 관리자 PowerShell에서1회 실행하고,
+`LAUNCH_EXIT`와 결과 경로/해시를 확인한다. 오류 시 같은 명령을 반복하지 않는다.
+
+fixture6검사·native PowerShell coordinator5조건·32/64비트 bootstrap6조건을 실제 실행했다.
+검사 driver exit는 각각0이며, 낮은 권한과32비트 직접 진입은 예정된 exit1로 거부됐다.
+fixture 실패 시 스레드 종료와 transport 복구, 다른 실행/해시/만료 거부, 원본 덮어쓰기 거부,
+실제 파일 잠금 경쟁 대기와 잘못된 JSON 거부를 확인했다. 선택 Ruff와 diff 검사를 별도로 수행한다.
+전체 coordinator의 관리자 추적 연결·정리와 요청/ETL 연결은 아직 실행하지 않았다.
+
+준비 위치: `C:/Users/user/Desktop/SmartFactory/PDCA_REQUEST_TRACE_20261015_5d90d5a4`.
+정적 manifest SHA는 `313112238ff09826e7abbb80ae4651e0e502db991c71c591ce1e4580151009bf`,
+coordinator SHA는 `7880ca458d06e68e472d3381e9748f20094c6572ac6a3242439aa34052a64bde`다.
+제품/설치본 변경 없음, R5 재실행 없음, 서버203ms 원인 미확정,
+15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.

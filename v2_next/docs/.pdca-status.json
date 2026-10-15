@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T23:52:36.464027+00:00",
+  "lastUpdated": "2026-10-15T00:10:15.896495+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T23:52:36.464027+00:00"
+        "lastUpdated": "2026-10-15T00:10:15.896495+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "R5 user LAUNCH_EXIT0 and summary SHA93c6d756 were independently verified; suite and six owned controller/guard processes are absent. Do not repeat R5. Prepare a bounded same-run HTTP/thread/QPC capture using the verified trace lifecycle, ready handshake, fixed source identity and owned cleanup. R4 per-CPU ordering and CSwitch chain continuity match, but earlier 142 HTTP requests belong to different sessions and must not be joined. Require recording-session/clock-domain binding, native process/thread generation and target-request event coverage; do not apply legacy V2 WaitMode semantics to the observed V5 byte13. Keep server203ms cause unresolved, field15 FAIL, canary120 unstarted and release HOLD.",
+            "nextAction": "Start the pinned unelevated nine-request fixture, bind a create-new request and admin command to its actual PID/creation FILETIME and 600-second arming deadline, then ask the user to execute the prepared command in independent administrator PowerShell. Verify the same capture, owned cleanup, hashes and native request/thread/QPC coverage before scheduler attribution. No R5 rerun or field QA pass is implied.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11504,6 +11504,56 @@
               "fullDataGate": "NOT_EVALUATED",
               "releaseGate": "HOLD",
               "promotionAllowed": false
+            },
+            "requestTracePreparationStage": {
+              "recordedAt": "2026-10-15T00:10:15.896495+00:00",
+              "status": "STATIC_PACKAGE_VALIDATED_FIXTURE_NOT_STARTED",
+              "fixtureTests": 6,
+              "fixtureTestExit": 0,
+              "nativeCoordinatorCases": 5,
+              "coordinatorTestExit": 0,
+              "bootstrapCases": 6,
+              "bootstrapTestExit": 0,
+              "actualRequestTraceExecuted": false,
+              "manifestSha256": "313112238ff09826e7abbb80ae4651e0e502db991c71c591ce1e4580151009bf",
+              "coordinatorSha256": "7880ca458d06e68e472d3381e9748f20094c6572ac6a3242439aa34052a64bde",
+              "fixtureSourceSha256": "250e803843d091ec967483b9e3b2ff4349960256da155607baa5d53f15ec7b94",
+              "unchangedR5Guard": true,
+              "plannedRequests": 9,
+              "fixturePrivilege": "UNELEVATED",
+              "coordinatorPrivilege": "ADMINISTRATOR_REQUIRED",
+              "fixtureWaitSeconds": 600,
+              "requestTraceCorrelation": "NOT_EVALUATED",
+              "traceQuality": "NOT_EVALUATED",
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "evidence": {
+                "fixtureTests": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\fixture-tests-r2\\summary.json",
+                  "bytes": 622,
+                  "sha256": "d4a02f63e66ab0ee347e7c1ce49457a2830e5944892f067cf0aacc4e66b6e923"
+                },
+                "coordinatorTests": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\coordinator-tests-r1\\summary.json",
+                  "bytes": 2100,
+                  "sha256": "87c6673f886c11c9dcd124c2865358affc04d62bebffc9116b2a323611e42f71"
+                },
+                "package": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\package-readiness-r1.json",
+                  "bytes": 3619,
+                  "sha256": "30d7dc46596d2083bab3bd8fb267c49d238c25df86d72d12265f9995b96b8909"
+                },
+                "launcher": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_REQUEST_TRACE_20261015_5d90d5a4\\launch-unelevated-fixture-r1.ps1",
+                  "bytes": 2225,
+                  "sha256": "01283865d1993e0326a7a3761dbbbf69d5958c283da08d94da2d0f8ee5f15200"
+                }
+              }
             }
           }
         }
