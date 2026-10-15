@@ -403,3 +403,23 @@ Low Signal OFF와 comparator 미확인 조건을 유지했다. 새 제한된 설
 60365·4를 현재값으로 자동 재적용하지 않았다. 이후 생산 작업값이 필요한 현장 검증 전에
 현재 값을 확인해야 한다. 사용자 회신으로 중단 대기를 재개했으며 이전 연속 blocked 횟수를
 이어 세지 않는다. 이번 턴은 원인 확인·요청 갱신·최종 전달의 실제 진전으로 기록한다.
+
+### 2026-10-16 00:27 KST 읽기 결과의 독립 검토기 준비
+
+00:22 원격 화면은 새 RI29 명령이 열린 메모장과 이전 `health-csv` 실패 콘솔이다.
+새 명령의 실행 출력이나 살아 있는 수집 프로세스는 확인되지 않았으므로 verified wait로
+분류하지 않는다. 이전 턴은 요청 갱신·서버 최종 전달을 완료한 progress다.
+
+대기와 독립적으로 설계 5.21의 회수 검토를 `review_health_runtime_identity.py`로 구현했다.
+외부 result/request pin과 정확한 5파일, 내용 hash, 설정 pin, health 실행 세대를 대조한다.
+native FILETIME의 전체 정밀도를 보존하며 CIM의 밀리초 표현, 부모/실행 경로와 listener를
+검사한다. 성공 결과에도 현재 생존 재확인 필요, 실제 exit 미관찰, 현장/파일 QA 미평가,
+물리 경계 NOT_TESTED와 출시 HOLD를 명시한다. 기존 종료 검토기의 시간·JSON·hash 함수만
+재사용하고 기존 종료 검토 코드와 서버 도우미 바이트는 변경하지 않았다.
+
+`test_review_health_runtime_identity.py` 8검사(exit 0)를 실행했다. 정상 fixture와
+불일치/변조·bool exit·중복 JSON·잘못된 종료/승격 주장을 검사하며, 실제 파일 잠금과 CLI의
+정상 exit 0/외부 result pin 거부 exit 1을 확인했다. 결과는 근거 루트의
+`identity-review-tests-r1` 및 `identity-review-tests-r1.log`에 보존한다. 두 새 Python 파일의
+Ruff `--isolated --select E9,F821`도 exit 0이다. 합성 fixture 검사이며 실제 현장 검증은 아니다.
+프로세스 식별자가 아직 없으므로 실행 가능한 6초 진단 요청은 발행하지 않았다.

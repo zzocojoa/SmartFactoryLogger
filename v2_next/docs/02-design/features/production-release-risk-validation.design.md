@@ -597,3 +597,15 @@ READY 출력·종료 대기·앱 종료·설정 쓰기·전체 백업은 하지 
 `RUNNING_IDENTITY_CAPTURED_REQUIRES_REVIEW`이며 실제 exit 관찰은 false, 현장 QA는 미평가다.
 독립 회수 검토 뒤에만 이 값으로 6초 진단 요청을 준비한다. 이전 실행의 식별자는 재사용하지 않는다.
 검증 예: 같은 native 계약 테스트에서 읽기 결과의 hash/request 연결과 미종료 범위를 확인한다.
+
+회수 후 `review_health_runtime_identity.py`는 콘솔 result SHA와 외부 request SHA를 요구한다.
+정확한 5파일 목록·개별 SHA·설정 원문 pin·health build/logger/CSV를 확인하고 native 생성
+FILETIME/UTC/초 값, CIM 생성 시각·부모·실행 경로, backend의 8000 listener를 대조한다.
+성공은 `CAPTURED_NATIVE_RUNTIME_IDENTITY_VERIFIED`이며 관찰 시점의 식별자를 뜻한다.
+현재 생존 여부는 `REQUIRES_EXECUTION_TIME_RECHECK`로 남기고 진단 실행기가 다시 검사한다.
+이를 정상 종료·설정 승인·데이터 QA·현장 QA 통과로 올리지 않는다.
+
+검토 예: `python scripts/field-v1028/review_health_runtime_identity.py --source <회수 폴더>
+--result-sha256 <콘솔 SHA> --request-sha256 <전달한 요청 SHA> --launch-exit 0
+--output <회수 폴더 밖 새 JSON>`을 한 줄로 실행한다. fixture/CLI 검사는
+`test_review_health_runtime_identity.py`이며 실제 서버 결과 검토를 대신하지 않는다.
