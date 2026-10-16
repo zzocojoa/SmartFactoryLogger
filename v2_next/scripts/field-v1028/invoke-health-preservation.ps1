@@ -58,6 +58,15 @@ function Assert-PreservationCapacity([string]$Path){
     return [ordered]@{required_free_bytes=$required;available_free_bytes=$drive.AvailableFreeSpace;
         full_data_copy_reserved=$false;operating_reserve_bytes=[long](10GB)}
 }
+function Assert-PreservationScope($Scope){
+    $health=$Scope.new_full_backup_policy -ceq 'OMITTED_FOR_1029_HEALTH_ONLY' -and
+        $Scope.expected_app_version -ceq '1.0.28' -and
+        $Scope.preceding_candidate_build_reference -ceq '4cc7393e1bafbf90a329726aed9470fe0daacb21'
+    $history=$Scope.new_full_backup_policy -ceq 'OMITTED_FOR_1030_HISTORY_ONLY' -and
+        $Scope.expected_app_version -ceq '1.0.29' -and
+        $Scope.preceding_candidate_build_reference -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7'
+    if(-not ($health -or $history)){throw 'scope-build-policy'}
+}
 try {
     $native=[Environment]::SystemDirectory+'\WindowsPowerShell\v1.0\powershell.exe'
     if(-not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or
@@ -87,9 +96,7 @@ try {
         $identity.User.Value -cne 'S-1-5-21-2762931165-1280404403-2847611662-1001' -or
         $scope.expected_operator_sid -cne $identity.User.Value -or
         -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'server-operator-admin-required'}
-    if($scope.new_full_backup_policy -cne 'OMITTED_FOR_1029_HEALTH_ONLY' -or
-        $scope.expected_app_version -cne '1.0.28' -or
-        $scope.preceding_candidate_build_reference -cne '4cc7393e1bafbf90a329726aed9470fe0daacb21'){throw 'scope-build-policy'}
+    Assert-PreservationScope $scope
     $factory=[Environment]::GetFolderPath('DesktopDirectory')+'\SmartFactory'
     if($factory -ine 'C:\Users\user\Desktop\SmartFactory' -or $factory -ine $scope.expected_factory_root -or
         [Environment]::GetFolderPath('UserProfile') -ine $scope.expected_profile){throw 'server-profile-desktop'}

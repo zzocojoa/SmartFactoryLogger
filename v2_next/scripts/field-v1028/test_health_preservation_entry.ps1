@@ -10,6 +10,28 @@ $null=[IO.Directory]::CreateDirectory($OutputRoot)
 $native=[Environment]::SystemDirectory+'\WindowsPowerShell\v1.0\powershell.exe'
 $checks=[Collections.Generic.List[string]]::new()
 function Test([bool]$Value,[string]$Name){if(-not $Value){throw ('FAILED: '+$Name)};$checks.Add($Name)}
+$entrySource=Join-Path $PackageRoot 'invoke-health-preservation.ps1'
+Test ((Get-FileHash -LiteralPath $entrySource).Hash -ceq (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'invoke-health-preservation.ps1')).Hash) 'package-contains-current-entry-source'
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($entrySource,[ref]$tokens,[ref]$errors)
+Test ($errors.Count -eq 0) 'entry-parse'
+$definition=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Assert-PreservationScope'},$false))
+Test ($definition.Count -eq 1) 'one-scope-validator'
+. ([scriptblock]::Create($definition[0].Extent.Text))
+foreach($row in @(
+    @('OMITTED_FOR_1029_HEALTH_ONLY','1.0.28','4cc7393e1bafbf90a329726aed9470fe0daacb21'),
+    @('OMITTED_FOR_1030_HISTORY_ONLY','1.0.29','acaf77d95101a050f4d3ecd76125d3502036f5a7'))){
+    $scope=[pscustomobject]@{new_full_backup_policy=$row[0];expected_app_version=$row[1];preceding_candidate_build_reference=$row[2]}
+    Assert-PreservationScope $scope;Test $true ('exact-scope:'+ $row[1])
+    foreach($key in @('new_full_backup_policy','expected_app_version','preceding_candidate_build_reference')){
+        $original=$scope.$key;$scope.$key='wrong';$caught=$null
+        try{Assert-PreservationScope $scope}catch{$caught=$_.Exception.Message}
+        Test ($caught -ceq 'scope-build-policy') ('rejected-scope:'+ $row[1]+':'+$key);$scope.$key=$original
+    }
+}
+$scope.expected_app_version='1.0.28';$scope.preceding_candidate_build_reference='4cc7393e1bafbf90a329726aed9470fe0daacb21';$caught=$null
+try{Assert-PreservationScope $scope}catch{$caught=$_.Exception.Message}
+Test ($caught -ceq 'scope-build-policy') 'history-policy-does-not-accept-old-generation'
 function Invoke-Entry([string]$Root,[string]$Pin,[string]$Name,[bool]$Library=$true){
     $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$native
     $info.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$Root+'\invoke-health-preservation.ps1" -ExpectedPackageManifestSha256 '+$Pin+' -PackageRoot "'+$Root+'"'

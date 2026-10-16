@@ -40,6 +40,25 @@ Reject {Assert-HealthInstallPaths $request 'C:\factory' 'C:\installed' @('C:\dat
 Reject {Assert-HealthInstallPaths $request 'C:\factory' 'C:\factory\installed' @('C:\data-a','C:\data-b')} 'overlapping-roots' 'reject-overlapping-output-install-root'
 $request.candidate_installer='C:\data-a\candidate.exe';Reject {Assert-HealthInstallPaths $request 'C:\factory' 'C:\installed' @('C:\data-a','C:\data-b')} 'input-inside-operating-root' 'reject-locked-input-in-preserved-data';$request.candidate_installer='C:\inputs\candidate.exe'
 
+$historyPins=Get-HealthInstallPins '0732c8e810be3c46096b397812f53a9767354229'
+Pass ($historyPins.previous_version -ceq '1.0.29' -and $historyPins.candidate_version -ceq '1.0.30' -and
+    $historyPins.previous_installer_bytes -eq 164824610 -and $historyPins.candidate_installer_bytes -eq 164941077 -and
+    $historyPins.rollback_installer -ceq $pins.rollback_installer) 'history-transition-keeps-formal-rollback-distinct'
+Reject {Get-HealthInstallPins 'ffffffffffffffffffffffffffffffffffffffff'} 'unsupported-install-candidate' 'reject-unlisted-install-candidate'
+$historyRequest=$request|ConvertTo-Json -Depth 5|ConvertFrom-Json
+$historyRequest.candidate_commit=$historyPins.candidate_commit;$historyRequest.preceding_commit=$historyPins.previous_commit
+$historyRequest.schema=$historyPins.request_schema;$historyRequest.new_full_backup_policy=$historyPins.backup_policy
+Reject {Assert-HealthInstallRequest $historyRequest} 'request-members' 'history-requires-preceding-installer'
+$historyRequest|Add-Member preceding_installer 'C:\inputs\previous.exe'
+Assert-HealthInstallRequest $historyRequest;Pass $true 'explicit-history-transition-accepted'
+Assert-HealthInstallPaths $historyRequest 'C:\factory' 'C:\installed' @('C:\data-a','C:\data-b');Pass $true 'history-all-input-paths-disjoint'
+$historyRequest.new_full_backup_policy=$pins.backup_policy;Reject {Assert-HealthInstallRequest $historyRequest} 'request-identity' 'reject-history-with-health-policy';$historyRequest.new_full_backup_policy=$historyPins.backup_policy
+$historyRequest.schema=$pins.request_schema;Reject {Assert-HealthInstallRequest $historyRequest} 'request-identity' 'reject-history-with-health-schema';$historyRequest.schema=$historyPins.request_schema
+$historyRequest.preceding_commit=$pins.previous_commit;Reject {Assert-HealthInstallRequest $historyRequest} 'request-identity' 'reject-history-with-v1028-previous';$historyRequest.preceding_commit=$historyPins.previous_commit
+$historyRequest.preceding_installer='C:\installed\previous.exe';Reject {Assert-HealthInstallPaths $historyRequest 'C:\factory' 'C:\installed' @('C:\data-a','C:\data-b')} 'input-inside-operating-root' 'reject-previous-installer-in-operating-root';$historyRequest.preceding_installer='C:\inputs\previous.exe'
+$historyRequest.preceding_installer='relative.exe';Reject {Assert-HealthInstallRequest $historyRequest} 'absolute-local-path' 'reject-relative-previous-installer';$historyRequest.preceding_installer='C:\inputs\previous.exe'
+$request|Add-Member preceding_installer 'C:\inputs\previous.exe';Reject {Assert-HealthInstallRequest $request} 'request-members' 'old-contract-does-not-silently-expand';$request.PSObject.Properties.Remove('preceding_installer')
+
 $identity=[pscustomobject]@{main_pid=123;main_created_at_utc='2026-10-15T01:02:03Z';backend_pid=456;backend_created_at_utc='2026-10-15T01:02:04Z'}
 $backup=[pscustomobject]@{preceding_operating_identity=$identity}
 $review=[pscustomobject]@{preceding_commit=$pins.previous_commit;main_pid=123;main_created_at_utc='2026-10-15T01:02:03Z';backend_pid=456;backend_created_at_utc='2026-10-15T01:02:04Z'}
@@ -63,6 +82,13 @@ $review|Add-Member logger_service_instance_id 'fixture-logger'
 $observation=[pscustomobject]@{schema='sfl-health-preservation-result-v1';status='CLOSED_ORIGINAL_OBSERVED_AND_REVERIFIED_NO_BACKUP';run_root='C:\factory\O12345678';source_roots=@('C:\data-a','C:\data-b');file_manifest_sha256=('B'*64);totals=[pscustomobject]@{Files=4;Directories=3;NamedStreams=3;Bytes=210;ManifestSha256=('B'*64);RecoverableBackupCreated=$false};original_default_named_streams_and_metadata_reverified=$true;app_backend_port_absence_observed=$true;new_full_data_backup_created=$false;installation_performed=$false;application_started=$false;preceding_operating_identity=$identity;preceding_logger_service_instance_id='fixture-logger';time=[DateTimeOffset]::UtcNow.ToString('o')}
 function ValidateObservation {Assert-ClosedObservation $observation $review 'C:\factory\O12345678' ('a'*64) ('b'*64) @('C:\data-a','C:\data-b')}
 ValidateObservation;Pass $true 'closed-observation-and-normal-close-binding'
+$historyReview=$review|ConvertTo-Json -Depth 5|ConvertFrom-Json
+$historyReview.preceding_commit=$historyPins.previous_commit
+Assert-ClosedObservation $observation $historyReview 'C:\factory\O12345678' ('a'*64) ('b'*64) @('C:\data-a','C:\data-b') $historyPins.candidate_commit
+Pass $true 'history-closed-observation-binds-v1029-generation'
+Reject {Assert-ClosedObservation $observation $historyReview 'C:\factory\O12345678' ('a'*64) ('b'*64) @('C:\data-a','C:\data-b')} 'close-review-preceding-build' 'history-review-rejected-by-legacy-default'
+$historyReview.backend_pid=457
+Reject {Assert-ClosedObservation $observation $historyReview 'C:\factory\O12345678' ('a'*64) ('b'*64) @('C:\data-a','C:\data-b') $historyPins.candidate_commit} 'native-generation:backend_pid' 'history-rejects-other-native-generation'
 $request.new_full_backup_policy='SKIP_ANY_BACKUP';Reject {Assert-HealthInstallRequest $request} 'request-identity' 'only-specific-health-no-copy-policy';$request.new_full_backup_policy='OMITTED_FOR_1029_HEALTH_ONLY'
 $observation.status='SELECTED_COLD_COPY_DEFAULT_AND_NAMED_DATA_STREAMS_VERIFIED';Reject {ValidateObservation} 'observation-status' 'backup-result-not-accepted-as-observation';$observation.status='CLOSED_ORIGINAL_OBSERVED_AND_REVERIFIED_NO_BACKUP'
 $observation.new_full_data_backup_created=$true;Reject {ValidateObservation} 'observation-actions' 'cannot-claim-fresh-backup';$observation.new_full_data_backup_created=$false
@@ -124,6 +150,27 @@ foreach($case in @('ok','bad','timeout')){
         Pass ($null -eq $script:installerExit -and -not (Test-Path -LiteralPath ($script:resultRoot+'\installer-exit.json'))) 'timeout-not-misreported-as-completed'
     }
 }
+# Only this unit fixture substitutes payload I/O; the production function above is unchanged.
+# Exercise the explicit version/commit/count and independently pinned uninstaller boundary.
+$savedPayloadFunction=(Get-Item Function:PayloadFacts).ScriptBlock
+try{
+    function PayloadFacts([string]$Root,$Specs){return $script:payloadFixture}
+    foreach($row in @(
+        @('1.0.28','4cc7393e1bafbf90a329726aed9470fe0daacb21',1814,234260,'0b2ddc44640a139ab3b5c5a4febdf75e7039a37fadc6871866d7b0d78a46bc6b'),
+        @('1.0.29','acaf77d95101a050f4d3ecd76125d3502036f5a7',1867,234261,'37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921'),
+        @('1.0.30','0732c8e810be3c46096b397812f53a9767354229',1899,234260,'a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'))){
+        $members=[ordered]@{};$script:payloadFixture=@{}
+        for($i=0;$i -lt $row[2];$i++){$members['file'+$i]=@{bytes=1;sha256=('a'*64)};$script:payloadFixture['file'+$i]=@{bytes=1;sha256=('a'*64)}}
+        $script:payloadFixture['Uninstall smart-factory.exe']=@{bytes=$row[3];sha256=$row[4]}
+        $reference=[pscustomobject]@{version=$row[0];candidate_commit=$row[1];payload_file_count=$row[2];payload_files=[pscustomobject]$members}
+        $null=Get-HealthPayloadFacts 'C:\unused' $reference $row[0];Pass $true ('payload-contract:'+ $row[0])
+        $reference.candidate_commit=('f'*40);Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'payload-contract' ('mixed-payload-build:'+ $row[0]);$reference.candidate_commit=$row[1]
+        $script:payloadFixture['Uninstall smart-factory.exe'].bytes++
+        Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'uninstaller-pin' ('wrong-uninstaller-size:'+ $row[0]);$script:payloadFixture['Uninstall smart-factory.exe'].bytes=$row[3]
+        $script:payloadFixture['Uninstall smart-factory.exe'].sha256=('b'*64)
+        Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'uninstaller-pin' ('wrong-uninstaller-hash:'+ $row[0])
+    }
+}finally{Set-Item Function:PayloadFacts $savedPayloadFunction}
 $result=[ordered]@{status='PASS';checks=$checks.Count;names=$checks.ToArray();source_sha256=(Fact $source).sha256;library_sha256=(Fact $library).sha256;server_accessed=$false;production_installation_performed=$false;forced_termination=$false}
 [IO.File]::WriteAllText((Join-Path $OutputRoot 'tests-result.json'),($result|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 $result|ConvertTo-Json -Depth 6

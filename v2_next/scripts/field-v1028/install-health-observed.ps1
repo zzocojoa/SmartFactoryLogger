@@ -32,7 +32,7 @@ function Assert-ObservationTotals($Actual,$Expected) {
     Require ($Actual.RecoverableBackupCreated -is [bool] -and -not $Actual.RecoverableBackupCreated -and
         $Expected.RecoverableBackupCreated -is [bool] -and -not $Expected.RecoverableBackupCreated) 'observation-not-backup'
 }
-function Assert-ClosedObservation($Observation,$Review,[string]$Root,[string]$ResultSha,[string]$ManifestSha,[string[]]$Roots) {
+function Assert-ClosedObservation($Observation,$Review,[string]$Root,[string]$ResultSha,[string]$ManifestSha,[string[]]$Roots,[string]$CandidateCommit='acaf77d95101a050f4d3ecd76125d3502036f5a7') {
     Require ($Observation.schema -ceq 'sfl-health-preservation-result-v1' -and
         $Observation.status -ceq 'CLOSED_ORIGINAL_OBSERVED_AND_REVERIFIED_NO_BACKUP' -and
         $Observation.run_root -ieq $Root) 'observation-status-path'
@@ -51,7 +51,7 @@ function Assert-ClosedObservation($Observation,$Review,[string]$Root,[string]$Re
     Require ($Review.normal_shutdown_observed -is [bool] -and $Review.normal_shutdown_observed -and
         @($Review.failed_checks).Count -eq 0) 'normal-shutdown-review'
     Require ($Review.logger_service_instance_id -ceq $Observation.preceding_logger_service_instance_id) 'close-review-logger-generation'
-    Assert-HealthCloseGeneration $Observation $Review
+    Assert-HealthCloseGeneration $Observation $Review $CandidateCommit
     $age=([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($Observation.time)).TotalMinutes
     # The original timestamp remains provenance. Installation requires a new full
     # verification below, even when this reviewed baseline is less than 180 minutes old.
@@ -75,41 +75,62 @@ function Assert-HealthReverificationFreshness($Verification,[int]$LimitMs=120000
         $Verification.freshness_clock.ElapsedMilliseconds -le $LimitMs) 'preinstall-reverification-freshness'
 }
 
-function Get-HealthInstallPins {
-    return @{
+function Get-HealthInstallPins([string]$CandidateCommit='acaf77d95101a050f4d3ecd76125d3502036f5a7') {
+    $common=@{
+        rollback_installer='08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c'
+        sequence_approval='6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685'
+    }
+    if($CandidateCommit -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7') { return $common+@{
+        request_schema='sfl-health-observed-install-request-v1'
+        backup_policy='OMITTED_FOR_1029_HEALTH_ONLY'
+        previous_version='1.0.28';candidate_version='1.0.29';candidate_installer_bytes=164824610
         previous_commit='4cc7393e1bafbf90a329726aed9470fe0daacb21'
         candidate_commit='acaf77d95101a050f4d3ecd76125d3502036f5a7'
         previous_reference='a5de26c2db81c8d69418fd3e574d4180b2dd895ab94b9cbf064959369644af5c'
         candidate_reference='658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
         candidate_installer='3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7'
-        rollback_installer='08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c'
-        sequence_approval='6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685'
+    }}
+    Require ($CandidateCommit -ceq '0732c8e810be3c46096b397812f53a9767354229') 'unsupported-install-candidate'
+    return $common+@{
+        request_schema='sfl-history-observed-install-request-v1'
+        backup_policy='OMITTED_FOR_1030_HISTORY_ONLY'
+        previous_version='1.0.29';candidate_version='1.0.30';candidate_installer_bytes=164941077
+        previous_commit='acaf77d95101a050f4d3ecd76125d3502036f5a7'
+        candidate_commit='0732c8e810be3c46096b397812f53a9767354229'
+        previous_reference='658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
+        candidate_reference='4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
+        candidate_installer='e72c042dd4554d5c31e27b8a2edfa6ecdcbdd08c58ed43769e7a84d782b370c1'
+        previous_installer='3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7'
+        previous_installer_bytes=164824610
     }
 }
 function Assert-HealthInstallRequest($Request) {
+    $pins=Get-HealthInstallPins $Request.candidate_commit
     $keys=@('schema','candidate_commit','preceding_commit','signature_policy','field_sequence_approval_path',
         'field_sequence_approval_sha256','observation_root','observation_result_sha256','observation_manifest_sha256',
         'close_review_path','close_review_sha256','candidate_installer','rollback_installer',
         'preceding_payload_reference','payload_reference','legacy_stream_engine','observation_engine','new_full_backup_policy','config_sha256')
+    if($pins.ContainsKey('previous_installer')){$keys+=@('preceding_installer')}
     $actual=@($Request.PSObject.Properties.Name)
     Require ($actual.Count -eq $keys.Count -and @($actual|Where-Object{$_ -cnotin $keys}).Count -eq 0) 'health-install-request-members'
-    $pins=Get-HealthInstallPins
-    Require ($Request.schema -ceq 'sfl-health-observed-install-request-v1' -and
+    Require ($Request.schema -ceq $pins.request_schema -and
         $Request.candidate_commit -ceq $pins.candidate_commit -and $Request.preceding_commit -ceq $pins.previous_commit -and
         $Request.signature_policy -ceq 'UNSIGNED_INTERNAL' -and
-        $Request.new_full_backup_policy -ceq 'OMITTED_FOR_1029_HEALTH_ONLY' -and
+        $Request.new_full_backup_policy -ceq $pins.backup_policy -and
         $Request.field_sequence_approval_sha256 -ceq $pins.sequence_approval) 'health-install-request-identity'
     foreach($key in @('observation_result_sha256','observation_manifest_sha256','close_review_sha256','config_sha256')){
         Require ($Request.$key -is [string] -and $Request.$key -cmatch '^[a-f0-9]{64}$') ('health-install-pin:'+ $key)
     }
-    foreach($key in @('field_sequence_approval_path','observation_root','close_review_path','candidate_installer',
-        'rollback_installer','preceding_payload_reference','payload_reference','legacy_stream_engine','observation_engine')){
+    $paths=@('field_sequence_approval_path','observation_root','close_review_path','candidate_installer',
+        'rollback_installer','preceding_payload_reference','payload_reference','legacy_stream_engine','observation_engine')
+    if($pins.ContainsKey('previous_installer')){$paths+=@('preceding_installer')}
+    foreach($key in $paths){
         Require ($Request.$key -is [string]) ('health-install-path-type:'+ $key)
         $null=Plain $Request.$key
     }
 }
-function Assert-HealthCloseGeneration($Backup,$Review) {
-    Require ($Review.preceding_commit -ceq (Get-HealthInstallPins).previous_commit) 'close-review-preceding-build'
+function Assert-HealthCloseGeneration($Backup,$Review,[string]$CandidateCommit='acaf77d95101a050f4d3ecd76125d3502036f5a7') {
+    Require ($Review.preceding_commit -ceq (Get-HealthInstallPins $CandidateCommit).previous_commit) 'close-review-preceding-build'
     foreach($name in @('main_pid','main_created_at_utc','backend_pid','backend_created_at_utc')){
         Require ($null -ne $Review.PSObject.Properties[$name] -and
             $null -ne $Backup.preceding_operating_identity.PSObject.Properties[$name] -and
@@ -133,8 +154,10 @@ function Assert-HealthInstallPaths($Request,[string]$Factory,[string]$InstallRoo
             Require (-not $left.StartsWith((Plain $right)+'\',[StringComparison]::OrdinalIgnoreCase)) 'health-install-overlapping-roots'
         }
     }
-    foreach($key in @('field_sequence_approval_path','observation_root','close_review_path','candidate_installer',
-        'rollback_installer','preceding_payload_reference','payload_reference','legacy_stream_engine','observation_engine')){
+    $paths=@('field_sequence_approval_path','observation_root','close_review_path','candidate_installer',
+        'rollback_installer','preceding_payload_reference','payload_reference','legacy_stream_engine','observation_engine')
+    if((Get-HealthInstallPins $Request.candidate_commit).ContainsKey('previous_installer')){$paths+=@('preceding_installer')}
+    foreach($key in $paths){
         $path=Plain $Request.$key
         foreach($area in @($InstallRoot)+$Roots){
             Require ($path -ine $area -and -not $path.StartsWith($area+'\',[StringComparison]::OrdinalIgnoreCase)) 'health-input-inside-operating-root'
@@ -152,17 +175,19 @@ function Assert-HealthConfiguration([byte[]]$Bytes) {
     Require ([Convert]::ToBase64String($checked) -ceq [Convert]::ToBase64String($content)) 'comparator-must-already-be-false'
 }
 function Get-HealthPayloadFacts([string]$Root,$Reference,[string]$Version) {
-    $pins=Get-HealthInstallPins
-    $commit=if($Version -ceq '1.0.28'){$pins.previous_commit}else{$pins.candidate_commit}
-    $count=if($Version -ceq '1.0.28'){1814}else{1867}
-    Require ($Version -cin @('1.0.28','1.0.29') -and $Reference.version -ceq $Version -and
-        $Reference.candidate_commit -ceq $commit -and $Reference.payload_file_count -eq $count -and
+    $known=@{
+        '1.0.28'=@{commit='4cc7393e1bafbf90a329726aed9470fe0daacb21';count=1814;size=234260;sha='0b2ddc44640a139ab3b5c5a4febdf75e7039a37fadc6871866d7b0d78a46bc6b'}
+        '1.0.29'=@{commit='acaf77d95101a050f4d3ecd76125d3502036f5a7';count=1867;size=234261;sha='37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921'}
+        '1.0.30'=@{commit='0732c8e810be3c46096b397812f53a9767354229';count=1899;size=234260;sha='a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'}
+    }
+    Require ($known.ContainsKey($Version)) 'health-install-payload-contract'
+    $pin=$known[$Version];$count=$pin.count
+    Require ($Reference.version -ceq $Version -and
+        $Reference.candidate_commit -ceq $pin.commit -and $Reference.payload_file_count -eq $count -and
         @($Reference.payload_files.PSObject.Properties).Count -eq $count) 'health-install-payload-contract'
     $facts=PayloadFacts $Root $Reference.payload_files
     $extra=$facts['Uninstall smart-factory.exe']
-    $sha=if($Version -ceq '1.0.28'){'0b2ddc44640a139ab3b5c5a4febdf75e7039a37fadc6871866d7b0d78a46bc6b'}else{'37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921'}
-    $size=if($Version -ceq '1.0.28'){234260}else{234261}
-    Require ($facts.Count -eq $count+1 -and $extra.sha256 -ceq $sha -and $extra.bytes -eq $size) 'health-install-uninstaller-pin'
+    Require ($facts.Count -eq $count+1 -and $extra.sha256 -ceq $pin.sha -and $extra.bytes -eq $pin.size) 'health-install-uninstaller-pin'
     return $facts
 }
 function Save-HealthInput([string]$Name,[IO.Stream]$Stream) {
@@ -197,6 +222,7 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     Require ($ControllerStream.Length -gt 0 -and $ControllerStream.Length -lt 1MB) 'health-controller-stream'
     $Request=ReadLockedJson $RequestStream
     Assert-HealthInstallRequest $Request
+    $pins=Get-HealthInstallPins $Request.candidate_commit
     $Factory=Plain $Factory;$InstallRoot=Plain $InstallRoot
     $Roots=@($Roots|ForEach-Object{Plain $_})
     Assert-HealthInstallPaths $Request $Factory $InstallRoot $Roots
@@ -221,10 +247,9 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     $null=LockFile ($observationRoot+'\observed.tsv') $Request.observation_manifest_sha256
     $closeStream=LockFile $Request.close_review_path $Request.close_review_sha256
     $review=ReadLockedJson $closeStream;Save-HealthInput 'close-review.json' $closeStream
-    Assert-ClosedObservation $observation $review $observationRoot $Request.observation_result_sha256 $Request.observation_manifest_sha256 $Roots
-    Assert-HealthCloseGeneration $observation $review
+    Assert-ClosedObservation $observation $review $observationRoot $Request.observation_result_sha256 $Request.observation_manifest_sha256 $Roots $Request.candidate_commit
+    Assert-HealthCloseGeneration $observation $review $Request.candidate_commit
     $cold=ColdSnapshot;AssertCold $cold;SaveJson 'runtime-before' $cold
-    $pins=Get-HealthInstallPins
     # Historical permission context is preserved unchanged. It is not new-candidate approval evidence.
     $approval=LockFile $Request.field_sequence_approval_path $pins.sequence_approval
     Save-HealthInput 'historical-sequence-approval.json' $approval
@@ -232,11 +257,16 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     $oldReference=ReadLockedJson $oldStream;Save-HealthInput 'preceding-payload.json' $oldStream
     $newStream=LockFile $Request.payload_reference $pins.candidate_reference
     $newReference=ReadLockedJson $newStream;Save-HealthInput 'candidate-payload.json' $newStream
-    SaveJson 'preceding-installed-files' (Get-HealthPayloadFacts $InstallRoot $oldReference '1.0.28')
+    SaveJson 'preceding-installed-files' (Get-HealthPayloadFacts $InstallRoot $oldReference $pins.previous_version)
     $candidate=Plain $Request.candidate_installer
-    $null=LockFile $candidate $pins.candidate_installer 164824610
+    $null=LockFile $candidate $pins.candidate_installer $pins.candidate_installer_bytes
     $null=LockFile $Request.rollback_installer $pins.rollback_installer 163826264
-    foreach($path in @($candidate,$Request.rollback_installer)){
+    $installerPaths=@($candidate,$Request.rollback_installer)
+    if($pins.ContainsKey('previous_installer')){
+        $null=LockFile $Request.preceding_installer $pins.previous_installer $pins.previous_installer_bytes
+        $installerPaths+=@($Request.preceding_installer)
+    }
+    foreach($path in $installerPaths){
         Require ((Get-AuthenticodeSignature -LiteralPath $path).Status.ToString() -ceq 'NotSigned') 'unsigned-installer-state'
     }
     ImportBackupEngine $Request.legacy_stream_engine
@@ -250,7 +280,9 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     $reverification=Invoke-HealthOriginalReverification $engine ($observationRoot+'\observed.tsv') $Request.observation_manifest_sha256 $observation.totals
     SaveJson 'original-data-before-install' $reverification.totals
     $script:phase='preinstall-configuration-and-freshness'
-    SaveJson 'installer-inputs' @{candidate=(Fact $candidate);rollback=(Fact $Request.rollback_installer);signature_policy='UNSIGNED_INTERNAL'}
+    $installerFacts=@{candidate=(Fact $candidate);rollback=(Fact $Request.rollback_installer);signature_policy='UNSIGNED_INTERNAL'}
+    if($pins.ContainsKey('previous_installer')){$installerFacts.preceding=Fact $Request.preceding_installer}
+    SaveJson 'installer-inputs' $installerFacts
     $configPath=$Roots[0]+'\config.ini'
     Require ((Fact $configPath).sha256 -ceq $Request.config_sha256) 'preinstall-config-pin'
     $configBefore=[IO.File]::ReadAllBytes($configPath);Assert-HealthConfiguration $configBefore
@@ -269,9 +301,9 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     Assert-HealthReverificationFreshness $reverification
     $script:phase='installer';Invoke-HealthInstaller $candidate
     $script:phase='installed-payload';AssertCold (ColdSnapshot)
-    SaveJson 'installed-files' (Get-HealthPayloadFacts $InstallRoot $newReference '1.0.29')
+    SaveJson 'installed-files' (Get-HealthPayloadFacts $InstallRoot $newReference $pins.candidate_version)
     $registrations=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'|Where-Object{$_.PSObject.Properties['DisplayName'] -and $_.DisplayName -like '*smart-factory*'})
-    Require ($registrations.Count -eq 1 -and $registrations[0].DisplayVersion -ceq '1.0.29' -and
+    Require ($registrations.Count -eq 1 -and $registrations[0].DisplayVersion -ceq $pins.candidate_version -and
         $registrations[0].UninstallString -like ('*'+$InstallRoot+'\Uninstall smart-factory.exe*')) 'installed-registration'
     $location=(Get-ItemProperty -LiteralPath ('HKCU:\Software\'+$registrations[0].PSChildName) -Name InstallLocation).InstallLocation
     Require ($location -ieq $InstallRoot) 'registered-install-location'
