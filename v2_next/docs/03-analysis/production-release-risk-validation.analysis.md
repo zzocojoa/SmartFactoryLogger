@@ -316,3 +316,22 @@ fact9개다. 현재 이미지 fact2,241,600,730bytes와 관찰 fact545,221,046by
 `P30/dataqa-readiness.json` SHA256은 `e61ba9e50f36417e9c317cd6a49a3b1afe6f5fddb3363798e4411a3a8c7622f1`이다.
 이 목록은 설치 전 경계다. canary 종료·같은 세대 정상 종료 뒤 최종 CSV/metadata/fact를
 확보하고 전체 범위를 확장해야 하며, 후보 데이터 QA·R4·출시 판정은 미완료다.
+
+### 5.30 선택 입력 확보 도우미의 로컬 검증 — 21:51 KST
+
+설계5.30의 `capture-closed-facts.ps1`를 추가했다. native PS5.1x64의10개 검사(exit0)에서
+실제3,145,745bytes 스트리밍 복사·원본 쓰기 차단·덮어쓰기/용량/추가 스트림 거부, 다른 세대·
+미완료/감소 순번·잘못된 선택 경로를 확인했다. 합성6파일 복사 후 모든 목적지 SHA를 재확인했고,
+config/CSV/metadata/관찰/이미지 각각의 잘못된 외부 SHA가 거부됐다. 개발 PC에서 실제 진입점을
+실행하면 서버 식별에서 exit1로 거부되며 원본 경로를 읽기 전에 끝나는 것도 확인했다.
+
+로컬 준비기 `P30/prepare_closed_fact_capture.py`의7개 검사도 exit0다. 실제 canary terminal이
+없는 상태에서 묶음을 생성하지 않으며, 정상 종료의 native 프로세스 세대·제어기 정리·최종 순번·
+콘솔 SHA를 연결한다. 합성 묶음8파일의 해시와 PowerShell4파일 구문을 확인했다. 기존 native
+Job 구현은 동일 바이트로 재사용하고 실제 서버용 묶음 생성/전달/실행은 아직 하지 않았다.
+
+검토 영수증 `P30/closed-fact-preparation-review.json` SHA256은
+`8b899b8f3909e329cab43cf6111c11e2558d544abae5eaddfee06a7d3e40207d`다.
+초기 로컬 시험의 경로 변수 충돌·OrderedDictionary 그룹화·ADS fixture 생성 실패 기록도
+보존했다. 수정한 최종 소스의10+7검사와 각 실제 종료 코드/전체 로그를 확인했으며,
+서버 대용량 복사·실제 후보 데이터 QA·120분 최종 성능·정식 출시를 통과한 것으로 표시하지 않는다.

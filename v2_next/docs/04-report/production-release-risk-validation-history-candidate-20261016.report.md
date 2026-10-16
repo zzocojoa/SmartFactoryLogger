@@ -623,3 +623,46 @@ consumer/worker exit0, 강제 종료 없음, 잔존 프로세스0, 소요2810.28
 경로·해시가 같은 자료의 증거를 재사용하고 새 자료를 검사하되, 원인 미확인 부재는 그대로 남긴다.
 21:26의 제한된 SSH 상태 확인은 같은7200초 요청과6개 수집 프로세스의 실행을 확인했다.
 최종 결과는 없으며 초기 binding/configuration PASS를 최종 성능 PASS로 바꾸지 않았다.
+
+## 21:51 정상 종료 후 대장 확보 도우미 준비
+
+기존 종료 관찰기에 포함되지 않는 누적 관찰 fact·이미지 fact·최종 image manifest를 확보하는
+별도 `scripts/field-v1028/capture-closed-facts.ps1`를 추가했다. 현재 닫힌 CSV/metadata/config와
+필요한 선택 fact도 같은 읽기 잠금 아래 확인·복사한다. 이미지4GiB/관찰2GiB 한도를 유지하고
+새 결과 폴더에 필요한 입력만 보관한다. 전체 백업·원본 변경·앱 시작/종료 기능은 없다.
+
+선택한 원본 전체의 쓰기/삭제 공유를 막는 핸들을 유지하고, 복사 목적지를 다시 해시한다.
+CSV/metadata/config는 정상 종료 결과, 관찰 fact는 metadata, 이미지 fact는 최종 manifest와
+SHA를 대조한다. 다른 실행 세대·최종 순번 감소·원본 추가 스트림·경로 탈출·기존 목적지는
+거부한다. 서버 앱/포트 부재를 전후 확인하고 실패한 부분 사본은 지우지 않고 HOLD로 남긴다.
+이 복사 결과는 실제 내용 검증이나 전체 R4 통과를 대신하지 않는다.
+
+| 검사 | 실제 결과 |
+|---|---|
+| native Windows PowerShell5.1x64 | 10개 검사, exit0 |
+| 합성 스트리밍/파일 결합 | 3,145,745bytes 복사, 원본 쓰기·덮어쓰기 차단, 선택6파일 목적지 SHA 일치 |
+| 부정 입력 | 다른 세대·미완료 종료·순번 감소·선택 경로/별칭·추가 스트림·잘못된5역할 SHA 거부 |
+| 실제 개발 PC 진입점 | 서버 식별에서 예상 exit1, 입력 경로 읽기/서버 작업 없이 거부 |
+| 로컬 묶음 준비기 | 7개 검사, exit0; 생성 파일8개 해시·PowerShell4파일 parse0 |
+| 현재 실행 중 canary | terminal 부재 시 묶음 생성 거부, 새 서버용 산출물 없음 |
+
+검토 영수증 `P30/closed-fact-preparation-review.json`은2,855bytes이며 SHA256은
+`8b899b8f3909e329cab43cf6111c11e2558d544abae5eaddfee06a7d3e40207d`다.
+최종 PowerShell summary SHA는 `fd93d182622ec94012aeadc2477beb3ca4fa15caf2335060c1feb021e9d1b68a`다.
+초기3개 실패는 시험 경로 변수 충돌, OrderedDictionary 그룹화, .NET의 ADS fixture 경로
+처리에서 발생했다. 각 원문을 보존했고 수정 후 최종10개 검사를 실제로 다시 수행했다.
+
+| 준비 소스 | SHA256 |
+|---|---|
+| `capture-closed-facts.ps1` | `0c84e46af3f48a66f71670d48d23974b71c36773e06dad0c28aa21e21b206cb5` |
+| `test-capture-closed-facts.ps1` | `c6c08a2887263747eceecf5b438be860a111a188eca5d785c9b6c495caf239ff` |
+| `P30/prepare_closed_fact_capture.py` | `50c03eccb2bbab163693b5e36b785c7a8700603c00b8e8f91642f301bd6a5950` |
+| `P30/test_closed_fact_capture_preparation.py` | `96c51a2b20f625879ff15f648a4bbd04c8d44958b657149922999c253ee8bcaa` |
+
+준비기는 실제 canary 재계산 결과, 정상 종료 콘솔/결과 SHA, 같은 main/backend 생성 시각,
+정상 종료 제어기의 exit0·잔존 프로세스0을 확인한 뒤에만 `FCAN30_20261016_e934c7a2`를 만든다.
+기존 native owned Job 바이트를 재사용하며 새 묶음의 진단 제한은1800초다. 생성 후에도 기존
+정책대로 Z 전달 → 서버 로컬 최종 복사 → 잠금 해시 검산을 마친 뒤 실행해야 한다.
+예: `prepare_closed_fact_capture.py --close-folder <회수한 R폴더> --result-sha256 <종료 콘솔 SHA>
+--canary-review-sha256 <120분 재계산 결과 SHA>`. 실제 묶음과 사본은 아직 생성하지 않았다.
+제품1.0.30 설치본은 재빌드하지 않았고 측정 중인 서버 앱/설정을 변경하지 않았다.
