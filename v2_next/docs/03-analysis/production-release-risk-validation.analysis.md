@@ -32,10 +32,10 @@ CSV·원본 모델의 freshness anchor·GC 설정·장비 설정은 변경하지
 | worker에서 응답 준비 | 같은 event loop의 health 요청 진행과 worker TID 검사 | 일치 |
 | GC 설정 및 bounded memory collector 보존 | 코드 대조와 memory 회귀 | 일치 |
 | 실제 구현의 GC·기록·조회·peak 메모리 비교 | 아래 R3 별도 프로세스 결과 | 일치 |
-| 최종 전체 health | R2 exit0; BytesIO·버전 변경 후 clean 후보에서 다시 실행 예정 | 미완료 |
-| 패키지 및 현장 15분/120분 효과 | 아직 새 installer/현장 결과 없음 | 미완료 |
+| 최종 전체 health | BytesIO·버전 변경 후 clean `0732c8e8` 출시 환경에서 exit0 | 일치 |
+| 패키지 및 현장 15분/120분 효과 | 동일 1.0.30 패키지·격리 설치/복구 통과, 현장 효과 미검증 | 미완료 |
 
-이 시점의 5.23 항목은 **9/11 확인(81.8%)**이다. 소스 구현과 일부 개발 검사만 끝났으며,
+최종 clean 소스 검사 후 5.23 항목은 **10/11 확인(90.9%)**이다. 소스 구현과 개발 검사를 마쳤으며,
 미완료 항목을 이전 설치본의 결과나 합성 수치로 대신하지 않는다.
 
 ## 개발 비교 방법과 결과
@@ -74,7 +74,7 @@ R2 문자열 결합은 조회를 줄였으나 최대 조회 peak working set이 
   backend936검사 중 private F01 fixture1건 skip. Ruff·mypy(9파일)·QA selftest 완료.
   이는 BytesIO·1.0.30 변경 전 결과라 최종 전체 통과로 사용하지 않는다.
 - 새 버전 package/lock/backend와 installer identity 회귀의 고정 기대값을 함께 갱신했다.
-  최종 clean 후보에서 전체 health를 다시 확인하고 패키지 검증 기록에 연결한다.
+  최종 clean 후보의 전체 health 결과는 아래 후속 절에 기록한다.
 - `git diff --check` exit0. 외부 설치·서버 restart·백업·운영 승격은 이 개발 단계에서 수행하지 않았다.
 
 | 원문 | SHA256 |
@@ -88,5 +88,28 @@ R2 문자열 결합은 조회를 줄였으나 최대 조회 peak working set이 
 `memory_before_query`와 `memory_after_query`를 함께 확인한다. 성능 반복 출력에 남은
 `query_1000_ms` 이름은 peak 시험에서 실제 limit36000을 뜻하므로 결과 JSON의 limit를 따른다.
 
-다음은 최종 clean commit의 미서명 패키지·설치/복구·현장 효과 검증이다.
+동일 clean commit의 미서명 패키지·격리 설치/복구는 후속 기록에서 확인했고, 다음은 현장 효과 검증이다.
 기존 현장 15분 FAIL, 120분 미시작, 물리 경계 NOT_TESTED, 전체 데이터 미결 및 출시 HOLD를 유지한다.
+
+## 최종 clean 소스의 출시 환경 검증
+
+`0732c8e810be3c46096b397812f53a9767354229`를 별도 checkout에 고정했다.
+출시 lock의 Python wheel 40개 버전·SHA256을 설치 보고서와 대조했고 `pip check` exit0이다.
+그 환경의 `npm run health`는 414.454초, exit0이었다. dependency15/Electron100/
+frontend 계약9·Vitest437, backend936검사 중 private F01 fixture1건 skip,
+Ruff·mypy(9파일)·QA selftest 결과를 확인했다. 해당 fixture 환경변수는 설정되지 않았으며
+skip 항목은 완료로 계산하지 않는다. 검사 후에도 checkout은 같은 commit의 clean 상태다.
+
+원문은 `C:/Users/user/Desktop/SmartFactory/PDCA_GC_BUILD_20261016_968f2df9`의
+`candidate-health-terminal.json`, stdout/stderr 및 `health-review.json`이다.
+stdout SHA256은 `4894397fed7f6f06644425543380e4515489bac5449b4df2c0e094661ec07d35`,
+stderr SHA256은 `1f1c6fa7dffd98eb5b7c7a902dc6c42a1b0746a480f3ce3b86c298086dc37f25`다.
+성능 비교의 after service와 clean 소스 service의 SHA256도 모두
+`2563496ea681c81b8001237bd656b6c89c7e1fe8bd5afeb9e843d1b015689a73`으로 같다.
+이 결과는 패키지·설치·현장 QA 통과를 뜻하지 않는다.
+
+패키지와 격리 설치/복구의 별도 실제 실행은
+[1.0.30 후보 검증 기록](../04-report/production-release-risk-validation-history-candidate-20261016.report.md)에 있다.
+동일 installer SHA의 새 설치/제거·1.0.29→1.0.30 업그레이드·재시작·1.0.29 복구를 마쳤다.
+닫힌 데이터 140항목/실패0, CSV·이미지 도구8회 exit0, 정상 종료와 증거 보존 후 Sandbox 정리를
+확인했다. 현장 15분/120분이 아직 없어 마지막 항목과 전체 출시 HOLD는 유지한다.
