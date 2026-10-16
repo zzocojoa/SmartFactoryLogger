@@ -71,7 +71,8 @@ build `acaf77d95101a050f4d3ecd76125d3502036f5a7`이다.
 - 변경 Python 파일 Ruff: PASS, exit 0.
 - 전체 `npm run health`: PASS, exit 0. 프런트엔드 437개, backend 932개 중
   931개 통과·1개 skip이며, 의존성·Electron·타입·lint·QA selftest도 완료했다.
-- 새 도우미의 frozen 빌드·서버 실행은 아직 수행하지 않았다.
+- 이 절의 Python 검증 이후 frozen 포장 검사에서 아래 종료 판정 문제가 발견됐다.
+  서버에는 새 진단을 실행하지 않은 상태다.
 
 예시 검증 명령(각 `SFL_*_TEST_ROOT`는 기존 경로를 재사용하지 않는 새 폴더):
 
@@ -86,3 +87,39 @@ SHA 일치를 확인했다. 이것은 당시 닫힌 콘솔의 해시를 복원�
 
 작업자 화면 요구는 `AGENTS.md`에 반영했다. 서버 작업 종료 시 실행 중인
 Smart Factory를 복원·전면 표시하고 현재 작업 정보가 보이는지 확인한다.
+
+## 포장 검사에서 확인한 종료 판정 수정
+
+첫 frozen 빌드는 clean commit `1baf2433e8ac9e6ebf2510ae704a5e4b11183c83`에서
+완료됐다. 그러나 개발 fixture의 내부 검사 PASS와 바깥 실행기 FAIL이 충돌했다.
+첫 실패 결과를 보존하고, 개발 전용 실행기에 검산 전 child receipt 저장만 추가해
+한 번 더 실행했다. 운영 서버나 제품 코드는 이 조사에 사용하지 않았다.
+
+`PDCA_TIMING_BUILD_20261016_7e8a9c03/pd1/run-cb324cc5508f/dev-child-before-verification.json`
+(SHA256 `ae04cc1f58178f8eda5d1fab36c23822f936948f1a4750118ede09f22c2474f2`)의 사실:
+
+- 실제 루트 종료 코드 0, 강제 종료 없음.
+- 첫 작업 묶음 accounting: 전체 11, active 1.
+- 뒤따른 native 관찰: 전후 active 0, 열거 멤버 0, 루트 signaled·exit 0.
+- 최종 active 0이지만 첫 값만 검사하는 `outer-descendants-remain`이 FAIL을 유지했다.
+
+루트 프로세스 종료와 작업 묶음 전체의 정리 확인은 별개다. Microsoft의
+[ActiveProcesses 정의](https://learn.microsoft.com/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information)는
+종료 프로세스의 참조가 해제된 뒤 카운터가 감소한다고 설명한다. 위 관찰은 첫 카운터와
+뒤의 비동시 관찰이 달랐다는 근거이며, 특정 숨은 프로세스의 정체나 현장 HTTP 지연 원인을
+입증하지 않는다.
+
+실행기는 최초 카운터를 보존하면서 전체 제한 시간 안에서 최대 2초간 소유 작업 묶음의
+active 0을 확인한다. 끝까지 남은 프로세스, 전체 시간 제한, nonzero 종료는 계속 FAIL이고
+소유 프로세스만 정리한다. 새 프로세스 실행이나 실패 요청 재시도는 없다. 출력 검산보다
+먼저 `native-child.json`을 저장하고 launcher 성공·실패 영수증에 해시를 연결해, 후속 검산
+오류가 발생해도 종료 근거를 잃지 않도록 했다.
+
+최종 `test_field_run_native.py` 16개 그룹 PASS, exit 0. 자연 종료하는 자식의 drain,
+잔류 자식·종료 7·전체 deadline·감시자 사망·진단 오류·30회 빠른 종료·다른 프로세스
+보존·출력 변조 거절을 확인했다. Windows PowerShell 5.1 x64에서 수행했고, 보호 ACL의
+descriptor를 검사했으며 관리자 소유 ACL 실제 적용은 개발 일반 권한 시험 범위 밖이다.
+결과: `PDCA_OBS_LATENCY_20261016_4b21c68f/native-drain-r2/summary.json`.
+최종 실행기 SHA256은 `65d37c5c1722efc0a572f36b2d792df611a96406d7a879e8b332fe72c775c41c`다.
+전체 health는 앞의 Python 변경 상태에서 통과했으며, 이후 실행기 수정은 위 native 시험과
+Ruff·diff 검사를 적용했다. 새 묶음 재포장 검증과 현장 진단은 후속 단계다.

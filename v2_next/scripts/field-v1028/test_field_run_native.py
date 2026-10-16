@@ -65,21 +65,21 @@ Check ($reader.Count -eq 1 -and $reader[0].FileSystemRights -eq ([Security.Acces
     fixture.write_text('''import json, os, subprocess, sys, time
 from pathlib import Path
 mode, marker = sys.argv[1], Path(sys.argv[2])
-if mode in ('hang','orphan'):
-    child=subprocess.Popen([sys.executable,'-S',__file__,'child',str(marker)],creationflags=subprocess.CREATE_NO_WINDOW)
+if mode in ('hang','orphan','settling','deadline-drain'):
+    child=subprocess.Popen([sys.executable,'-S',__file__,'short-child' if mode=='settling' else 'child',str(marker)],creationflags=subprocess.CREATE_NO_WINDOW)
     end=time.monotonic()+5
     while not marker.exists() and time.monotonic()<end:time.sleep(.01)
-    if mode=='orphan':raise SystemExit(0)
+    if mode in ('orphan','settling','deadline-drain'):raise SystemExit(0)
     time.sleep(90)
-elif mode=='child':
+elif mode in ('child','short-child'):
     marker.write_text(json.dumps({'pid':os.getpid()}))
-    time.sleep(90)
+    time.sleep(.3 if mode=='short-child' else 90)
 elif mode=='args':
     print(json.dumps({'args':sys.argv[3:],'stdin':sys.stdin.buffer.read().hex(),
         'unexpected_environment':os.environ.get('SFL_SHOULD_NOT_BE_INHERITED')}))
 elif mode=='exit7':raise SystemExit(7)
 ''',encoding='utf-8')
-    names=('args','exit7','hang','orphan')
+    names=('args','exit7','hang','orphan','settling','deadline-drain')
     unrelated=subprocess.Popen([sys._base_executable,'-S','-c','import time;time.sleep(90)'],creationflags=subprocess.CREATE_NO_WINDOW)
     try:
         for name in names:
@@ -87,11 +87,12 @@ elif mode=='exit7':raise SystemExit(7)
             marker=root/(name+'-child.json')
             arguments=['-S',str(fixture),name,str(marker)]
             if name=='args':arguments+=['spaces and 한글','literal"quote','trailing\\','']
-            body='$r=Invoke-RunNative '+quote(sys._base_executable)+' @('+','.join(quote(x) for x in arguments)+') '+quote(directory)+' '+('1' if name=='hang' else '15')+'\n'
+            body='$r=Invoke-RunNative '+quote(sys._base_executable)+' @('+','.join(quote(x) for x in arguments)+') '+quote(directory)+' '+('1' if name in ('hang','deadline-drain') else '15')+'\n'
             body+="$r|ConvertTo-Json -Depth 8\nCheck ($r.created_suspended -and $r.job_assigned_before_resume -and $r.job_after_cleanup[1] -eq 0) 'owned suspended job'\n"
-            if name=='args':body+="Check ($r.status -ceq 'PASS' -and $r.actual_exit_code -eq 0 -and -not $r.termination_requested) 'normal child'\n"
+            if name in ('args','settling'):body+="Check ($r.status -ceq 'PASS' -and $r.actual_exit_code -eq 0 -and -not $r.termination_requested -and $r.job_drain.idle_confirmed) 'normal child and owned drain'\n"
             elif name=='exit7':body+="Check ($r.status -ceq 'FAIL' -and $r.actual_exit_code -eq 7 -and -not $r.termination_requested) 'actual exit7'\n"
             else:body+="Check ($r.status -ceq 'FAIL' -and $r.termination_requested) 'owned fault termination'\n"
+            if name=='deadline-drain':body+="Check ($r.errors -contains 'outer-deadline' -and -not $r.job_drain.idle_confirmed) 'drain cannot extend overall deadline'\n"
             observation=json.loads(run(name,body))['job_observation_before_cleanup']
             assert observation['schema']=='sfl-owned-job-observation-v1',observation
             assert observation['sequence_not_atomic'] is True and observation['stopwatch_frequency']>0,observation
@@ -102,7 +103,7 @@ elif mode=='exit7':raise SystemExit(7)
             assert root_observation['signaled'] is (name!='hang'),observation
             assert root_observation['error'] is None,observation
             assert unrelated.pid not in [p['pid'] for p in observation['members']],observation
-            if name in ('hang','orphan'):
+            if name in ('hang','orphan','deadline-drain'):
                 child_pid=json.loads(marker.read_bytes())['pid']
                 owned_child=[p for p in observation['members'] if p['pid']==child_pid]
                 assert len(owned_child)==1 and owned_child[0]['owned'] is True and owned_child[0]['signaled'] is False,observation
@@ -126,14 +127,14 @@ Set-Item Function:Invoke-RunNative ([scriptblock]::Create($definition))
         assert marker.exists() and not psutil.pid_exists(json.loads(marker.read_bytes())['pid'])
         assert unrelated.poll() is None
 
-        # Repeated quick exits exercise transient console descendants. Keep the
-        # original accounting verdict, even when the later observation is empty.
+        # Repeated quick exits retain the first accounting sample while requiring
+        # positive, bounded whole-job idle confirmation before a PASS.
         directory=root/'quick-exits';directory.mkdir()
         body='$parent='+quote(directory)+'\n$records=@()\n'
         body+='for($i=0;$i -lt 30;$i++){\n$d=Join-Path $parent ([string]$i);[void][IO.Directory]::CreateDirectory($d)\n'
         body+='$r=Invoke-RunNative '+quote(sys.executable)+" @('-S','-c','pass') $d 15\n"
         body+="Check ($r.actual_exit_code -eq 0 -and $r.job_after_cleanup[1] -eq 0) 'quick root exited and job cleaned'\n"
-        body+="if($r.job_before_cleanup[1] -ne 0){Check ($r.status -ceq 'FAIL' -and $r.errors -contains 'outer-descendants-remain') 'original accounting failure retained'}\n"
+        body+="Check ($r.status -ceq 'PASS' -and $r.job_drain.idle_confirmed -and -not $r.termination_requested -and $r.job_drain.observations[-1].accounting[1] -eq 0) 'bounded idle confirmation required'\n"
         body+="$records+=$r\n}\n$records|ConvertTo-Json -Depth 8\n"
         records=json.loads(run('quick-exits',body))
         assert len(records)==30

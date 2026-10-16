@@ -287,14 +287,29 @@ function Invoke-RunNative([string]$Executable,[string[]]$Arguments,[string]$Dire
         $record.job_before_cleanup=$child.Accounting()
         try{$record.job_observation_before_cleanup=$child.ObserveJob()}
         catch{$record.job_observation_error=$_.Exception.Message}
-        Assert-RunCondition ($record.job_before_cleanup[1] -eq 0) 'outer-descendants-remain'
+        # Root-process signaling and whole-job accounting are separate facts.
+        # Retain the first count, then require an idle owned job within a short
+        # drain budget and the original overall deadline. No restart or timeout
+        # extension, and a surviving descendant still fails and is terminated.
+        $settle=[Diagnostics.Stopwatch]::StartNew()
+        $record.job_drain=[ordered]@{budget_seconds=2;observations=@();idle_confirmed=$false}
+        do{
+            $current=$child.Accounting()
+            $record.job_drain.observations+= [ordered]@{elapsed_ms=$settle.Elapsed.TotalMilliseconds;accounting=$current}
+            if($current[1] -eq 0){$record.job_drain.idle_confirmed=$true;break}
+            Assert-RunCondition ($clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) 'outer-deadline'
+            if($settle.Elapsed.TotalSeconds -ge 2){break}
+            [Threading.Thread]::Sleep(25)
+        }while($true)
+        $record.job_drain.elapsed_ms=$settle.Elapsed.TotalMilliseconds
+        Assert-RunCondition ($record.job_drain.idle_confirmed) 'outer-descendants-remain'
         foreach($name in @('stdout.log','stderr.log')){Assert-RunCondition (([IO.FileInfo]::new($Directory+'\'+$name)).Length -le 128MB) 'outer-final-output-budget'}
         if($record.actual_exit_code -eq 0){$record.status='PASS'}
     }catch{$record.errors+= $_.Exception.Message}
     finally{
         if($null -ne $child){
-            # Diagnostic fields never replace the original accounting verdict or
-            # prevent cleanup. The observation spans multiple native calls.
+            # Diagnostic fields never prevent cleanup. The observation spans
+            # multiple native calls; only the bounded idle check grants success.
             if(-not $record.Contains('job_observation_before_cleanup') -and -not $record.Contains('job_observation_error')){
                 try{$record.job_observation_before_cleanup=$child.ObserveJob()}
                 catch{$record.job_observation_error=$_.Exception.Message}
@@ -314,7 +329,7 @@ function Invoke-RunNative([string]$Executable,[string[]]$Arguments,[string]$Dire
     return $record
 }
 
-$held=[Collections.Generic.List[IO.Stream]]::new();$resultRoot=$null
+$held=[Collections.Generic.List[IO.Stream]]::new();$resultRoot=$null;$childReceipt=$null
 try{
     $native=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
     Assert-RunCondition ([Environment]::Is64BitProcess -and $PSVersionTable.PSEdition -ceq 'Desktop' -and $PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -eq 1 -and [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ieq $native) 'native-powershell-5.1-x64-required'
@@ -348,18 +363,20 @@ try{
     [void][IO.Directory]::CreateDirectory($resultRoot,(New-RunAcl $OperatorSid));Assert-RunAcl $resultRoot $OperatorSid
     $child=Invoke-RunNative ($root+'\field_runner.exe') @('--request',$request,'--request-sha256',$ExpectedRequestSha256,'--output-root',$resultRoot,'--package-root',$root) $resultRoot 9000
     Assert-RunAcl $resultRoot $OperatorSid
+    Write-RunJson ($resultRoot+'\native-child.json') $child
+    $childReceipt=Get-RunFact ($resultRoot+'\native-child.json')
     $outputVerification=$null
     if([IO.File]::Exists($resultRoot+'\session\manifest.json')){$outputVerification=Test-RunOutput $resultRoot $ExpectedRequestSha256 ($child.status -ceq 'PASS')}
     Assert-RunCondition ($child.status -cne 'PASS' -or $null -ne $outputVerification) 'successful-child-missing-output'
     Assert-RunCondition ((Get-RunHash $requestStream) -ceq $ExpectedRequestSha256 -and (Get-RunHash $manifest) -ceq $fieldRunManifestSha256) 'launcher-input-closeout'
-    $record=[ordered]@{schema='sfl-field-launch-v1';child=$child;output_verification=$outputVerification;request_sha256=$ExpectedRequestSha256;package_manifest_sha256=$fieldRunManifestSha256;signature_policy='UNSIGNED_INTERNAL';release_gate='HOLD';promotion_allowed=$false;installation_performed=$false;application_shutdown_performed=$false}
+    $record=[ordered]@{schema='sfl-field-launch-v1';child=$child;native_child_receipt=$childReceipt;output_verification=$outputVerification;request_sha256=$ExpectedRequestSha256;package_manifest_sha256=$fieldRunManifestSha256;signature_policy='UNSIGNED_INTERNAL';release_gate='HOLD';promotion_allowed=$false;installation_performed=$false;application_shutdown_performed=$false}
     Write-RunJson ($resultRoot+'\launcher.json') $record
     Write-Host ('RESULT_PATH='+$resultRoot)
     $digest=[IO.File]::Open($resultRoot+'\launcher.json','Open','Read','Read')
     try{Write-Host ('LAUNCHER_SHA256='+(Get-RunHash $digest))}finally{$digest.Dispose()}
     if($child.status -cne 'PASS'){exit 1};exit 0
 }catch{
-    $failure=[ordered]@{status='FAIL';reason=$_.Exception.Message;result_path=$resultRoot;release_gate='HOLD';promotion_allowed=$false}
+    $failure=[ordered]@{status='FAIL';reason=$_.Exception.Message;result_path=$resultRoot;native_child_receipt=$childReceipt;release_gate='HOLD';promotion_allowed=$false}
     if($null -ne $resultRoot){try{Write-RunJson ($resultRoot+'\launcher-failure.json') $failure}catch{}}
     $failure|ConvertTo-Json -Compress
     exit 1
