@@ -562,3 +562,34 @@ SHA256 `156084bd57be92fac81795d2a3b62c3b316ef5dcdbceccf0b9f74ed35bc75f3f`다.
 캐시가 데워진 단일 생성자 실행이라는 범위를 지킨다. 현재 설치 전 이력2,241,600,730bytes와
 자료도 다르다. 서버 시작의 CSV/관찰 fact/이미지 초기화 구간을 함께 계측하지 않았으므로
 65944.981ms 지연의 현장 원인은 계속 UNCONFIRMED이며 제품 코드·설치본은 변경하지 않았다.
+
+## 21:12 canary 완료 이후 정상 종료 준비 검사
+
+개발 PC의 `P30/prepare_canary_final_close.py`를 준비했다. 실제120분 SSH terminal과 콘솔
+결과 경로·launcher SHA·종료 코드, 회수 manifest, 명시적으로 고정한 독립 재계산 결과 SHA를
+연결한다. 최종 health 바이트에서 backend/build/spot/logger/CSV/최소 순번을 다시 계산하고
+관찰 shutdown expectation과 대조한다. 현재 실행의 승인 설정·첫3행 증거를 함께 사용한다.
+기존 v3 종료 관찰기와 native 제어기는 변경하지 않았고 제품 설치본도 재빌드하지 않았다.
+
+`test_canary_final_close.py`15개가 exit0이다. 실행 중 terminal 부재·콘솔 중복/해시/종료 코드,
+900초 창·다른 요청·재계산 미완료·다른 logger/CSV/build·순번 감소/형식·변조된 health·승격
+scope를 거부했다. 로컬 fixture 안에서만9파일 묶음과 실행기를 생성하고 파일별 해시·기준
+도우미 바이트 유지·실행 전 연결 조건·기존 목적지 재사용 거부를 확인했다. 이 fixture는
+실제120분 완료·서버 전달 증거가 아니다. 실제 실행 중 canary로는 준비 파일을 만들지 않았다.
+
+| 검증 자료 | 결과 / SHA256 |
+|---|---|
+| `canary-close-preparation-checks-r1/summary.json` | 15개 PASS / exit0 / `5de78b6ec067966acbbb64654c48cd252241cf603563a63507ac6b0f72046e8d` |
+| `canary-close-preparation-checks-r1/preflight-and-parse.json` | frozen85소스·실제 runtime preflight0, PowerShell3파일 정적 parse0 / `783da8ff1a898e85d0943bb617e8679c90b29bd1ca80ce50c2226f898662c236` |
+| `prepare_canary_final_close.py` | `395717b54580a29f87d65fbaed90a82e2c49b45e2d95336252d5b82d8f91664f` |
+| `test_canary_final_close.py` | `2da89f8da8546248c2d6da5a629abda376c95eca2f20404889206658ed6dc830` |
+
+native PowerShell5.1x64에서 실제 v3 요청을 `-LibraryOnly`로 검사한 종료 코드도0이다.
+측정 FAIL이 있어도 증거가 온전하면 자료 보존을 위한 정상 종료 준비는 허용하며, FAIL과
+출시 HOLD는 유지한다. 예: 실제 측정 종료 → 원문 회수·독립 재계산 → 그 결과 SHA로
+준비기 실행 → 새 묶음의 서버 로컬 전달·잠금 해시 확인 → 관찰기 READY 확인 → 정상 GUI 종료.
+실제 서버용 묶음 생성·전달·종료·후속 CSV/fact/이미지 QA는 아직 수행하지 않았다.
+
+21:13 기존 제조사 문의 thread를 한 번 읽어 보낸 메일1건만 확인했다. 답장은 아직 없으며
+재발송하지 않았다. `manufacturer-reply-check-2113.json`에 기록했다. 진행 중120분 관찰과
+물리 경계 NOT_TESTED·정식 QA/출시 HOLD는 유지한다.
