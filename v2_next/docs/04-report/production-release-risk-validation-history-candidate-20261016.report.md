@@ -140,9 +140,67 @@ portable summary의 `package_unchanged`, `inputs_unchanged`, 세 child의 native
 코드와 `job_after_cleanup`을 확인한다. 실패를 기대한 음성 대조군의 FAIL은 보존한다.
 `release_gate=HOLD`, `field_observation_executed=false`도 함께 확인한다.
 
+## 원본 보존 설치 도우미 검증
+
+설치 도우미 commit은 `a344e4cbab0ce39e852dc45285ecb28c1c31b84c`다.
+기존 계약과 함께 정확한1.0.29→1.0.30 쌍을 허용하며 새 요청은
+`sfl-history-observed-install-request-v1`/`OMITTED_FOR_1030_HISTORY_ONLY`를 요구한다.
+새 설치본·직전1.0.29 후보 설치본·정식541d 롤백 설치본을 각각 잠금 검산한다.
+제품은 재빌드하지 않았다. 원문 루트는 `C:/Users/user/Desktop/SmartFactory/I30_20261016_5bd912c7`다.
+
+동일 설치본의 제거 파일을 별도 오프라인 Sandbox에서 확보했다. 234,260bytes,
+SHA256 `a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910`이며
+앞선 전체 matrix의 해시와 같다. 처음 두 dispatch는 guest 로그인 전이라 실행되지 않았고,
+종료 CLI의 빈 성공 출력을 JSON으로 읽은 host wrapper 오류도 원문에 남겼다.
+실제 설치1회 exit0, guest 종료0, 환경 부재와 보존 파일을 별도 재검산했다.
+
+`test_install_health_observed.ps1`의80검사 exit0, `test_health_preservation_entry.ps1`의
+17검사 exit0이다. 후자는 최초 실행에서 상위 PowerShell7의 module path를 상속하여
+Get-FileHash를 찾지 못했다. source 변경 없이 native5.1 기본 module path로 재실행한
+결과를 사용하며 첫 exit1을 보존했다. 실제 installer 모사 프로세스0/17/timeout,
+구·신 schema/정책·생성 식별자·제거 파일 크기/해시와 패키지 오염 거부를 검사했다.
+
+새 설치 도우미 함수 본문을 바꾸지 않고 별도 오프라인 Sandbox에서 실제1.0.29→1.0.30
+설치를 실행했다. 기존 기본 스트림 변경과 추가 스트림 변경 두 음성 대조군은 설치 시작 전에
+거부됐다. 정상 조건은4시간 지난 관찰을 전수 재검산하고639ms 뒤 freshness 확인을 통과했다.
+설치 native 종료0, 이전1,867개/후보1,899개 payload와 각 제거 파일·등록값, 합성 원본
+4파일/3폴더/3추가 스트림/210bytes 보존을 확인했다. 원본·설정 쓰기, 전체 백업, 강제 종료,
+자동 복귀는 없었다. 관리자/SYSTEM 쓰기와 운영자 읽기 ACL도 격리 guest에서 적용됐다.
+
+닫힌 증거의 독립 재검토 `review_install_trial.py`는 **127항목 PASS, exit0**이다.
+현재 소스와 archived controller 바이트, 모든 입력·결과 해시와 보존 자료61파일을 대조했다.
+앱/포트 부재를 확인한 뒤 해당 Sandbox만 종료했다. 이 시험의 정상 종료 리뷰는 합성 자료로,
+**실제 서버 앱의 정상 종료나 실제 서버 설치를 대신하지 않는다**.
+
+| 증거 | SHA256 |
+|---|---|
+| 실제 시험 controller | `a9897e4c0f49d523c807d26bde329dba351aa389806f4e220b450500fcf8e6c1` |
+| `preservation-r1/package-manifest.json` | `6bcbe2f18950d54c4d298897c980fa9df0f6e0304030fc1f88eb2d6c224260c9` |
+| `install-tests-r1/tests-result.json` | `c79be406aa0ea9a7dc0d338399b7f0e7947b2bd6f2afc54634584e307f8bdaba` |
+| `entry-tests-r2/result.json` | `fcde3872fd397900e51bd824b60e5fc5452340cdf99de30096458fdfca8bae63` |
+| `install-trial/output/transaction/result.json` | `e11193b73a43a52b622a4889e41f9652fa4382a3d1d5c4fe24caf440586c0d2d` |
+| `install-trial/closed-output-manifest.json` | `cbe6eb4487974f090d94743776e74bb194482422b9ba9f3394096b2dacd0b8c9` |
+
+확인 예: `install-trial-review.json`의127개 조건과 원문 receipt를 대조한다.
+`installer-inputs.json`에서 candidate/preceding/rollback을 구분하고, 두 `*-rejected.json`의
+`installer_started=false`, `original-data-before-install-freshness.json`의120000ms 예산을 확인한다.
+
+## 실제 서버 준비 상태
+
+16:49 KST 화면과 후속 승인된 SSH 읽기에서 서버1.0.29 Running 및 동일 main14044/
+backend11520의 생성 시각을 확인했다. 사용자가 알려 준60374·1 이후 작업자가10851·1,
+이어 **60534·1을16:48:53 KST에 적용**한 기록이 있었다. 최신 운영자 입력을 보존하고
+다시 쓰지 않았다. Smart Factory는 전면에 있었다. 화면은 `server-current-job-1649.png`,
+API·권한·생성 식별자·C: 여유18.88GiB는 `server-preflight.json`에 보존했다.
+
+16:53 KST 현재 CSV는357,811,133bytes로 기존 `observe-health-runtime-close.ps1`의
+128MiB 읽기 한도를 넘는다. 따라서 이 도우미로 앱부터 종료하지 않았다. 다음 단계는
+대용량 현재 CSV와 자정 rollover의 첫 sample sequence를 처리할 정상 종료 증거 경로를
+준비·검증하는 것이다. 이 크기 확인은 파일 내용 검증을 뜻하지 않는다.
+
 ## 남은 작업
 
-- 1.0.29→1.0.30 실제 설치 도우미와 새 현장 설정 기준 연결·검증.
+- 현재 대용량 CSV에 맞는 정상 종료·manifest 결합 증거 경로와 새 현장 설정 기준 준비.
 - 승인된 서버 교체, 변경 후 현장15분 및 선행 조건 통과 후120분 관찰.
 - 물리 경계 NOT_TESTED/제조사 확인·전체 데이터 미결의 처리와 실제 운영 승격 판단.
 

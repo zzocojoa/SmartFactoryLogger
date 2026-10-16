@@ -138,3 +138,27 @@ stderr SHA256은 `1f1c6fa7dffd98eb5b7c7a902dc6c42a1b0746a480f3ce3b86c298086dc37f
 frozen 빌드0, `verify_portable.py`0이다. 운영 ACL 적용은 이 개발 시험에 포함되지 않는다.
 상세 해시·재검산 예는 [후보 검증 기록](../04-report/production-release-risk-validation-history-candidate-20261016.report.md)에 있다.
 미검증 현장 효과·물리 경계·전체 데이터·운영 승격 및 출시 HOLD를 그대로 유지한다.
+
+## 5.25 원본 보존 설치 계약 대조
+
+설치 도우미 commit `a344e4cbab0ce39e852dc45285ecb28c1c31b84c`의 실제 함수 본문으로
+PS5.1 단위 검사와 오프라인 NSIS transaction을 실행했다. 제품0732/e72c 설치본은 같다.
+
+| 설계 조건 | 실제 확인 | 상태 |
+|---|---|---|
+| 두 교체 쌍·기존 기본값·새 schema/정책 | 정확한 새 요청 수용, 혼합/누락 거부 | 일치 |
+| 후보/직전 후보/정식 롤백 설치본 구분 | 세 실제 설치본 잠금 해시·크기, receipt 독립 대조 | 일치 |
+| payload·제거 파일·등록값 | 이전1,867/새1,899파일+제거 파일, 실제234,260bytes 확보 | 일치 |
+| 원본 전수 재검산·120초·native0·무강제 | 기본/ADS 변경 설치 전 차단, 오래된 기준 재검산 후 실제 설치0 | 일치 |
+| 원본/설정·ACL 보존 | 합성4파일/3폴더/3ADS/210bytes, protected ACL 실제 적용 | 일치 |
+| 실제 서버 정상 종료·설치·검산 | 현재 CSV357,811,133bytes에 맞는 종료 증거 경로 준비 필요 | 미완료 |
+
+이 표는 **5/6 확인(83.3%)**이며 전체 PDCA 달성률이 아니다. 원문은
+`C:/Users/user/Desktop/SmartFactory/I30_20261016_5bd912c7`에 있다.
+설치 검사80/보존 entry17 PASS, 닫힌 증거 독립 재검토127 PASS와 실제 native0을 확인했다.
+초기 guest 로그인 미완료 dispatch·성공한 stop의 빈 출력 파싱 오류·PS5.1 module path
+시험 실행기 오류를 보존했다. 최종 검산은 모두 exit0이며 실패를 PASS로 재작성하지 않았다.
+격리 시험의 close review는 합성 자료다. 실제 서버 current CSV가128MiB를 넘어 기존
+runtime-close 도우미를 그대로 실행하지 않았다. 새 실제 정상 종료·원본 manifest 결합,
+현장15분/120분과 효과 검증은 남아 있다. 상세 증거와 재검산 예는
+[후보 검증 기록](../04-report/production-release-risk-validation-history-candidate-20261016.report.md)에 있다.
