@@ -593,3 +593,33 @@ native PowerShell5.1x64에서 실제 v3 요청을 `-LibraryOnly`로 검사한 �
 21:13 기존 제조사 문의 thread를 한 번 읽어 보낸 메일1건만 확인했다. 답장은 아직 없으며
 재발송하지 않았다. `manufacturer-reply-check-2113.json`에 기록했다. 진행 중120분 관찰과
 물리 경계 NOT_TESTED·정식 QA/출시 HOLD는 유지한다.
+
+## 21:29 관찰 후 데이터 검사에 필요한 용량·실행 시간
+
+개발 PC의 보존 자료만 읽어 후속 데이터 검사 조건을 확인했다. `O4ff65a11/observed.tsv`와
+결과 SHA를 전후 대조했고, `logs/test_data` 직접 하위36파일(v2 CSV12·metadata12·현재
+fact/최종 manifest3·과거 schema-mismatch fact9)의 경로·크기·해시·추가 스트림 수를
+`P30/dataqa-readiness.json`에 기록했다. 이36파일의 추가 스트림은0이다. 이미지 폴더·NAS·
+외부 자료를 포함한 전체 R4 범위를 이 목록으로 축소하지 않는다.
+
+현재 이미지 fact는2,241,600,730bytes, 현재 관찰 fact는545,221,046bytes다. 기존 CSV 입력
+검증기의 이미지 역할4GiB/기타2GiB 한도에 들어가므로 코드나 한도를 변경하지 않았다.
+4,878,532,000bytes의 과거 schema-mismatch 관찰 fact는 별도 이력이며, 이번 현재 CSV
+검사에 자동 포함되거나 검증된 것으로 처리하지 않는다. 전체 과거 데이터 판정은 남아 있다.
+
+10월14일 실제 CSV 검사 원문·최종 결합 기록·stdout/stderr/terminal 해시를 다시 확인했다.
+consumer/worker exit0, 강제 종료 없음, 잔존 프로세스0, 소요2810.281초다. 후속 현재 CSV
+검사는 기존 `run_command`의3600초 예산을 사용하며, 120초 기본값으로 실행해 같은
+시간 초과를 반복하지 않는다. 이는 로컬 오프라인 검증기 시간 예산이며 HTTP 성능 기준은 그대로다.
+
+`review_dataqa_readiness.py` 실행 exit0, frozen85소스와 고정 CSV EXE 해시 확인 완료다.
+검토 파일11,047bytes/SHA256 `e61ba9e50f36417e9c317cd6a49a3b1afe6f5fddb3363798e4411a3a8c7622f1`,
+도우미 SHA256 `d3f26547e9749ba0dc6f5b9b1a643aa118270cbafcb87fd8d0b14cbdfdeb7260`이다.
+실제 후보 CSV 소비자는 아직 실행하지 않았고 새 전체 백업·서버 파일 복사도 하지 않았다.
+
+다음 순서는 실제 canary 종료·원시 표본 재계산 → 같은 세대 정상 종료와 최종 순번 대조 →
+닫힌 현재 CSV/metadata/관찰 fact/이미지 fact/최종 image manifest 및 metadata가 요구하는
+선택 fact 확보 → 입력 해시·잠금을 유지한 소비자 실행이다. 최종 이미지 목록은 이전 검사와
+경로·해시가 같은 자료의 증거를 재사용하고 새 자료를 검사하되, 원인 미확인 부재는 그대로 남긴다.
+21:26의 제한된 SSH 상태 확인은 같은7200초 요청과6개 수집 프로세스의 실행을 확인했다.
+최종 결과는 없으며 초기 binding/configuration PASS를 최종 성능 PASS로 바꾸지 않았다.
