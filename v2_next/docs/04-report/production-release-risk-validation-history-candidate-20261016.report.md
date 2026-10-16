@@ -104,9 +104,45 @@ record로 보관하도록 변경했다. HTTP 이력 응답은 worker thread에�
 적용된 Smart Factory Running 전면 화면을 16:09–16:10 KST에 확인했다. 재입력하지 않았다.
 화면 증거는 같은 루트의 `server-60374-1-foreground.png`다.
 
+## 현장 관찰 도우미 연결 검증
+
+도우미 소스 commit은 `b735967e63f591e6e11e3c08d69c7591300f83b7`이다.
+제품 build와 설치본 SHA는 위와 동일하다. 새 후보 식별자와 payload 기준 SHA를 명시적으로
+연결하고, 기존 1.0.28 기본값·1.0.29 계약을 보존했다. 일반 관찰900/7200초, host300초,
+timing900초 예산과 native 생성 FILETIME 검증을 유지한다. 6초 WPR 전용 경로는 계속
+1.0.29만 허용하며 새 후보를 암묵적으로 수용하지 않는다.
+
+증거 루트는 `C:/Users/user/Desktop/SmartFactory/F30_20261016_8cafb9d8`다.
+첫 회귀 실행은 실제 검사152개가 통과했으나 시험 실행기의 저장소 PYTHONPATH 누락으로
+CSV 모듈을 불러오지 못해 exit1이었다. 원문을 보존했고 제품 변경 없이 실행 경로를
+보완한 새 CSV·host 실행25개가 exit0으로 끝났다. 합계 **서로 다른 실제 검사177개 PASS**,
+skip0이다. 전체 첫 실행을 exit0으로 보고하지 않는다. 변경한 Python9파일 Ruff와
+`git diff --check`는 exit0이었다. 변경이 없는 제품 전체 health를 다시 실행하지 않았다.
+
+새 binding으로 실제 추출 payload1,899파일/563,853,145bytes와 설치본을 읽고 재검산했다.
+85개 tracked 도우미 소스를 고정하여 빌드했고, 소스·의존성이 전후 같았다.
+frozen 실행 파일의 describe/관리자 차단/합성 닫힌 데이터/중복 JSON/부적합한 과거
+attestation/잘못된 요청 SHA 여섯 실행은 모두 예상 종료 코드를 기록했다.
+실행된 child3건은 잔존 job0·강제 정리0이고, 입력282파일과 패키지가 전후 같았다.
+개발 시험용 controller의 관리자 조건 변경은 별도 파일에만 적용했으며 운영 controller는
+그대로 보존했다. **운영 ACL 실제 적용과 서버 관찰 실행은 아직 미검증**이다.
+
+| 증거 | SHA256 |
+|---|---|
+| 첫 회귀 stderr, exit1 | `fc2ff6ad966302821f22f1e8453d9f19f0ae674276ba3a743f8dc96b3267db69` |
+| CSV·host 재실행 stderr, exit0 | `94e791eac514d98c6ca8e179d3654a0238b2851bbd2c7495061a0601dfc6b5f0` |
+| `runner-build/RUN130/field_runner.exe`, 16,097,422bytes | `0bf334d539b95cae516b08c59e7a6287525d265ce610ad9ce7062efa22e06976` |
+| `runner-build/RUN130/manifest.json` | `d17ebb1efb280d2ff9400cf21c15e76065e6721d8da6418f0d843228c159984f` |
+| `runner-build/portable-r1/summary.json` | `d20e9d084cc56494c3f2c31e2420a96f353469cfcfcfc7c3d8d0b087f67cb212` |
+
+검산 예: `test-reconciliation.json`의 모듈별 PASS 합계177과 두 원문을 비교하고,
+portable summary의 `package_unchanged`, `inputs_unchanged`, 세 child의 native 종료
+코드와 `job_after_cleanup`을 확인한다. 실패를 기대한 음성 대조군의 FAIL은 보존한다.
+`release_gate=HOLD`, `field_observation_executed=false`도 함께 확인한다.
+
 ## 남은 작업
 
-- 1.0.30 식별자를 명시적으로 전달하는 현장 도우미와 설정 기준 연결·검증.
+- 1.0.29→1.0.30 실제 설치 도우미와 새 현장 설정 기준 연결·검증.
 - 승인된 서버 교체, 변경 후 현장15분 및 선행 조건 통과 후120분 관찰.
 - 물리 경계 NOT_TESTED/제조사 확인·전체 데이터 미결의 처리와 실제 운영 승격 판단.
 

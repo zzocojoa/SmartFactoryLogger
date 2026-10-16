@@ -113,3 +113,28 @@ stderr SHA256은 `1f1c6fa7dffd98eb5b7c7a902dc6c42a1b0746a480f3ce3b86c298086dc37f
 동일 installer SHA의 새 설치/제거·1.0.29→1.0.30 업그레이드·재시작·1.0.29 복구를 마쳤다.
 닫힌 데이터 140항목/실패0, CSV·이미지 도구8회 exit0, 정상 종료와 증거 보존 후 Sandbox 정리를
 확인했다. 현장 15분/120분이 아직 없어 마지막 항목과 전체 출시 HOLD는 유지한다.
+
+## 5.24 현장 관찰 도우미 후보 연결 대조
+
+도우미 commit `b735967e63f591e6e11e3c08d69c7591300f83b7`을 최종 검사했다.
+제품 build `0732c8e8...`와 installer `e72c042d...`는 재빌드하지 않았다.
+원문 루트는 `C:/Users/user/Desktop/SmartFactory/F30_20261016_8cafb9d8`다.
+
+| 설계 조건 | 실제 확인 | 상태 |
+|---|---|---|
+| 정확한 새 후보·기존 기본값 유지 | 3개 후보 identity와 잘못된 조합 거부 | 일치 |
+| 후보별 외부 payload SHA | 명시 선택, 실제1,899파일/설치본 잠금 재검산 | 일치 |
+| outer/spec·fingerprint·runtime 연결 | 새 collector 정상, 누락·혼합·과거 fingerprint 거부 | 일치 |
+| 관찰 시간·native 시계·200ms 기준 | 기존 예산, FILETIME, 느린 첫 health 실패 유지 | 일치 |
+| 닫힌 CSV·이미지·종료 metadata | 새 후보 전 경로 및 혼합 이전 후보 거부 | 일치 |
+| 6초 WPR 범위 유지 | 1.0.30 거부 회귀, 해당 구현 변경 없음 | 일치 |
+| frozen helper의 동일 소스와 결과 정리 | 85개 소스 고정, 실제6회, child3건 잔존0 | 일치 |
+| 실제 설치·설정 연결·현장15분/120분 | 다음 단계이며 서버 미실행 | 미완료 |
+
+이 대조표는 **7/8 확인(87.5%)**이며 전체 PDCA 달성률이 아니다.
+첫 회귀 실행의 PYTHONPATH 누락으로 CSV 모듈 load ERROR와 exit1이 있었다.
+실제152개 PASS와 경로를 보완한 CSV·host25개 PASS(exit0)를 합쳐177개를 확인했다.
+초기 실패 원문과 재실행을 `test-reconciliation.json`으로 구분했다. 관련 Ruff와 diff 검사0,
+frozen 빌드0, `verify_portable.py`0이다. 운영 ACL 적용은 이 개발 시험에 포함되지 않는다.
+상세 해시·재검산 예는 [후보 검증 기록](../04-report/production-release-risk-validation-history-candidate-20261016.report.md)에 있다.
+미검증 현장 효과·물리 경계·전체 데이터·운영 승격 및 출시 HOLD를 그대로 유지한다.
