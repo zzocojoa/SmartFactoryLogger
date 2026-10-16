@@ -110,7 +110,7 @@ function Read-RuntimeHealth($Request) {
         $s=$r.GetResponseStream();$buffer=New-Object byte[] 8192
         while(($n=$s.Read($buffer,0,$buffer.Length)) -gt 0){Require-Runtime ($m.Length+$n -le 2MB) 'health-byte-budget';$m.Write($buffer,0,$n)}
         $bytes=$m.ToArray();$h=Read-RuntimeJson $bytes
-        Require-Runtime ($h.running -eq $true -and $h.mode -ceq 'REAL' -and $h.app_version -ceq '1.0.29') 'health-runtime'
+        Require-Runtime ($h.running -eq $true -and $h.mode -ceq 'REAL' -and $h.app_version -ceq (Get-RuntimeRequestVersion $Request)) 'health-runtime'
         Require-Runtime ($h.spot_temperature.build_git_commit -ceq $Request.candidate_commit -and $h.spot_temperature.v2_4_operational.logger_service_instance_id -ceq $Request.logger_service_instance_id) 'health-generation'
         Require-Runtime ($h.spot_temperature.v2_4_operational.current_v2_csv_file_name -ceq $Request.csv_name) 'health-csv'
         return ,$bytes
@@ -141,11 +141,16 @@ function New-RuntimeResult([string]$Parent,[string]$Sid) {
     }
     return $path
 }
+function Get-RuntimeRequestVersion($Request) {
+    if($Request.schema -cin @('sfl-health-runtime-close-request-v1','sfl-health-runtime-close-request-v2') -and $Request.candidate_commit -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7'){return '1.0.29'}
+    if($Request.schema -ceq 'sfl-health-runtime-close-request-v3' -and $Request.candidate_commit -ceq '0732c8e810be3c46096b397812f53a9767354229'){return '1.0.30'}
+    throw 'request-contract'
+}
 function Assert-RuntimeRequest($Request) {
-    Require-Runtime ($Request.schema -cin @('sfl-health-runtime-close-request-v1','sfl-health-runtime-close-request-v2') -and $Request.candidate_commit -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7') 'request-contract'
+    $null=Get-RuntimeRequestVersion $Request
     Require-Runtime ($Request.logger_service_instance_id -cmatch '^[a-f0-9-]{36}$' -and $Request.csv_name -cmatch '^Factory_Integrated_Log_v2_[0-9]{8}_[0-9]{6}\.csv$') 'request-generation'
     Require-Runtime ($Request.config_sha256 -cmatch '^[a-f0-9]{64}$') 'request-config-pin'
-    if($Request.schema -ceq 'sfl-health-runtime-close-request-v2'){
+    if($Request.schema -cin @('sfl-health-runtime-close-request-v2','sfl-health-runtime-close-request-v3')){
         Require-Runtime ($null -ne $Request.PSObject.Properties['csv_first_sample_seq']) 'request-first-sequence'
         Require-Runtime (($Request.csv_first_sample_seq -is [int] -or $Request.csv_first_sample_seq -is [long]) -and $Request.csv_first_sample_seq -gt 0) 'request-first-sequence'
     }else{Require-Runtime ($null -eq $Request.PSObject.Properties['csv_first_sample_seq']) 'legacy-first-sequence-not-configurable'}
@@ -225,7 +230,7 @@ try{
     Require-Runtime ($metadata.schema_metadata.git_commit -ceq $request.candidate_commit -and $metadata.schema_metadata.logger_service_instance_id -ceq $request.logger_service_instance_id) 'metadata-generation'
     Require-Runtime ($metadata.csv_closeout.finalized -eq $true -and $metadata.csv_closeout.closeout_reason -ceq 'shutdown' -and $metadata.csv_closeout.csv_file_name -ceq $request.csv_name -and $metadata.csv_closeout.logger_service_instance_id -ceq $request.logger_service_instance_id) 'metadata-not-finalized'
     $files[$metadataName]=Write-RuntimeBytes ($resultRoot+'\'+$metadataName) $metadataBytes
-    $csvLimit=if($request.schema -ceq 'sfl-health-runtime-close-request-v2'){1073741824}else{134217728}
+    $csvLimit=if($request.schema -cin @('sfl-health-runtime-close-request-v2','sfl-health-runtime-close-request-v3')){1073741824}else{134217728}
     $files[$request.csv_name]=Copy-RuntimeFile $csvPath ($resultRoot+'\'+$request.csv_name) $csvLimit
     Assert-RuntimeCold (Observe-Runtime)
     $receipt=Write-RuntimeJson ($resultRoot+'\result.json') ([ordered]@{schema='sfl-health-runtime-close-result-v1';status='CLOSED_RUNTIME_CAPTURED_REQUIRES_REVIEW';request_sha256=$ExpectedRequestSha256;files=$files;configuration_changed=$false;application_started=$false;forced_termination=$false;full_backup_created=$false;file_content_qa='NOT_EVALUATED';release_gate='HOLD';promotion_allowed=$false})

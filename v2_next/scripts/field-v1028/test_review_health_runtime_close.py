@@ -111,6 +111,43 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
 
+    def test_history_candidate_exact_version_build_and_schema(self):
+        files = rollover_fixture()
+        candidate = reviewer.binding.CANDIDATE_1030
+        for name in ('request.json', 'health-before.json', META):
+            value = json.loads(files[name])
+            if name == 'request.json':
+                value.update(schema='sfl-health-runtime-close-request-v3', candidate_commit=candidate.commit)
+            elif name == 'health-before.json':
+                value['app_version'] = candidate.version
+                value['spot_temperature']['build_git_commit'] = candidate.commit
+            else:
+                value['schema_metadata']['git_commit'] = candidate.commit
+            files[name] = raw(value)
+        files = seal(files)
+        result = self.invoke(files)
+        self.assertEqual(result['candidate_commit'], candidate.commit)
+        self.assertEqual(result['csv_first_sample_seq'], 18573)
+        self.assertEqual(result['release_gate'], 'HOLD')
+        self.assertFalse(result['promotion_allowed'])
+        for name, keys, wrong, message in (
+            ('request.json', ('schema',), 'sfl-health-runtime-close-request-v2', 'request-build-schema'),
+            ('request.json', ('candidate_commit',), reviewer.BUILD, 'request-build-schema'),
+            ('health-before.json', ('app_version',), '1.0.29', 'health-runtime'),
+            ('health-before.json', ('spot_temperature', 'build_git_commit'), reviewer.BUILD, 'health-generation'),
+            (META, ('schema_metadata', 'git_commit'), reviewer.BUILD, 'metadata-generation'),
+        ):
+            with self.subTest(name=name, keys=keys):
+                changed = deepcopy(files)
+                value = json.loads(changed[name])
+                target = value
+                for key in keys[:-1]:
+                    target = target[key]
+                target[keys[-1]] = wrong
+                changed[name] = raw(value)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.invoke(seal(changed))
+
     def test_rollover_pinned_start_and_session_counters(self):
         result = self.invoke(rollover_fixture())
         self.assertEqual((result['csv_rows'], result['csv_first_sample_seq'], result['csv_last_sample_seq']), (3, 18573, 18575))

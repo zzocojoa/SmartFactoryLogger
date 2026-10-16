@@ -243,11 +243,51 @@ reviewer는14,025bytes/SHA256
 닫았다. 이후 Smart Factory Running/60534·1 화면을 전면에 복원했다.
 화면 증거는 `C30_20261016_b5d184c2/server-smart-factory-foreground-1724.png`다.
 
+## 실제 1.0.29 정상 종료와 회수 검토
+
+증거 루트는 `C:/Users/user/Desktop/SmartFactory/P30_20261016_e934c7a2`다.
+전용 SSH에서 진단 자식만 소유하는 실행기를 정상 종료·시간 제한·제어 프로세스 종료의
+세 조건으로 확인했다. 각 시험 후 해당 자식/제어 프로세스 부재를 확인했으며 운영 앱은
+그 시험에 포함하지 않았다. `owned-probes-verification.json`에 원문 해시와 부재 관찰을
+보존했다. 이 실행기는 설치 프로그램에 적용하지 않는다.
+
+두 도우미의 READY를 확인한 뒤17:51 KST에 Smart Factory의 닫기 버튼으로 정상 종료했다.
+종료 결과는 서버 `R89d7e3a4b705`, SHA256
+`752609a47798c86c1907c8827be52aa3d2cd238df35d62536a729a280290ba4d`이며 실행0이다.
+`native-close-review.json`은 관련5개 프로세스의 native 종료0, 설정 SHA9901d4e3… 유지,
+현재 CSV278,630행·순번18,573→297,202의 연속성을 확인했다. valid257,755,
+under_range20,852, stale23행으로, 이 집계만으로 온도 의미/전체 데이터 QA를 승인하지 않는다.
+
+추가로 필요한9파일/381,687,645bytes를
+`Z:/SmartFactory/20261016/return/P30_20261016_e934c7a2`와 개발 PC로 회수·검산했다.
+`preliminary-worker-close-review.json`(SHA256
+`06ca2cd6a7c84c383b095c97ac113da1cc7a2592f2fc9e571b38c1a5b8228c8a`)은
+Electron 정상 종료 순서·backend11520의 begin/final 결합·10개 작업 종료·이미지57,746건
+저장 및 남은 queue/inflight/unfinished/failure/drop0을 확인했다. 이 단계의 상태는
+`CLOSE_EVIDENCE_CHECKED_TERMINAL_BINDING_PENDING`이다. 전체 원본 관찰 manifest와의
+결합은 서버 `O4ff65a11`의 캡처/재검산 완료 후 별도로 수행한다.
+
+종료 직전 작업 정보는 현장 운영자가16:48:53에 적용한60534·1이며 마지막 CSV 행과도 같다.
+이전 사용자 입력60374·1로 덮어쓰지 않았다. 원본 검산 중에는 앱을 종료 상태로 유지한다.
+새 전체 백업은 만들지 않았고1.0.30 설치는 아직 시작하지 않았다.
+
+## 1.0.30 새 실행 확인 도우미
+
+설정 확인 도우미에 정확한0732c8e… 후보만 추가했고 기존 승인 프로파일/입력 SHA/Low Signal
+OFF 조건을 유지한다. `test_spot_attestation_script.py`10개가107.784초에 PASS·exit0이다.
+실제 새 metadata와 종료 증거를 얻은 뒤 네 확인 항목만 연결하며 현장 적용은 아직 하지 않았다.
+
+종료 도우미의 v3 요청은1.0.30만 허용하고 v1/v2의1.0.29 계약을 유지한다. v3도 명시적
+첫 순번·스트리밍 한도·native 종료 확인을 사용한다. `checks-r1`의 PowerShell15개와
+Python18개, `adjacent-r1`의 identity8개가 PASS·exit0이다. 버전/build/schema가 섞인
+요청·health·metadata를 거부했고 실제 대용량 복사/CLI 회귀를 확인했다. Ruff/diff도0이다.
+설치본은 재빌드하지 않았다. 이 도우미 검증은1.0.30 현장 실행·프로파일 확인·QA 통과가 아니다.
+
 ## 남은 작업
 
-- 전달된 도우미의 새 실행 요청 준비, 실제 정상 종료·현재 CSV·원본 manifest·worker 종료 증거 결합, 새 현장 설정 기준 준비.
+- 진행 중인 전체 원본 캡처/재검산 완료와 이미 확인한 정상 종료·CSV·worker 증거의 manifest 결합.
 - 승인된 서버 교체, 변경 후 현장15분 및 선행 조건 통과 후120분 관찰.
 - 물리 경계 NOT_TESTED/제조사 확인·전체 데이터 미결의 처리와 실제 운영 승격 판단.
 
-새 전체 서버 백업, 서버 설치·재시작·프로파일 변경, 운영/롤백 기준 갱신은 이 단계에서 하지 않았다.
+새 전체 서버 백업, 서버 설치·재시작·프로파일 변경, 운영/롤백 기준 갱신은 아직 하지 않았다.
 기존 현장15분 FAIL과 출시 HOLD를 유지하며 1.0.30의 현장 개선 효과는 아직 미검증이다.

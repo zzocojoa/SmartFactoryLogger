@@ -180,3 +180,19 @@ runtime-close 도우미를 그대로 실행하지 않았다. 새 실제 정상 �
 이 표의 확인율은4/5(80%)이며 전체 PDCA 달성률이 아니다. PowerShell14/Python17/
 인접 identity8개, 총39개 PASS와 각 exit0을 확인했다. Ruff와 diff 검사도0이다.
 로컬 도우미 검증만으로 서버 정상 종료·설치·현장 QA를 PASS로 바꾸지 않는다.
+
+### 5.26 현장 진행 보완
+
+2026-10-16 17:51 KST 실제 정상 종료 뒤 native5개 종료0와 현재 CSV278,630행의
+18,573→297,202 연속성을 확인했다. 별도 종료 로그 검토에서10개 작업 종료, 이미지57,746건
+저장·queue/inflight/unfinished/failure/drop0을 확인했다. 전체 원본 `O4ff65a11`의 캡처와
+재검산이 진행 중이므로 manifest 결합 행은 계속 미완료다. 증거는
+`P30_20261016_e934c7a2/native-close-review.json` 및 `preliminary-worker-close-review.json`이다.
+
+## 5.27 1.0.30 실행 확인 연결
+
+정확한 후보0732c8e…를 승인 프로파일 도우미에 추가한 회귀10개가PASS·exit0이다.
+새 종료 v3 요청의1.0.30 build/version 결합과 기존 v1/v2 격리를 확인했다.
+PowerShell15/Python18/인접 identity8개, 총41개PASS·exit0이며 Ruff/diff도0이다.
+검사는 `P30_20261016_e934c7a2/checks-r1` 및 `adjacent-r1`에 있다.
+실제 새 실행 metadata를 이용한 네 확인 항목 적용과1.0.30 종료/현장 QA는 아직 미완료다.

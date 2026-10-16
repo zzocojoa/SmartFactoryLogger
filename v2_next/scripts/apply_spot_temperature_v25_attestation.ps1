@@ -315,7 +315,8 @@ if ($readbackStatus -notin @("matched", "not_supported")) {
 if ($disabledLowSignalTrial) {
     $limitedCandidateBuilds = @(
         "4cc7393e1bafbf90a329726aed9470fe0daacb21",
-        "acaf77d95101a050f4d3ecd76125d3502036f5a7"
+        "acaf77d95101a050f4d3ecd76125d3502036f5a7",
+        "0732c8e810be3c46096b397812f53a9767354229"
     )
     if ($buildCommit -cnotin $limitedCandidateBuilds) { throw "Limited field candidate build mismatch." }
     $limitedProfile = @{

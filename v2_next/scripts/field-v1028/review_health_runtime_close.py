@@ -94,9 +94,12 @@ def review_streams(files, request_sha256, launch_exit):
     require(type(launch_exit) is int and launch_exit == 0, 'launcher-nonzero')
     request = decode(files['request.json'])
     require(sha(files['request.json']) == request_sha256, 'external-request-pin')
-    require(request['schema'] in ('sfl-health-runtime-close-request-v1', 'sfl-health-runtime-close-request-v2')
-            and request['candidate_commit'] == BUILD, 'request-build-schema')
-    rollover = request['schema'] == 'sfl-health-runtime-close-request-v2'
+    history = request['schema'] == 'sfl-health-runtime-close-request-v3'
+    candidate = binding.CANDIDATE_1030 if history else binding.CANDIDATE_1029
+    require(request['schema'] in ('sfl-health-runtime-close-request-v1', 'sfl-health-runtime-close-request-v2',
+                                  'sfl-health-runtime-close-request-v3')
+            and request['candidate_commit'] == candidate.commit, 'request-build-schema')
+    rollover = request['schema'] != 'sfl-health-runtime-close-request-v1'
     first_seq = request.get('csv_first_sample_seq') if rollover else 1
     require(integer(first_seq, 1), 'request-first-sequence')
     require(rollover or 'csv_first_sample_seq' not in request, 'legacy-first-sequence-not-configurable')
@@ -122,11 +125,11 @@ def review_streams(files, request_sha256, launch_exit):
     require(sha(files['config.ini']) == request['config_sha256'], 'config-pin')
 
     health = decode(files['health-before.json'])
-    require(health['running'] is True and health['mode'] == 'REAL' and health['app_version'] == '1.0.29'
+    require(health['running'] is True and health['mode'] == 'REAL' and health['app_version'] == candidate.version
             and ntpath.normcase(health['executable_path']) == ntpath.normcase(BACKEND), 'health-runtime')
     spot = health['spot_temperature']
     operational = spot['v2_4_operational']
-    require(spot['build_git_commit'] == BUILD and operational['logger_service_instance_id'] == logger
+    require(spot['build_git_commit'] == candidate.commit and operational['logger_service_instance_id'] == logger
             and operational['current_v2_csv_file_name'] == csv_name, 'health-generation')
     before = decode(files['runtime-before.json'])
     observed = utc(before['observed_at_utc'])
@@ -172,7 +175,7 @@ def review_streams(files, request_sha256, launch_exit):
 
     metadata = decode(files[metadata_name])
     schema, close = metadata['schema_metadata'], metadata['csv_closeout']
-    require(schema['git_commit'] == BUILD and schema['logger_service_instance_id'] == logger, 'metadata-generation')
+    require(schema['git_commit'] == candidate.commit and schema['logger_service_instance_id'] == logger, 'metadata-generation')
     require(close['finalized'] is True and close['closeout_reason'] == 'shutdown'
             and close['csv_file_name'] == csv_name and close['logger_service_instance_id'] == logger, 'csv-not-finalized')
     statuses, reasons = Counter(), Counter()
@@ -198,7 +201,7 @@ def review_streams(files, request_sha256, launch_exit):
     if rollover:
         require(integer(operational['last_sample_seq'], 1)
                 and first_seq <= operational['last_sample_seq'] <= last_seq, 'csv-before-sequence')
-    return dict(status='LIMITED_RUNTIME_CLOSE_RECEIPTS_VERIFIED', candidate_commit=BUILD,
+    return dict(status='LIMITED_RUNTIME_CLOSE_RECEIPTS_VERIFIED', candidate_commit=candidate.commit,
                 logger_service_instance_id=logger, native_processes=len(native), main_pid=main, backend_pid=backend,
                 csv_rows=rows, csv_status_counts=dict(statuses), csv_reason_counts=dict(reasons),
                 csv_first_sample_seq=first_seq, csv_last_sample_seq=last_seq,

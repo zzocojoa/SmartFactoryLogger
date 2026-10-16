@@ -127,6 +127,22 @@ Check 'real-controller-development-host-denied' {
     $output=& $native -NoProfile -NonInteractive -File $source -RequestPath ($root+'\missing.json') -ExpectedRequestSha256 ('a'*64)
     Require-Runtime ($LASTEXITCODE -eq 1 -and ($output -join "`n") -match 'server-operator-admin-required') 'controller-host-guard'
 }
+Check 'history-v3-exact-build-and-legacy-isolation' {
+    $r=[pscustomobject]@{schema='sfl-health-runtime-close-request-v3';candidate_commit='0732c8e810be3c46096b397812f53a9767354229';logger_service_instance_id='c7bad677-3827-4da6-b4a0-920f9e5629e6';csv_name='Factory_Integrated_Log_v2_20261016_180000.csv';config_sha256=('a'*64);csv_first_sample_seq=1}
+    Assert-RuntimeRequest $r
+    Require-Runtime ((Get-RuntimeRequestVersion $r) -ceq '1.0.30') 'history-version'
+    foreach($schema in @('sfl-health-runtime-close-request-v1','sfl-health-runtime-close-request-v2')){
+        $r.schema=$schema;Reject {Assert-RuntimeRequest $r} 'request-contract'
+    }
+    $r.schema='sfl-health-runtime-close-request-v3'
+    foreach($build in @('acaf77d95101a050f4d3ecd76125d3502036f5a7','4cc7393e1bafbf90a329726aed9470fe0daacb21','wrong')){
+        $r.candidate_commit=$build;Reject {Assert-RuntimeRequest $r} 'request-contract'
+    }
+    $r.candidate_commit='0732c8e810be3c46096b397812f53a9767354229'
+    foreach($bad in @($null,$true,0,-1,1.5,'1')){
+        $r.csv_first_sample_seq=$bad;Reject {Assert-RuntimeRequest $r} 'request-first-sequence'
+    }
+}
 Check 'identity-only-result-preserves-running-and-unverified-exit-scope' {
     $identityRoot=Join-Path $root 'identity-only';$null=New-Item -ItemType Directory -Path $identityRoot
     $files=[ordered]@{'config.ini'=@{bytes=7;sha256=('c'*64)}}
