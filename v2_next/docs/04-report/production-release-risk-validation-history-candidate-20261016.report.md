@@ -1,6 +1,8 @@
 # 1.0.30 이력 GC 보완 후보 검증
 
-작성일: 2026-10-16. **clean 소스·미서명 패키지·격리 설치/복구 검증 완료, 현장 효과 미검증, 출시 HOLD**.
+작성일: 2026-10-16. **1.0.30 현장 설치·원본 보존·승인 설정 연결 및 15분 관찰 확인, 120분 관찰 진행 중, 출시 HOLD**.
+
+최신 상태는 아래 `20:25 15분 관찰 완료와 20:32 120분 관찰 시작` 절을 따른다. 앞선 시각별 미완료 기록은 당시 이력이다.
 
 같은 현장 요청의 CPU 스택에서 관찰한 자동 GC 비용을 줄이기 위해 화면 이력을 불변 JSON
 record로 보관하도록 변경했다. HTTP 이력 응답은 worker thread에서 BytesIO로 준비한다.
@@ -26,7 +28,8 @@ record로 보관하도록 변경했다. HTTP 이력 응답은 worker thread에�
 | 검산 결과 | `candidate-verification.json`, SHA256 `b26bd2a47ef3d61200ed6d7a96553e6b3cd101bc846493169e8b9185c9155914` |
 
 서명은 승인된 정책에 따라 `NOT_REQUIRED_BY_APPROVED_UNSIGNED_POLICY`로 기록한다.
-미서명 상태를 서명 검증 PASS로 바꾸지 않는다. 서버의 1.0.29나 운영·롤백 기준을 갱신한 기록이 아니다.
+미서명 상태를 서명 검증 PASS로 바꾸지 않는다. 아래 현장 설치에서 서버의1.0.29를 같은
+1.0.30 후보로 교체했으며, 정식 운영·롤백 기준은 아직 갱신하지 않았다.
 
 ## 실제 실행한 검사
 
@@ -320,7 +323,7 @@ SHA256은 `c219bf5fab6680f4eb1089b6896dc2aed59ce539533a95cbf2adc2e50ea29fb1`다.
 아직 미완료다. 연결을 유지하며 강제 종료·자동 재시도 없이 실제 결과를 확인한다.
 새 전체 백업은 없고 앱은 종료 상태를 유지한다. 재시작 뒤 운영 화면 복귀와 현장 QA가 남는다.
 
-## 남은 작업
+## 19:14 당시 남은 작업
 
 - 진행 중인 설치 후 원본 보존 확인과 최종 영수증 검토.
 - 새 실행·승인 프로파일 연결과 변경 후 현장15분 및 선행 조건 통과 후120분 관찰.
@@ -357,3 +360,144 @@ PID8276으로 시작해19:09:59에 실제 종료0으로 끝났음을 기록했�
 runtime 요청을 만들지 않았다. 실제 새 logger·CSV·첫 순번·설정 SHA를 얻은 뒤 검증된
 v3 observer에 연결한다. 현재 앱은 계속 종료 상태이며 원본 검산 후 승인된 재시작,
 네 프로파일 확인 항목 적용, 운영 화면 전면 복귀와 현장 QA가 남는다.
+
+## 19:31 설치 보존 검산 완료
+
+SSH 설치 절차가19:31:54 KST 실제 종료0으로 끝났다. 서버 `J22c6ed1c/result.json`의
+콘솔 SHA256 `93a6fb2829537489d9093d12fd26a3949f6bbc8e352c1f8f16469228abad675e`와
+회수 원문을 대조했다.22개 영수증을 독립 검토한 `field-install-review-J22c6ed1c.json`
+(SHA256 `e69cb6957c8d7ac031eb0aec239fe3c9eeeb6d6615c75b8ebf6277fec3b0d73c`)은
+exit0이다. 설치 후에도290,682파일/245폴더/680ADS/14,887,746,451bytes가 원본 목록과
+일치했다. 새 설치 파일1,900개와 등록 버전1.0.30, 변경 없는 config2671bytes도 확인했다.
+설치 직전 전수 대조 종료에서 실제 설치 시작까지3199ms였다. 새 전체 백업은 만들지 않았다.
+
+## 19:42 첫 실제 실행 정상 종료와 시작 지연 발견
+
+첫 실제 실행은 main1376/backend9052와 logger `d6442d39-3d32-48b5-98fd-1d6cd4bb217e`다.
+서버 `R0be485d915b8` 결과를 콘솔 SHA256
+`39ec5a3370debc6135603ccc74f29a62ae494eb911d9738de2e9a0e94a2f3084`에 결합해 회수했다.
+5개 프로세스 모두 유지한 native handle의 종료0이며 강제 종료는 없었다. 현재 CSV는
+2439행/순번1→2439로 연속이고 startup_pending11/stale231/valid2197이었다.
+
+추가로 회수한9개 정지 상태 자료의 해시, begin/final, Electron session, native 종료와 CSV를
+`analyze_first1030_runtime.py`로 대조했다(exit0). `first1030-runtime-analysis.json` SHA256은
+`f50f64c683eb4dc69510b7122b116c592905f8492900f655bebf03ff96d638c3`다.10개 작업 종료가
+확인됐고, 이미지 저장 중1건(written243/inflight1/unfinished1)이 최종 written244/
+inflight0/unfinished0으로 완료됐다. 실패/drop0, worker stopped·writes drained true다.
+이는 실제 저장 중 작업의 종료 근거이며 개별 이미지 바이트·fact 전수 QA를 대신하지 않는다.
+
+Electron의 dashboard-operational-ready는8868.6ms, backend 정상 종료는956.9ms였다.
+다만 CSV sample→ingest 지연은 최대65944.981ms이고 순번12→242는 ingest 시 stale로
+분류됐다. 화면 준비 시간과 CSV 반영 시간을 구분한다. 지연 원인은 아직 확정하지 않았고,
+한 번의 시작으로 필수 시작 횟수·화면 수 비교 전체를 PASS로 바꾸지 않는다.
+
+## 19:48 승인 설정 연결과 19:50 새 실행
+
+이미 승인된 설정을 같은1.0.30 build에 연결하는 네 확인 항목만 갱신했다. `A20a65c88`의
+콘솔 결과 SHA256은 `73bc8db5a295d96286680a3a13288ff0884c0278bd7499fefb3f091bc0fb2c9a`이며
+실행·독립 검토 모두0이다. config SHA256은
+`bb1b8326c860bcd14b435bb8865ee14984228245eb626b131316d487a12ab55a`이고 다른 설정은 같다.
+네 항목 복원을 위한 작은 config 사본만 보존했다. Low Signal OFF와 물리 NOT_TESTED를 유지한다.
+
+정상 GUI 재시작 뒤 main16128/backend8980, logger `ee648ff0-d3a9-4ab9-bb7e-015ff4457cb4`,
+CSV `Factory_Integrated_Log_v2_20261016_195021.csv` 첫 순번1/2/3과 설정 일치를 확인했다.
+`attested-runtime-review.json`의 소프트웨어 승인 필드 대조는PASS이며 전 CSV 검증은 아니다.
+첫 제한 읽기의 마지막 CSV 행이 잘린 자료는 보존했다. 새 검토기는 완성된 첫3행만 확인하고
+첫 행이 불완전하면 거부하는2개 검사를 실행했으며, 전체 CSV 검증기를 완화하지 않았다.
+작업 정보는16:48 운영자 입력60534·1이다.14:21 입력60374·1로 덮어쓰지 않았다.
+
+## 20:09 현장 관찰 시작
+
+RUN1308파일과 `O1530_20261016_e934c7a2_R2`5파일을 Z send에서 원격 탐색기로 서버 로컬
+SmartFactory 아래 복사했다. 최종 절대경로·파일을 화면에서 확인하고13개 전 파일의 잠금
+크기·SHA256을 SSH에서 확인했다. 요청 SHA256은
+`7208ae7851ad1481afa84c5b3d4ab28d72eba348bcb722f430406e1b8d6ac870`이다.
+
+20:08:34 KST 승인된 SSH로 한 번 실행했다. 서버 결과 폴더는 `run-51af6bced804`이며,
+20:09:22 생성된 관찰은900초와 위 실행 세대에 결합돼 있다. 초기 설치본·프로세스 세대·
+설정 대조는PASS지만 최종 측정 결과는 아직 없다. 앱은 최대화해 작업자가 볼 수 있게 했고
+측정 중 탐색기·작업 관리자·서버 파일 복사를 수행하지 않는다. 근거는 P30의
+`observe1030-launch/start.json`, `observe15-poll-111140.json`,
+`attested-1030-operator-foreground.png`다.
+
+남은 작업은 이번15분 원문 회수·독립 재계산, 결과에 따른120분 관찰, 시작 지연 원인과
+필수 시작 시험, 전체 데이터 미결·물리 경계·제조사 확인 및 운영 승격 판단이다.
+예: 완료 시 콘솔 `LAUNCHER_SHA256`을 회수 `launcher.json`과 대조한 뒤 session manifest의
+모든 파일을 확인하고 HTTP/resource/combined 요약을 원시 표본에서 재계산한다.
+기존 실패 증거와 출시 HOLD는 유지한다.
+
+## 20:25 15분 관찰 완료와 20:32 120분 관찰 시작
+
+15분 실행은20:25:37 KST 개발 PC의 SSH 종료0으로 끝났다. 콘솔 launcher SHA256은
+`4602c1708a9f0a535c49c1b153813cd41d86da4ef2b5bb4c0a1a0c63271f2fb1`이다.
+승인된 Z return에61,184,000bytes archive(SHA256
+`a2874dad7dd6965dfc39f725efe9e3ab8b5d3fd0177a969a99d1898250a3e8ba`)를 회수했고,
+8,795파일/53,944,838bytes를 개발 PC에서 풀어 콘솔·session manifest·전체 파일을 대조했다.
+
+같은 frozen 도우미 소스85개를 build provenance에 결합한 독립 검토에서 HTTP/resource/
+combined 요약을 원시 표본으로 재현했다. `review_observe1030.py` exit0,
+`observe1030-replay-review.json` SHA256
+`66b87ea6f0d65e3d52754d82465abec85cbc886f19bd95e0ae51968f7b4623ce`가 근거다.
+판정은 `RECORDED_SUMMARIES_REPRODUCED`/observation PASS이며 release HOLD다.
+
+| 실제15분 범위 | 결과 |
+|---|---|
+| health 경계 포함452건 | 첫7.6261ms, 최대141.8191ms, 전 요청200ms 이내 |
+| 주기 health450건 | p95 65.4291ms, 50ms 경고55건, timeout/오류/누락0 |
+| data150건 | 최대111.042ms, 500ms 실패0, 100ms 경고1건 |
+| image3600건 | 최대164.3711ms, timeout/오류/누락0, 임의 실패 상한 추가 없음 |
+| 자원 표본 | 181/181개, 미측정 구간0, warmup 후300초 창3개 각각61표본 |
+| 프로세스 CPU 합계 | 장비 전체 CPU 용량 대비 평균16.9959%, 최대24.1765%; 임의 합격 기준 없음 |
+| CSV 운용 표본 | 순번4973→8802, 기존 stale244건 증가0, fact 링크/쓰기 실패·config drift0 |
+| 이미지 경계 | written571→1379, 양쪽 실패/drop/대기/inflight0 |
+
+요약 `observe1030-summary.json` SHA256은
+`bc9b21d1c84c07409bfa99441ba8474c74b4e0224edf152152ae4c8bbee68ff4`다.
+RSS 합계에는 공유 페이지가 중복될 수 있고 disk는 호스트 전체 값이다. 자원 성능 전체·
+UI 지표·시작 시 지연·전체 데이터·물리 시험을 이 관찰 PASS로 대체하지 않는다.
+
+이 선행 조건을 확인한 뒤 같은 후보·설정·실행 세대로7200초 요청을 만들었다.
+`O12030_20261016_e934c7a2`5파일을 원격 탐색기로 서버 로컬에 복사하고 RUN1308파일과
+함께 잠금 해시를 다시 확인했다. 요청 SHA256은
+`3f31ca781b4b66b52c6c2963e2e82ec7fe50cc3b4c3399dcd929d63d46d81c58`이다.
+20:31:46 KST SSH로 한 번 실행했고 서버 `run-382f1d686bd7`에서20:32:11 관찰 설정과
+초기 설치본·세대·설정 PASS를 확인했다. 실제7200초 창은 약22:32까지이며 이후 검산 시간이
+추가된다. 아직 최종 결과는 없다. 앱은 최대화 전면으로 복귀했고60534·1을 유지한다.
+
+다음 작업은120분 결과 검산과 정상 종료 후 새 CSV·이미지·fact 대조, 시작 지연의 원인 확인,
+나머지 R2/R4·물리/제조사 조건이다. 설치·전체 백업·설정 변경·앱 재시작을 이번 관찰 중
+추가하지 않는다. 운영·롤백 기준과 출시 HOLD는 그대로다.
+
+## 20:43 시작 시 이미지 이력 대기 경로의 격리 재현
+
+`P30/reproduce_startup_image_wait.py`는 후보0732c8e의 repository/spot_api/image fact/config
+소스4개를 Git blob과 대조했다. Windows CRLF만 LF로 정규화한 비교이며 실행한 원본 바이트와
+Git blob 해시는 각각 결과에 보존했다. 소스나 설치본은 변경하지 않았다.
+새 로컬 실험 폴더에 APPDATA/설정/로그를 격리하고 네트워크·하위 프로세스·폴더 밖 쓰기를
+금지한 상태에서 두 조건을 검사했다. 관찰 fact 생성은 별도 stub으로 분리했고, 이미지
+manifest 초기화만 event로 지연시켰다. 합성 지연의 길이를 서버 지연의 측정값으로 사용하지 않는다.
+
+| 격리 조건 | 실제 스택과 결과 |
+|---|---|
+| 다른 스레드가 이미지 writer 초기화 중 | CSV open → sidecar → image manifest → health → writer lock에서 대기 |
+| CSV가 첫 이미지 writer 생성 | 같은 호출 경로에서 초기화 event 해제를 대기 |
+
+두 경우 모두 대기 중 CSV에는 header1행만 있고 sidecar는 없었다. 초기화를 해제한 뒤 각각
+12.4281ms/4.1634ms에 open이 끝났으며 sidecar와 합성 fact1행 대조가 성공했다. 별도 비대기
+health 호출은 manifest 미준비 상태를 반환했다. 실행 exit0, 외부 접근 시도0이다.
+초기 준비 시 CRLF 바이트 차이를 엄격 비교가 거부했고, 다음 시도는 import의 Git 조회를
+하위 프로세스 금지 규칙이 거부했다. 두 시도는 재현 성공으로 계산하지 않는다. 최종 실행은
+commit 조회만 검증한 값으로 고정하고 외부 접근 금지 규칙을 유지했다.
+
+결과 `startup-image-wait-bb2f6d111f9e/result.json` SHA256은
+`11617c8135d27725a0609691e9e976f19c67b4d3e10aae1fbbdca3f418c92990`,
+재현기 SHA256은 `606be2eb98fa41a5ce169e2d8268f397cccaa79b21b4955ba2d3f5d9d07abd22`다.
+이는 CSV의 동기 대기 경로를 확인한 제한 재현이다. 서버에서 발생한65944.981ms 지연을
+이 초기화에 직접 연결하는 스택·구간 계측은 아직 없으므로 실제 원인은 UNCONFIRMED다.
+예: 다음 승인된 시작 측정에서는 CSV open/sidecar와 이미지 이력 hash/count 단계의 시각을
+같은 실행 세대에 결합하고, 관찰 fact 초기화 등 다른 대기와 구분해야 한다.
+
+20:43:48 서버 읽기 확인에서 기존120분 collector6개와 같은 요청·실행 세대를 확인했다.
+초기 binding/configuration PASS를 최종 성능 PASS로 바꾸지 않았으며 측정은 계속 진행 중이다.
+120분 회수·독립 재계산 도우미는 준비했고 provenance85소스 preflight exit0이다. 회수는
+실제 종료 뒤 콘솔 해시를 얻은 후에만 수행한다. 운영 화면은60534·1, Running 상태로 전면 유지다.
