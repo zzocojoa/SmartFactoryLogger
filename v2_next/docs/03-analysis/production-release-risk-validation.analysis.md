@@ -162,3 +162,21 @@ PS5.1 단위 검사와 오프라인 NSIS transaction을 실행했다. 제품0732
 runtime-close 도우미를 그대로 실행하지 않았다. 새 실제 정상 종료·원본 manifest 결합,
 현장15분/120분과 효과 검증은 남아 있다. 상세 증거와 재검산 예는
 [후보 검증 기록](../04-report/production-release-risk-validation-history-candidate-20261016.report.md)에 있다.
+
+## 5.26 대용량·자정 rollover 종료 증거 대조
+
+도우미 commit `4c3e292e54a2fcde989c60f915cc56531a29420f`를 검사했다. 서버 현재
+파일의 첫 세 순번18,573/18,574/18,575와 동일 logger를32KiB 제한 읽기로 확인했다.
+이 확인은 전체 CSV 검증이 아니다. 원문은 `C:/Users/user/Desktop/SmartFactory/C30_20261016_b5d184c2`다.
+
+| 설계 조건 | 확인 | 상태 |
+|---|---|---|
+| v2 첫 순번 고정·v1 유지 | 잘못된/생략된 시작값과 v1 override 거부 | 일치 |
+| 한도·순차 복사·덮어쓰기 방지 | 실제134,217,745bytes 복사와 독립 양쪽 SHA, writer lock/예산 거부 | 일치 |
+| 잠금 순차 검토·연속성·최종 순번 | 실제144,291,503bytes CLI와18,573→20,772 합성2,200행, 잘린 시작/중간/중복 거부 | 일치 |
+| native 종료·기존 identity 계약 유지 | 기존 종료/native 조건과 identity8개 회귀 | 일치 |
+| 실제 서버 종료와 원본 manifest·worker 증거 결합 | 다음 현장 단계 | 미완료 |
+
+이 표의 확인율은4/5(80%)이며 전체 PDCA 달성률이 아니다. PowerShell14/Python17/
+인접 identity8개, 총39개 PASS와 각 exit0을 확인했다. Ruff와 diff 검사도0이다.
+로컬 도우미 검증만으로 서버 정상 종료·설치·현장 QA를 PASS로 바꾸지 않는다.

@@ -198,9 +198,54 @@ API·권한·생성 식별자·C: 여유18.88GiB는 `server-preflight.json`에 �
 대용량 현재 CSV와 자정 rollover의 첫 sample sequence를 처리할 정상 종료 증거 경로를
 준비·검증하는 것이다. 이 크기 확인은 파일 내용 검증을 뜻하지 않는다.
 
+## 대용량 현재 CSV 종료 도우미 보완
+
+17:02 KST에 현재 파일의 앞32KiB와 metadata를 읽어 첫 순번18,573 및 동일 logger를
+확인했다. 서버 파일이나 설정은 변경하지 않았다. 새 도우미 commit은
+`4c3e292e54a2fcde989c60f915cc56531a29420f`이며 제품 설치본은 그대로다.
+v2 요청은 첫 순번을 고정하고1GiB 한도에서1MiB씩 복사한다. 검토기도 잠금 핸들을
+유지하며 해시와 CSV를 순차 읽는다. v1의128MiB/첫 순번1 조건은 유지한다.
+
+증거 루트 `C:/Users/user/Desktop/SmartFactory/C30_20261016_b5d184c2`의
+`checks-r1/result.json`은 source 전후 일치와 PowerShell14/Python17 PASS·exit0을
+기록한다. 실제134,217,745bytes 복사와 양쪽 독립 SHA,144,291,503bytes/2,200행
+CLI 검토, writer lock, 초과 용량, 앞·중간 누락/중복, 잘못된 최종 순번·logger·UTF-8/CSV를
+검사했다. `adjacent-r1`의 identity8개 회귀·Ruff·diff 검사도 exit0이다. 합계39개 PASS다.
+
+검사된 observer는18,470bytes/SHA256
+`1047549449372034f387984b059c93ea93d6521bf0764df29bcd5841ac500d0e`,
+reviewer는14,025bytes/SHA256
+`745589fe596c5b75196aaf923f8bbe823064dd40213c1dfaa4d9694737be5b95`다.
+확인 예: `checks-r1/python-files/large-cli-review.json`의 첫/끝 순번18,573/20,772와
+`prior_csv_content=NOT_EVALUATED`, worker/image/attestation 미평가를 함께 확인한다.
+실제 서버 CSV 전수 검토와 정상 종료·원본 manifest 결합은 아직 수행 전이다.
+
+## 서버 전달과 종료 검토 준비
+
+17:23:39 KST에 서버 `C:\Users\user\Desktop\SmartFactory\H30_20261016_b5d184c2`의
+22파일/494,509,232bytes를 SSH로 전수 검산했다. 개발 PC와
+`Z:\SmartFactory\20261016\send\H30_20261016_b5d184c2`의 검산 후 원격 탐색기로
+서버 로컬에 복사했으며, manifest SHA256은
+`e428cf55125c49daf1a50cfbfcd09ecee068cf3463f0db6edaa33bb889ffdba0`다.
+`C30_20261016_b5d184c2/delivery-server-verification.json`에 서버 이름·최종 경로·
+각 파일 해시·SSH exit0을 기록했다. 설치 프로그램 실행은 아직 하지 않았다.
+
+이전 현장 종료 검토기의 버전·현재 CSV·관찰 경로를 명시적 입력으로 바꾼 별도 사본을
+준비했다. 처음 검토는 전달 목록의 Windows 경로 구분자와 이전 metadata를 고려하지 못해
+`unique-current-metadata`로 중단됐다. 현재 CSV 이름을 고정하도록 수정한 뒤 과거 실제
+1.0.28 종료 증거를 읽기 전용으로 재검토하여 기존 결과29필드가 모두 같음을 확인했다
+(250,085행, 최종 순번361,155, 이미지76,114건, exit0).
+`close-review-preparation-r2.json`과 원문 로그를 보존했다. 새 검토기 SHA256은
+`5b9243e4331d1dd5fe3981d78bb254eb51490d19d02e4d972b1edfee928d0f98`이며,
+이 재검토는 현재1.0.29의 종료 확인을 대신하지 않는다.
+
+탐색기 작업 중 옆의 다른 기록 프로그램을 잘못 열었으나 연결·시작 버튼을 조작하지 않고
+닫았다. 이후 Smart Factory Running/60534·1 화면을 전면에 복원했다.
+화면 증거는 `C30_20261016_b5d184c2/server-smart-factory-foreground-1724.png`다.
+
 ## 남은 작업
 
-- 현재 대용량 CSV에 맞는 정상 종료·manifest 결합 증거 경로와 새 현장 설정 기준 준비.
+- 전달된 도우미의 새 실행 요청 준비, 실제 정상 종료·현재 CSV·원본 manifest·worker 종료 증거 결합, 새 현장 설정 기준 준비.
 - 승인된 서버 교체, 변경 후 현장15분 및 선행 조건 통과 후120분 관찰.
 - 물리 경계 NOT_TESTED/제조사 확인·전체 데이터 미결의 처리와 실제 운영 승격 판단.
 
