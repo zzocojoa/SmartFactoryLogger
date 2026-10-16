@@ -283,6 +283,13 @@ Python18개, `adjacent-r1`의 identity8개가 PASS·exit0이다. 버전/build/sc
 요청·health·metadata를 거부했고 실제 대용량 복사/CLI 회귀를 확인했다. Ruff/diff도0이다.
 설치본은 재빌드하지 않았다. 이 도우미 검증은1.0.30 현장 실행·프로파일 확인·QA 통과가 아니다.
 
+설치 영수증 검토기도 이전 자료를 보존한 별도 사본 `P30_20261016_e934c7a2/review-history-install.py`로
+준비했다(SHA256 `d19f16ad12d884270b43e92658e154fcc938e53fc2b81d4f1fc28adc58c21e91`).
+정확한1.0.30/직전1.0.29/정식 복귀1.0.26 설치본과 payload·제거 파일·정책을 구분한다.
+보존된 I30 실제 격리 설치 영수증을 받아들이고, 콘솔 해시·종료 코드·설정·payload·제거 파일·
+직전 설치본·등록 버전·신선도 변경과 중복 JSON 키를 거부하는12개 검사를 exit0으로 마쳤다.
+`reviewer-tests-r1/summary.json`이 근거이며 실제 서버 설치 결과 검토는 여전히 대기 중이다.
+
 ## 남은 작업
 
 - 진행 중인 전체 원본 캡처/재검산 완료와 이미 확인한 정상 종료·CSV·worker 증거의 manifest 결합.
