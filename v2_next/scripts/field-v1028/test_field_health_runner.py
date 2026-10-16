@@ -38,7 +38,7 @@ class RunnerTests(unittest.TestCase):
         self.request = dict(schema=runner.SCHEMA, candidate_commit=runner.binding.CANDIDATE_1029.commit,
             signature_policy='UNSIGNED_INTERNAL', duration_seconds=6, spec=dict(
                 root=str(self.installed), reference=str(self.root/'original-reference-not-present.json'),
-                reference_sha256=runner.PAYLOAD_SHA256,
+                reference_sha256=runner.binding.REFERENCE_SHA_1029,
                 configuration_reference=str(self.root/'original-configuration-not-present.json'),
                 configuration_reference_sha256=config_sha, extras={}, port=8000,
                 main=dict(pid=100, created=1.0, exe=str(self.installed/'smart-factory.exe')),
@@ -46,6 +46,7 @@ class RunnerTests(unittest.TestCase):
                 backend_created_filetime=134365056356121274))
 
     def invoke(self, *, phase=None, mutate=None):
+        expected_candidate = runner.binding.candidate_from_commit(self.request['candidate_commit'])
         self.request['spec']['reference_sha256'] = self.payload_sha
         request_sha = save(self.archive/'request.json', self.request)
         if mutate:
@@ -54,7 +55,7 @@ class RunnerTests(unittest.TestCase):
 
         def fixture(spec, output):
             seen.append(spec)
-            self.assertEqual(spec.candidate, runner.binding.CANDIDATE_1029)
+            self.assertEqual(spec.candidate, expected_candidate)
             self.assertEqual(spec.reference, str(self.archive/'candidate-payload.json'))
             self.assertEqual(spec.configuration_reference, str(self.archive/'configuration.json'))
             contract = json.loads(Path(spec.trace_contract_path).read_bytes())
@@ -71,7 +72,12 @@ class RunnerTests(unittest.TestCase):
             output.mkdir()
             return phase or dict(supervisor_status='PASS', release_gate='HOLD', promotion_allowed=False)
 
-        with patch.object(runner, 'PAYLOAD_SHA256', self.payload_sha), patch.object(runner.trace, 'supervise', fixture):
+        def payload_pin(candidate):
+            self.assertEqual(candidate, expected_candidate)
+            return self.payload_sha
+
+        with patch.object(runner.binding, 'candidate_reference_sha256', payload_pin), \
+                patch.object(runner.trace, 'supervise', fixture):
             result = runner.run(self.output, request_sha, self.trace_sha)
         return result, json.loads((self.output/'session/result.json').read_bytes()), seen
 
@@ -136,6 +142,44 @@ class RunnerTests(unittest.TestCase):
                 result, _, seen = self.invoke()
                 self.assertEqual(result['status'], 'PASS')
                 self.assertEqual(seen[0].candidate, runner.binding.CANDIDATE_1029)
+
+    def test_1030_requires_explicit_matching_spec_and_payload_pin(self):
+        self.request['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
+        self.request['spec']['reference_sha256'] = runner.binding.REFERENCE_SHA_1030
+        with self.assertRaisesRegex(ValueError, 'health-request-spec-candidate'):
+            runner.validate_request(self.request)
+        self.request['spec']['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
+        runner.validate_request(self.request)
+        for key, value in [('candidate_commit', runner.binding.CANDIDATE_1029.commit),
+                           ('reference_sha256', runner.binding.REFERENCE_SHA_1029)]:
+            changed = deepcopy(self.request)
+            changed['spec'][key] = value
+            with self.assertRaises(ValueError):
+                runner.validate_request(changed)
+        changed = deepcopy(self.request)
+        changed['candidate_commit'] = runner.binding.CANDIDATE_1029.commit
+        with self.assertRaisesRegex(ValueError, 'health-request-spec-candidate'):
+            runner.validate_request(changed)
+
+    def test_all_three_1030_trace_modes_keep_candidate_and_fixed_contract(self):
+        for schema in (runner.SCHEMA, runner.OUTLIER_SCHEMA, runner.CPU_OUTLIER_SCHEMA):
+            with self.subTest(schema=schema):
+                self.setUp()
+                self.request.update(schema=schema, duration_seconds=6 if schema == runner.SCHEMA else 900,
+                                    candidate_commit=runner.binding.CANDIDATE_1030.commit)
+                self.request['spec']['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
+                result, saved, seen = self.invoke()
+                self.assertEqual(result['status'], 'PASS', saved)
+                self.assertEqual(seen[0].candidate, runner.binding.CANDIDATE_1030)
+                self.assertEqual(saved['field_gate'], 'NOT_EVALUATED')
+                self.assertFalse(saved['promotion_allowed'])
+
+    def test_1030_tampered_archived_payload_prevents_collection(self):
+        self.request['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
+        self.request['spec']['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
+        result, saved, seen = self.invoke(mutate=lambda: (self.archive/'candidate-payload.json').write_text('{}'))
+        self.assertEqual((result['status'], seen), ('FAIL', []))
+        self.assertIn('health-archived-input-pin:candidate-payload.json', str(saved['errors']))
 
     def test_archived_references_used_and_locked_before_collection(self):
         result, saved, seen = self.invoke()

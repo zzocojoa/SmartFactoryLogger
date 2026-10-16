@@ -60,6 +60,17 @@ class BoundProbeTests(unittest.TestCase):
         self.assertEqual(result['validation']['status'], 'REQUEST_AND_NATIVE_CLOCK_BOUND')
         self.assertEqual(result['sessions'], self.sessions)
 
+    def test_1030_probe_requires_1030_runtime_not_just_valid_native_timing(self):
+        self.payload.candidate = binding.CANDIDATE_1030
+        result, count = self.capture()
+        self.assertEqual((result['status'], count), ('NOT_BOUND', 1))
+        self.health['app_version'] = binding.CANDIDATE_1030.version
+        self.health['spot_temperature']['build_git_commit'] = binding.CANDIDATE_1030.commit
+        result, count = self.capture()
+        self.assertEqual((result['status'], count), ('REQUEST_AND_RUNTIME_BOUND', 1))
+        self.payload.candidate = binding.CANDIDATE_1029
+        self.assertEqual(self.capture()[0]['status'], 'NOT_BOUND')
+
     def test_missing_external_identity_or_wrong_candidate_never_contacts_http(self):
         for options in ({'expected_created_filetime': True}, {'expected_created_filetime': 0},
                         {'expected_sessions': {}}, {'probe_id': 'wrong'}):

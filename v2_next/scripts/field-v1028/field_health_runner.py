@@ -1,4 +1,4 @@
-"""Frozen bounded 1.0.29 health/trace collector for the protected launcher.
+"""Frozen bounded candidate health/trace collector for the protected launcher.
 
 Inputs must already be archived by the launcher. This child owns only collection
 workers; the independent administrator coordinator owns its unique WPR session.
@@ -24,14 +24,14 @@ from field_resource_sampling import ProcessIdentity, error_record
 SCHEMA = 'sfl-health-diagnostic-request-v1'
 OUTLIER_SCHEMA = 'sfl-health-outlier-request-v1'
 CPU_OUTLIER_SCHEMA = 'sfl-health-cpu-outlier-request-v1'
-PAYLOAD_SHA256 = '658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
 
 
 def validate_request(value):
     binding.require(isinstance(value, dict) and set(value) == {
         'schema', 'candidate_commit', 'signature_policy', 'duration_seconds', 'spec'}, 'health-request-members')
+    candidate = binding.candidate_from_commit(value['candidate_commit'])
     binding.require(value['schema'] in (SCHEMA, OUTLIER_SCHEMA, CPU_OUTLIER_SCHEMA)
-                    and value['candidate_commit'] == binding.CANDIDATE_1029.commit
+                    and candidate in collection.HEALTH_CANDIDATES
                     and value['signature_policy'] == 'UNSIGNED_INTERNAL', 'health-request-identity-policy')
     policy = trace.capture_policy(value['schema'] != SCHEMA, value['schema'] == CPU_OUTLIER_SCHEMA)
     binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] == policy['duration'],
@@ -41,8 +41,8 @@ def validate_request(value):
     binding.require(isinstance(data, dict) and set(data) in (spec_fields, spec_fields - {'candidate_commit'}),
                     'health-request-spec-members')
     binding.require(data.get('candidate_commit', binding.CANDIDATE_1029.commit)
-                    == binding.CANDIDATE_1029.commit, 'health-request-spec-candidate')
-    binding.require(data['reference_sha256'] == PAYLOAD_SHA256
+                    == candidate.commit, 'health-request-spec-candidate')
+    binding.require(data['reference_sha256'] == binding.candidate_reference_sha256(candidate)
                     and trace.digest(data['configuration_reference_sha256']), 'health-request-reference-pins')
     for role in ('main', 'backend'):
         binding.require(isinstance(data[role], dict)
@@ -102,7 +102,8 @@ def run(output_root, request_sha256, trace_package_sha256):
                 result.update(mode='health-outlier-trace', scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
             if cpu_samples:
                 result.update(mode='health-cpu-outlier-trace', scope='CPU_OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
-            hold('candidate-payload.json', PAYLOAD_SHA256, 1024**2)
+            candidate = binding.candidate_from_commit(request['candidate_commit'])
+            hold('candidate-payload.json', binding.candidate_reference_sha256(candidate), 1024**2)
             hold('configuration.json', data['configuration_reference_sha256'], 1024**2)
             hold('trace/manifest.json', trace_package_sha256, 65536)
             spec = archived_spec(request, root)
@@ -145,6 +146,7 @@ def main(argv=None):
         if args.describe:
             binding.require(not any(supplied), 'health-describe-with-run-arguments')
             print(json.dumps(dict(schema=SCHEMA, candidate_commit=binding.CANDIDATE_1029.commit,
+                supported_candidate_commits=[item.commit for item in collection.HEALTH_CANDIDATES],
                 frozen=bool(getattr(sys, 'frozen', False)), signature_policy='UNSIGNED_INTERNAL', duration_seconds=6,
                 release_gate='HOLD', promotion_allowed=False)))
             return 0

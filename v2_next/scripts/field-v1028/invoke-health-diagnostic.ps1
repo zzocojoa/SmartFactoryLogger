@@ -57,17 +57,21 @@ function Get-HealthEntryFiles([string]$Root){
  return $files
 }
 function Assert-HealthEntryPackage($Document){
+ $payloadPins=@{
+  'acaf77d95101a050f4d3ecd76125d3502036f5a7'='658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
+  '0732c8e810be3c46096b397812f53a9767354229'='4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
+ }
  $required=@('health_diagnostic_runner.exe','invoke-health-diagnostic.ps1','candidate-payload.json','helper-source.zip','helper-build.json',
   'trace/manifest.json','trace/invoke-field-run.template.ps1','trace/invoke-trace-validation.ps1','trace/invoke-health-trace.ps1','trace/SFLThreadScheduling.wprp')
  Assert-HealthEntry ($Document.schema -ceq 'sfl-health-diagnostic-package-v1' -and $Document.signature_policy -ceq 'UNSIGNED_INTERNAL' -and
-  $Document.candidate_commit -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7') 'health-package-identity'
+  $Document.candidate_commit -is [string] -and $Document.candidate_commit -cin @($payloadPins.Keys)) 'health-package-identity'
  Assert-HealthEntry (@($Document.files.PSObject.Properties).Count -eq $required.Count) 'health-package-members'
  foreach($name in $required){
   Assert-HealthEntry ($null -ne $Document.files.PSObject.Properties[$name]) 'health-package-missing-member'
   $fact=$Document.files.$name
   Assert-HealthEntry ($fact.bytes -is [int] -and $fact.bytes -gt 0 -and $fact.bytes -le 128MB -and $fact.sha256 -cmatch '^[0-9a-f]{64}$') 'health-package-fact'
  }
- Assert-HealthEntry ($Document.files.'candidate-payload.json'.sha256 -ceq '658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69') 'health-package-payload-pin'
+ Assert-HealthEntry ($Document.files.'candidate-payload.json'.sha256 -ceq $payloadPins[$Document.candidate_commit]) 'health-package-payload-pin'
  Assert-HealthEntry ($Document.release_gate -ceq 'HOLD' -and $Document.promotion_allowed -is [bool] -and -not $Document.promotion_allowed) 'health-package-gates'
 }
 function Get-HealthEntryBudget($Request){

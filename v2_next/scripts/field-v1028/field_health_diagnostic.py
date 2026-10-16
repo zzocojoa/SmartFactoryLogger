@@ -1,4 +1,4 @@
-"""Bind one opt-in health request to an externally verified 1.0.29 runtime.
+"""Bind one opt-in health request to a pinned 1.0.29 or 1.0.30 runtime.
 
 This read-only component neither controls the app nor starts WPR. Its caller
 must hold the payload, configuration and authenticated generation boundaries,
@@ -13,6 +13,9 @@ import field_health_timing as timing
 import field_http_sampling as http
 import field_installation_binding as binding
 from field_host_sampling import WindowsProcessReader
+
+
+HEALTH_CANDIDATES = (binding.CANDIDATE_1029, binding.CANDIDATE_1030)
 
 
 def require_native(value, backend, expected_created):
@@ -31,7 +34,8 @@ def capture_health_probe(payload, main, backend, port, *, expected_created_filet
                   field_gate='NOT_EVALUATED', etw_coverage='NOT_EVALUATED',
                   release_gate='HOLD', promotion_allowed=False)
     try:
-        binding.require(payload.active and payload.candidate == binding.CANDIDATE_1029,
+        binding.require(payload.active and type(payload.candidate) is binding.CandidateIdentity
+                        and payload.candidate in HEALTH_CANDIDATES,
                         'active-health-candidate-required')
         binding.require(type(probe_id) is str and re.fullmatch('[0-9a-f]{32}', probe_id),
                         'diagnostic-probe-id')

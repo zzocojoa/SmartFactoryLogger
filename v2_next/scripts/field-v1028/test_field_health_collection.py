@@ -37,6 +37,7 @@ class CollectionTests(unittest.TestCase):
                        closeout_error=False, stop=None, duration=.01, trace=None, outlier=False):
         @contextmanager
         def reference(*args, **kwargs):
+            self.assertEqual(kwargs['candidate'], self.spec.candidate)
             yield {}
             if closeout_error:
                 raise OSError('injected reference closeout failure')
@@ -60,6 +61,8 @@ class CollectionTests(unittest.TestCase):
                 side_effect=probes or [probe]))
             result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append,
                                         _trace=trace, _outlier=outlier)
+            if payload.called:
+                self.assertEqual(payload.call_args.kwargs['candidate'], self.spec.candidate)
         self.assertEqual(result['field_gate'], 'NOT_EVALUATED')
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
@@ -79,11 +82,18 @@ class CollectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'diagnostic-candidate-required'):
             self.run_collection()
 
-    def test_1030_observation_support_does_not_expand_six_second_trace_scope(self):
+    def test_1030_is_bound_to_both_payload_and_configuration_references(self):
         self.spec = replace(self.spec, candidate_commit=collection.binding.CANDIDATE_1030.commit)
-        with self.assertRaisesRegex(ValueError, 'diagnostic-candidate-required'):
-            self.run_collection()
-        self.assertFalse((self.folder/'evidence').exists())
+        result, _, count = self.run_collection()
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 1))
+
+    def test_1030_generation_change_retains_raw_probe_and_fails_collection(self):
+        self.spec = replace(self.spec, candidate_commit=collection.binding.CANDIDATE_1030.commit)
+        result, _, count = self.run_collection(native=[
+            dict(status='CAPTURED', pid=101, created_100ns=1000),
+            dict(status='CAPTURED', pid=101, created_100ns=1001)])
+        self.assertEqual((result['collection_status'], count), ('INCOMPLETE', 1))
+        self.assertTrue((self.folder/'evidence/probe-000.json').is_file())
 
     def test_initial_configuration_or_control_failure_prevents_probes(self):
         for kind, failed in (('configuration', {'configuration_status': 'FAIL'}),

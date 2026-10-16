@@ -54,6 +54,19 @@ foreach($name in @('health_diagnostic_runner.exe','invoke-health-diagnostic.ps1'
 $files['candidate-payload.json'].sha256='658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
 $document=[pscustomobject]@{schema='sfl-health-diagnostic-package-v1';candidate_commit='acaf77d95101a050f4d3ecd76125d3502036f5a7';signature_policy='UNSIGNED_INTERNAL';files=[pscustomobject]$files;release_gate='HOLD';promotion_allowed=$false}
 Assert-HealthEntryPackage $document
+$next=$document|ConvertTo-Json -Depth 5|ConvertFrom-Json
+$next.candidate_commit='0732c8e810be3c46096b397812f53a9767354229'
+$next.files.'candidate-payload.json'.sha256='4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
+Assert-HealthEntryPackage $next
+foreach($pair in @(@($document,$next),@($next,$document))){
+ $mixed=$pair[0]|ConvertTo-Json -Depth 5|ConvertFrom-Json
+ $mixed.files.'candidate-payload.json'.sha256=$pair[1].files.'candidate-payload.json'.sha256
+ $rejected=$false;try{Assert-HealthEntryPackage $mixed}catch{$rejected=$true};Check $rejected 'cross-candidate payload accepted'
+}
+foreach($commit in @($next.candidate_commit.ToUpperInvariant(),('f'*40))){
+ $mixed=$next|ConvertTo-Json -Depth 5|ConvertFrom-Json;$mixed.candidate_commit=$commit
+ $rejected=$false;try{Assert-HealthEntryPackage $mixed}catch{$rejected=$true};Check $rejected 'nonexact candidate accepted'
+}
 $bad=@(@('schema','old'),@('candidate_commit','4cc7393e1bafbf90a329726aed9470fe0daacb21'),@('signature_policy','SIGNED'),@('release_gate','PASS'),@('promotion_allowed',0))
 foreach($row in $bad){$changed=$document|ConvertTo-Json -Depth 5|ConvertFrom-Json;$changed.($row[0])=$row[1];$rejected=$false;try{Assert-HealthEntryPackage $changed}catch{$rejected=$true};Check $rejected ('package:'+ $row[0])}
 $changed=$document|ConvertTo-Json -Depth 5|ConvertFrom-Json;$changed.files.'candidate-payload.json'.sha256='b'*64
@@ -62,7 +75,7 @@ $changed=$document|ConvertTo-Json -Depth 5|ConvertFrom-Json;$changed.files.'heal
 $rejected=$false;try{Assert-HealthEntryPackage $changed}catch{$rejected=$true};Check $rejected 'negative bytes'
 $changed=$document|ConvertTo-Json -Depth 5|ConvertFrom-Json;$changed.files|Add-Member extra @{bytes=1;sha256=('a'*64)}
 $rejected=$false;try{Assert-HealthEntryPackage $changed}catch{$rejected=$true};Check $rejected 'extra package member'
-@{status='PASS';accepted=1;rejected=8}|ConvertTo-Json
+@{status='PASS';accepted=2;rejected=12}|ConvertTo-Json
 ''')
     run('request-budgets', r'''
 $short=Get-HealthEntryBudget @{schema='sfl-health-diagnostic-request-v1';duration_seconds=6}

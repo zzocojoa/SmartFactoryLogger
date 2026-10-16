@@ -1,4 +1,4 @@
-"""Bounded read-only 1.0.29 diagnostic collection, not a field QA entrypoint.
+"""Bounded read-only candidate diagnostic collection, not a field QA entrypoint.
 
 The existing supervisor owns only a gated collector process. Neither this module
 nor its worker controls the application or WPR. A protected outer launcher and
@@ -20,6 +20,9 @@ import field_observation as observation
 from field_host_sampling import WindowsProcessReader
 
 
+HEALTH_CANDIDATES = diagnostic.HEALTH_CANDIDATES
+
+
 @dataclass(frozen=True)
 class HealthCollectionSpec(observation.ObservationSpec):
     candidate_commit: str = binding.CANDIDATE_1029.commit
@@ -27,7 +30,7 @@ class HealthCollectionSpec(observation.ObservationSpec):
 
     def validate(self):
         super().validate()
-        binding.require(self.candidate == binding.CANDIDATE_1029, 'diagnostic-candidate-required')
+        binding.require(self.candidate in HEALTH_CANDIDATES, 'diagnostic-candidate-required')
         binding.require(type(self.backend_created_filetime) is int
                         and 0 < self.backend_created_filetime < 2**64,
                         'external-backend-native-generation-required')
@@ -68,9 +71,9 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
         require_running()
         with binding.InstalledPayload(spec.root, spec.reference,
                 expected_reference_sha256=spec.reference_sha256, extras=spec.extras,
-                candidate=binding.CANDIDATE_1029) as payload, \
+                candidate=spec.candidate) as payload, \
                 configuration.configuration_reference(spec.configuration_reference,
-                    spec.configuration_reference_sha256, candidate=binding.CANDIDATE_1029) as expected:
+                    spec.configuration_reference_sha256, candidate=spec.candidate) as expected:
             result.update(configuration.scope_fields(expected))
             native = WindowsProcessReader().read(spec.backend.pid)
             save('native-initial.json', native)
