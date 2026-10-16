@@ -1,5 +1,33 @@
 # 프로덕션 출시 리스크: 설계와 구현 착수
 
+## 2026-10-17 종료 검산의 읽기 크기 보완
+
+고정 원본120분 자료의 로컬 재검산과300파일/2,400회 순서 균형 비교에서 작은 파일에
+1MiB·16MiB 읽기 요청을 주는 비용을 확인했다. 원래 서버 timeout의 정확한 단계는 미확정이다.
+보완 범위는 검증 도우미의 `stream_fact`와 `read_json`이며 제품의 수집/보존 정책은 유지한다.
+
+- 한 번의 읽기는64KiB 이하로 고정한다. `stream_fact`는 처음으로 seek한 뒤 EOF까지
+  모든 바이트를 해시하고 기존512MiB 상한을 유지한다.
+- JSON은 기존 기본16MiB/호출별 limit을 유지하며, 초과 탐지를 위해 최대limit+1바이트만
+  읽는다. 짧은 read를 EOF로 처리하지 않고 이어 읽으며 실제 EOF 또는 상한까지 확인한다.
+  UTF-8은 청크를 결합한 뒤 기존 엄격 JSON 소비기로 처리한다. 결합 중 최대약2배의
+  bounded buffer가 존재할 수 있으므로 청크는 파싱 전에 해제한다.
+- 경로/reparse·파일 집합·동일성·SHA·중복 JSON 키·비유한 수 거부 및180초 제한은 유지한다.
+  I/O 실패를 부분 결과의 성공으로 바꾸지 않는다.
+- 수정 전/후 회귀는 작은 파일 읽기 요청,16MiB/512MiB 실제 경계, 짧은 read, EOF/오류,
+  UTF-8 청크 경계, 기존 native 설치/관찰/종료·trace 소비자 범위를 검사한다.
+- 원래120분 전체 corpus의 값/해시 및 실패 판정을 대조하고, 대형 payload 파일 처리량도
+  확인한다. 같은 서버의 단계 계측 전에는 원래 timeout 원인이나 현장 개선 PASS로 판정하지 않는다.
+
+02:30 KST 로컬 검증: 수정 전 11개 검사에서 실패4/오류2를 재현했고, 동일 검사 수정 후11개와
+기존 영향 범위152개가 모두 exit0으로 통과했다. 원본→수정→수정→원본 순서의 전체 검산은
+80.158/29.436/29.329/81.914초이며 70,076개 파일·모든 결과 값·원래 FAIL 판정이 일치한다.
+1,899개/563,853,145bytes 설치본 구성 파일의 잠금·전체 해시·재검산도 네 실행 모두 통과했다.
+실행 명령과 입력 환경은 `C:/Users/user/Desktop/SmartFactory/RB17_3f0ba68a`의
+`native-affected/request.json`, `comparison-plan.json`, 각 `*-execution/terminal.json`에 보존했다.
+독립 정산 `review.json` SHA256은 `cb5eaad6f60b6eb95c260031bf5a8263f5e31876b8ca8e9ad51a4dab11b25261`.
+호스트·캐시 상태는 통제하지 않았으며 서버 개선 확인과 원래 timeout의 인과 판정은 미완료다.
+
 작성일: 2026-10-10. 기준: `codex/production-release-risk-validation-20261010`,
 `eb9af6f1398d588733f3f1884411e2612496d267`.
 계획: [기준 플랜](../../01-plan/features/production-release-risk-validation-codex-production-release-risk-validation-20261010.plan.md).

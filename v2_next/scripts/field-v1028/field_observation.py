@@ -96,8 +96,16 @@ def write_json(path, value):
 
 def read_json(path, limit=16 * 1024**2):
     path = binding.plain_path(path)
+    chunks, remaining = [], limit + 1
     with path.open('rb') as stream:
-        raw = stream.read(limit + 1)
+        while remaining > 0:
+            chunk = stream.read(min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    raw = b''.join(chunks)
+    del chunks  # Release buffered chunks before strict JSON decoding.
     binding.require(len(raw) <= limit, 'json-read-budget')
     return binding.strict_json(raw), raw
 

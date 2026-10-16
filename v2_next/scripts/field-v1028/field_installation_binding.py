@@ -148,7 +148,8 @@ def stream_fact(stream):
     stream.seek(0)
     digest = hashlib.sha256()
     size = 0
-    while chunk := stream.read(1024 * 1024):
+    # Most observation files are small; do not request a MiB for each one.
+    while chunk := stream.read(64 * 1024):
         size += len(chunk)
         require(size <= 512 * 1024**2, 'file-byte-budget')
         digest.update(chunk)
