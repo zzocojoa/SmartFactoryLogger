@@ -319,7 +319,7 @@ def _prepare_output(output):
 def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3,
                         origin_ns=None, pending_byte_budget=64 * 1024**2, pending_record_budget=256,
-                        include_native_timing=True, diagnostic_timing=False):
+                        include_native_timing=True, diagnostic_timing=False, _record_observer=None):
     """Collect a bounded component window. Caller owns installation/session binding."""
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
@@ -337,6 +337,8 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         raise ValueError('Native timing flag must be boolean')
     if type(diagnostic_timing) is not bool or (diagnostic_timing and not include_native_timing):
         raise ValueError('Diagnostic timing requires native timing')
+    if _record_observer is not None and not callable(_record_observer):
+        raise ValueError('Record observer must be callable')
     endpoints = tuple(endpoints)
     if not endpoints or len({endpoint.name for endpoint in endpoints}) != len(endpoints):
         raise ValueError('Nonempty unique endpoints required')
@@ -414,7 +416,7 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                 backlog['peak_pending_' + key] = max(backlog['peak_pending_' + key], backlog['pending_' + key])
         if timing is not None:
             timing['enqueue_return_ns'] = time.perf_counter_ns()
-        return timing
+        return timing, metadata
 
     def persist():
         while True:
@@ -486,9 +488,12 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         if body_bytes + len(body) > body_byte_budget:
                             raise ValueError('window-body-byte-budget')
                         body_bytes += len(body)
-                enqueued = enqueue(name, record, body)
+                enqueued, metadata = enqueue(name, record, body)
+                turn_finished = time.perf_counter_ns()
                 if record['kind'] == 'request':
-                    previous_finished = time.perf_counter_ns()
+                    previous_finished = turn_finished
+                if _record_observer is not None:
+                    _record_observer(endpoint, metadata, turn_finished)
                 if turn is not None:
                     turn.update(kind=record['kind'], queued_ns=record['queued_ns'], **enqueued,
                                 worker_turn_finished_ns=time.perf_counter_ns())

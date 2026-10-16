@@ -64,7 +64,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
         result.update(scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE', trigger_status='NOT_EVALUATED',
                       trigger_threshold_ms=200, trigger=None)
     if _concurrent_api:
-        result.update(scope='CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE', concurrent_api=True)
+        result.update(scope='CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE', concurrent_api=True,
+                      concurrent_trigger=None)
     companion = None
     companion_finished = False
 
@@ -75,12 +76,36 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
         receipt = companion.finish()
         save('concurrent-api-closeout.json', receipt)
         binding.require(receipt['load_status'] == 'CAPTURE_COMPLETE', 'concurrent-api-capture-incomplete')
+        if result['concurrent_trigger'] is not None:
+            binding.require(receipt['trigger'] == result['concurrent_trigger'], 'concurrent-api-trigger-changed')
+        elif receipt['trigger'] is not None:
+            # An in-flight request can finish after WPR stop was requested.
+            # Preserve it without claiming it caused, or is covered by, the trace.
+            result['late_concurrent_trigger'] = receipt['trigger']
+            save('concurrent-api-late-trigger.json', receipt['trigger'])
 
     def save(name, value):
         files[name] = observation.write_json(folder / name, value)
 
     def require_running():
         binding.require(not stop.is_set(), 'diagnostic-stop-requested')
+
+    def poll_companion():
+        if companion is None:
+            return False
+        notice = companion.poll_trigger()
+        if notice is None:
+            return False
+        if result['concurrent_trigger'] is None:
+            result['concurrent_trigger'] = notice
+            observed = time.perf_counter_ns()
+            save('concurrent-api-trigger.json', dict(notice=notice, observed_ns=observed))
+            if result['trigger'] is None:
+                result.update(trigger_status='COMPANION_ANOMALY_CAPTURED_REQUIRES_CORRELATION',
+                    trigger=dict(source='companion', file='concurrent-api-trigger.json', decision_ns=observed))
+        else:
+            binding.require(result['concurrent_trigger'] == notice, 'concurrent-api-trigger-changed')
+        return True
 
     try:
         require_running()
@@ -121,9 +146,14 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
             notify(dict(phase='observing', origin_ns=origin))
             previous_finish = None
             for index in range(expected_slots):
+                require_running()
+                if poll_companion():
+                    break
                 target = origin + index * 2_000_000_000
                 if stop.wait(max(0, (target - time.perf_counter_ns()) / 1e9)):
                     raise InterruptedError('diagnostic-stop-requested')
+                if poll_companion():
+                    break
                 binding.require(previous_finish is None or previous_finish < target, 'diagnostic-slot-overrun')
                 binding.require(time.perf_counter_ns() < target + 2_000_000_000, 'diagnostic-slot-missed')
                 sample = diagnostic.capture_health_probe(payload, spec.main, spec.backend, spec.port,
@@ -137,21 +167,26 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                 previous_finish = time.perf_counter_ns()
                 if _outlier and sample['health_record']['client_request_and_body_ms'] > 200:
                     result.update(trigger_status='OUTLIER_CAPTURED_REQUIRES_CORRELATION',
-                        trigger=dict(sequence=index, file=name, probe_id=sample['probe_id'],
+                        trigger=dict(source='health', sequence=index, file=name, probe_id=sample['probe_id'],
                             client_request_and_body_ms=sample['health_record']['client_request_and_body_ms'],
                             response_finished_ns=sample['health_record']['response_finished_ns'],
                             decision_ns=previous_finish))
+                poll_companion()
+                if _outlier and result['trigger'] is not None:
                     break
+            triggered = _outlier and result['trigger'] is not None
+            if not triggered and stop.wait(max(0, (origin + round(duration * 1e9) - time.perf_counter_ns()) / 1e9)):
+                raise InterruptedError('diagnostic-stop-requested')
+            poll_companion()
             triggered = _outlier and result['trigger'] is not None
             if companion is not None and triggered:
                 companion.request_stop()
-            if not triggered and stop.wait(max(0, (origin + round(duration * 1e9) - time.perf_counter_ns()) / 1e9)):
-                raise InterruptedError('diagnostic-stop-requested')
             if _outlier:
                 if not triggered:
                     result['trigger_status'] = 'NO_OUTLIER_OBSERVED'
                 save('trigger.json', dict(status=result['trigger_status'], threshold_ms=200,
                     trigger=result['trigger'], probes=len(result['samples']), expected_slots=expected_slots,
+                    concurrent_trigger=result.get('concurrent_trigger'),
                     origin_ns=origin, finished_ns=time.perf_counter_ns(),
                     release_gate='HOLD', promotion_allowed=False))
             notify(dict(phase='finalizing', origin_ns=origin))

@@ -276,6 +276,29 @@ def test_invalid_contract_refused_before_write(tmp_path, kwargs):
     assert not output.exists()
 
 
+def test_record_observer_matches_persisted_bytes_and_failure_drains(server, tmp_path):
+    for fails in (False, True):
+        observed = []
+        def observe(endpoint, metadata, finished):
+            row = json.loads(metadata)
+            observed.append((endpoint.name, metadata, finished))
+            assert row['queued_ns'] <= finished
+            if fails:
+                raise OSError('injected-observer-failure')
+        output = tmp_path / str(fails)
+        result = sampling.collect_http_window(server.server_port, output, duration_seconds=.1,
+            endpoints=(sampling.ENDPOINTS[2],), _record_observer=observe)
+        assert len(observed) == 1
+        name, metadata, _ = observed[0]
+        assert (output/f'{name}-00000.json').read_bytes() == metadata
+        assert result['persistence']['submitted_records'] == result['persistence']['persisted_records'] == 1
+        assert result['persistence']['pending_records'] == 0
+        assert bool(result['worker_errors']) is fails
+        if fails:
+            assert result['http_component_status'] == 'FAIL'
+            assert result['worker_errors'][0]['reason'] == 'injected-observer-failure'
+
+
 def load_tests(_loader, _tests, _pattern):
     root = Path(os.environ['SFL_HTTP_TEST_ROOT'])
     if not root.is_absolute() or not root.parent.is_dir():
@@ -295,6 +318,7 @@ def load_tests(_loader, _tests, _pattern):
         (test_cancel_preserves_unobserved_slot_count, {}),
         (test_body_budget_failure_cannot_pass, {}),
         (test_output_cannot_be_reused_or_escape_parent, {}),
+        (test_record_observer_matches_persisted_bytes_and_failure_drains, {}),
     ]
     for mode, kind, error in [
         ('bad-json', 'health', 'JSONDecodeError'), ('duplicate-json', 'health', 'ValueError'),
@@ -311,6 +335,7 @@ def load_tests(_loader, _tests, _pattern):
         {'duration_seconds': 1, 'endpoints': (replace(sampling.ENDPOINTS[0], interval_seconds=.000001),)},
         {'duration_seconds': 1, 'endpoints': (replace(sampling.ENDPOINTS[0], path='/change-settings'),)},
         {'duration_seconds': 1, 'include_native_timing': 1},
+        {'duration_seconds': 1, '_record_observer': True},
     ]:
         cases.append((test_invalid_contract_refused_before_write, {'kwargs': kwargs}))
     suite = unittest.TestSuite()

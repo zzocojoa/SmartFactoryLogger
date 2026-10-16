@@ -1,11 +1,13 @@
 """Real loopback requests and owned Windows job cleanup, no production contact."""
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
@@ -25,14 +27,18 @@ class CompanionTests(unittest.TestCase):
     def setUp(self):
         self.folder = ROOT/str(len(list(ROOT.iterdir())))
         self.requests = []
+        self.image_delay = 0
         picture = io.BytesIO()
         Image.new('RGB', (2, 2), 'red').save(picture, format='JPEG')
         image = picture.getvalue()
         requests = self.requests
+        case = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 requests.append((self.path, time.perf_counter_ns()))
+                if self.path.endswith('.jpg'):
+                    time.sleep(case.image_delay)
                 body = image if self.path.endswith('.jpg') else b'{"fixture":true}'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
@@ -85,6 +91,8 @@ class CompanionTests(unittest.TestCase):
                 self.assertGreaterEqual(record['started_ns'], record['scheduled_ns'], path.name)
                 self.assertGreaterEqual(record['start_lateness_ms'], 0, path.name)
         self.assertIs(worker.finish(), result)
+        self.assertIsNone(worker.receiver)
+        self.assertIsNone(result['trigger'])
 
     def exercise_worker_wait(self, *, collector_fails):
         class EarlyEvent:
@@ -209,6 +217,160 @@ class CompanionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load.ConcurrentApiLoad(port, self.folder, duration_seconds=duration, origin_ns=origin)
             self.assertFalse(self.folder.exists())
+
+    def test_real_notice_is_available_before_drain_and_matches_retained_record(self):
+        self.image_delay = .35
+        worker = self.start(6)
+        try:
+            notice = None
+            deadline = time.monotonic() + 6
+            while notice is None and time.monotonic() < deadline:
+                notice = worker.poll_trigger()
+                time.sleep(.01)
+            self.assertIsNotNone(notice)
+            self.assertTrue(worker.process.is_alive())
+            self.assertFalse((self.folder/'closeout.json').exists())
+            self.assertEqual((notice['endpoint'], notice['reason']), ('image', 'request-period-overrun'))
+            result = worker.finish(request_stop=True)
+        finally:
+            worker.finish(request_stop=True)
+        self.verify_closed(result)
+        self.assertEqual(result['load_status'], 'CAPTURE_COMPLETE')
+        self.assertEqual(result['trigger'], notice)
+        self.assertEqual(hashlib.sha256((self.folder/notice['record_file']).read_bytes()).hexdigest(), notice['record_sha256'])
+        self.assertIsNone(worker.receiver)
+
+    def test_notice_and_worker_result_disagreement_fails_after_cleanup(self):
+        self.image_delay = .35
+        worker = self.start(.6)
+        try:
+            worker.process.join(10)
+            self.assertEqual(worker.process.exitcode, 0)
+            path = self.folder/'worker-result.json'
+            value = json.loads(path.read_bytes())
+            self.assertIsNotNone(value['trigger'])
+            value['trigger']['record_sha256'] = '0'*64
+            path.write_text(json.dumps(value), encoding='utf-8')
+            result = worker.finish()
+        finally:
+            worker.finish(request_stop=True)
+        self.verify_closed(result)
+        self.assertEqual(result['load_status'], 'FAIL')
+        self.assertIn('companion-notice-result-mismatch', json.dumps(result['errors']))
+
+    def test_broken_notice_delivery_fails_worker_and_closes_owned_job(self):
+        self.image_delay = .35
+        worker = self.start(6)
+        try:
+            worker.receiver.close()
+            worker.receiver = None
+            worker.process.join(10)
+            self.assertEqual(worker.process.exitcode, 1)
+            with self.assertRaisesRegex(ValueError, 'companion-exited-during-observation'):
+                worker.poll_trigger()
+            result = worker.finish()
+        finally:
+            worker.finish(request_stop=True)
+        self.verify_closed(result)
+        self.assertEqual(result['load_status'], 'FAIL')
+        self.assertFalse(result['forced_termination'])
+
+    def test_spawn_failure_closes_both_pipe_handles(self):
+        context = load.multiprocessing.get_context('spawn')
+        original = context.Pipe
+        opened = []
+        def pipe(*args, **kwargs):
+            pair = original(*args, **kwargs)
+            opened.extend(pair)
+            return pair
+        with patch.object(context, 'Pipe', side_effect=pipe), \
+                patch.object(context.Process, 'start', side_effect=OSError('injected-spawn-failure')):
+            with self.assertRaisesRegex(OSError, 'injected-spawn-failure'):
+                self.start()
+        self.assertEqual(len(opened), 2)
+        self.assertTrue(all(handle.closed for handle in opened))
+        self.assertEqual(self.requests, [])
+
+
+class NoticeTests(unittest.TestCase):
+    def test_period_and_failure_threshold_boundaries_preserve_existing_contract(self):
+        data, image = load.ENDPOINTS
+        row = dict(kind='request', request_success=True, scheduled_ns=1_000_000_000,
+                   client_request_and_body_ms=500)
+        self.assertIsNone(load._trigger_reason(data, row, 1_500_000_000))
+        self.assertEqual(load._trigger_reason(data, {**row, 'client_request_and_body_ms': 500.01}, 1_500_010_000),
+                         'request-threshold-exceeded')
+        self.assertIsNone(load._trigger_reason(image, row, 1_249_999_999))
+        self.assertEqual(load._trigger_reason(image, row, 1_250_000_000), 'request-period-overrun')
+        self.assertEqual(load._trigger_reason(image, {**row, 'request_success': False}, 1_010_000_000), 'request-error')
+        self.assertEqual(load._trigger_reason(image, dict(kind='missed_slot'), 1), 'missed-slot')
+        self.assertIsNone(load._trigger_reason(image, dict(kind='cancelled_remaining'), 1))
+
+    def test_concurrent_anomalies_send_only_one_bounded_hash_bound_notice(self):
+        messages = []
+        class Sender:
+            def send_bytes(self, raw):
+                messages.append(raw)
+        observer = load._FirstAnomaly(Sender())
+        origin = time.perf_counter_ns() - 1_000_000_000
+        metadata = (json.dumps(dict(kind='missed_slot', sequence=0, scheduled_ns=origin,
+                                   queued_ns=origin, reason='scheduler-missed-entire-slot'))+'\n').encode()
+        barrier = threading.Barrier(3)
+        def send():
+            barrier.wait()
+            observer(load.ENDPOINTS[1], metadata, time.perf_counter_ns())
+        threads = [threading.Thread(target=send) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join(2)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(len(messages), 1)
+        self.assertLessEqual(len(messages[0]), load.NOTICE_LIMIT)
+        notice = json.loads(messages[0])
+        self.assertEqual(notice['record_sha256'], hashlib.sha256(metadata).hexdigest())
+        self.assertEqual(load._validate_notice(notice, origin, 900), load.ENDPOINTS[1])
+        for changed in ({'sequence': True}, {'record_file': '../other.json'}, {'period_ns': 1},
+                        {'decision_ns': origin-1}, {'kind': 'cancelled_remaining'}, {'record_sha256': 'g'*64}):
+            with self.assertRaises(ValueError):
+                load._validate_notice({**notice, **changed}, origin, 900)
+
+    def test_send_failure_is_not_a_successful_notice(self):
+        class Sender:
+            def send_bytes(self, raw):
+                raise OSError('injected-send-failure')
+        observer = load._FirstAnomaly(Sender())
+        with self.assertRaisesRegex(OSError, 'injected-send-failure'):
+            observer(load.ENDPOINTS[1], b'{"kind":"missed_slot","sequence":0,"scheduled_ns":1}', 2)
+        self.assertIsNone(observer.notice)
+
+    def test_duplicate_notice_is_rejected_and_hash_disagreement_is_not_completion(self):
+        receiver, sender = load.multiprocessing.get_context('spawn').Pipe(duplex=False)
+        worker = object.__new__(load.ConcurrentApiLoad)
+        worker.origin_ns = time.perf_counter_ns() - 1_000_000_000
+        worker.duration_seconds = 900
+        worker.receiver, worker.trigger, worker.receipt = receiver, None, None
+        worker.process = SimpleNamespace(exitcode=0)
+        worker.output = Path('not-read-with-patched-reader')
+        metadata = (json.dumps(dict(kind='missed_slot', sequence=0, scheduled_ns=worker.origin_ns,
+                                   queued_ns=worker.origin_ns))+'\n').encode()
+        observer = load._FirstAnomaly(sender)
+        try:
+            observer(load.ENDPOINTS[1], metadata, time.perf_counter_ns())
+            notice = worker.poll_trigger()
+            self.assertEqual(notice, observer.notice)
+            sender.send_bytes(json.dumps(notice).encode())
+            with self.assertRaisesRegex(ValueError, 'companion-duplicate-notice'):
+                worker.poll_trigger()
+            sender.close()
+            with patch.object(load.observation, 'read_json', return_value=(json.loads(metadata), metadata+b' ')):
+                with self.assertRaisesRegex(ValueError, 'companion-notice-record-hash'):
+                    worker.verify_trigger({'trigger': notice})
+            self.assertIsNone(worker.receiver)
+        finally:
+            receiver.close()
+            sender.close()
 
 
 if __name__ == '__main__':

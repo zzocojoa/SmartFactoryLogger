@@ -182,7 +182,8 @@ class CollectionTests(unittest.TestCase):
         for name in ('trace-binding.json', 'trace-completion.json'):
             self.assertTrue((self.folder/'evidence'/name).is_file())
 
-    def run_outlier(self, latencies, *, bound=True, concurrent=False, fail_at=None):
+    def run_outlier(self, latencies, *, bound=True, concurrent=False, fail_at=None,
+                    notice_at=None, late_notice=False):
         clock = {'ns': 1_000_000_000, 'stop': False}
         def wait(seconds):
             clock['ns'] += round(seconds * 1e9)
@@ -204,6 +205,7 @@ class CollectionTests(unittest.TestCase):
         trace = SimpleNamespace(begin=lambda *args: trace_phase('begin'),
                                 finish=lambda *args: trace_phase('finish'), abort=lambda *args: trace_phase('abort'))
         case = self
+        notice = dict(endpoint='image', sequence=0, reason='request-period-overrun', fixture=True)
         class Companion:
             def __init__(self, port, folder, *, duration_seconds, origin_ns):
                 case.assertTrue(concurrent)
@@ -214,15 +216,26 @@ class CollectionTests(unittest.TestCase):
                 folder.mkdir()
                 collection.observation.write_json(folder/'started.json', {'fixture': True})
                 self.stopped = False
+                self.polls = 0
+                self.notice = None
 
             def request_stop(self):
                 if not self.stopped:
                     phases.append('load-stop')
                     self.stopped = True
 
+            def poll_trigger(self):
+                self.polls += 1
+                if fail_at == 'load-poll':
+                    raise ValueError('injected-load-poll')
+                if notice_at is not None and self.polls >= notice_at:
+                    self.notice = notice
+                return self.notice
+
             def finish(self):
                 phases.append('load-finish')
                 return dict(load_status='FAIL' if fail_at == 'load-finish' else 'CAPTURE_COMPLETE',
+                            trigger=notice if late_notice else self.notice,
                             release_gate='HOLD', promotion_allowed=False)
 
         with patch.object(collection.time, 'perf_counter_ns', lambda: clock['ns']), \
@@ -245,6 +258,37 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 450))
         self.assertEqual(phases, ['begin', 'load-start', 'finish', 'load-finish'])
         self.assertEqual(result['finished_ns'] - result['origin_ns'], 900_000_000_000)
+
+    def test_companion_notice_before_first_health_preserves_initial_and_final_binding(self):
+        result, count, phases = self.run_outlier([], concurrent=True, notice_at=1)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 0))
+        self.assertEqual(phases, ['begin', 'load-start', 'load-stop', 'finish', 'load-finish'])
+        self.assertEqual(result['trigger']['source'], 'companion')
+        self.assertTrue((self.folder/'evidence/runtime-final.json').is_file())
+
+    def test_same_probe_health_outlier_and_companion_notice_both_survive(self):
+        result, count, _ = self.run_outlier([250], concurrent=True, notice_at=3)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 1))
+        self.assertEqual(result['trigger']['source'], 'health')
+        self.assertEqual(result['concurrent_trigger']['endpoint'], 'image')
+
+    def test_final_tail_notice_stops_companion_and_late_notice_cannot_claim_trace_trigger(self):
+        # Three polls per health slot, then one after the final interval tail.
+        result, count, phases = self.run_outlier([10]*450, concurrent=True, notice_at=1351)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 450))
+        self.assertEqual(result['trigger']['source'], 'companion')
+        self.assertIn('load-stop', phases)
+        self.setUp()
+        result, count, _ = self.run_outlier([250], concurrent=True, late_notice=True)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 1))
+        self.assertEqual(result['trigger']['source'], 'health')
+        self.assertIsNone(result['concurrent_trigger'])
+        self.assertEqual(result['late_concurrent_trigger']['endpoint'], 'image')
+
+    def test_poll_failure_aborts_trace_and_still_drains_companion(self):
+        result, count, phases = self.run_outlier([], concurrent=True, fail_at='load-poll')
+        self.assertEqual((result['collection_status'], count), ('INCOMPLETE', 0))
+        self.assertEqual(phases, ['begin', 'load-start', 'load-stop', 'abort', 'load-finish'])
 
     def test_concurrent_unbound_probe_stops_and_drains_even_if_abort_publication_fails(self):
         for failed in (None, 'trace-abort'):
@@ -340,6 +384,64 @@ class CollectionTests(unittest.TestCase):
         trigger = json.loads((self.folder/'evidence/trigger.json').read_bytes())
         self.assertEqual((trigger['probes'], trigger['expected_slots']), (2, 450))
         self.assertEqual(trigger['trigger'], result['trigger'])
+
+    def test_image_overrun_preserves_trace_while_health_stays_fast(self):
+        picture = io.BytesIO()
+        Image.new('RGB', (2, 2), 'red').save(picture, format='JPEG')
+        requests = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                is_image = self.path.endswith('.jpg')
+                if is_image and requests.count(self.path) == 1:
+                    time.sleep(.35)
+                body = picture.getvalue() if is_image else b'{"fixture":true}'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Content-Type', 'image/jpeg' if is_image else 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        stop = threading.Event()
+        deadline = threading.Timer(8, stop.set)
+        deadline.start()
+        phases = []
+        try:
+            self.spec = replace(self.spec, port=server.server_port)
+            def probe(*args, **kwargs):
+                return dict(status='REQUEST_AND_RUNTIME_BOUND', probe_id=kwargs['probe_id'],
+                    health_record=dict(client_request_and_body_ms=10, response_finished_ns=time.perf_counter_ns()))
+            def finish(*args):
+                phases.append('trace-finish')
+                self.assertFalse((self.folder/'evidence/concurrent-api-closeout.json').exists())
+                return {'fixture': True}
+            trace = SimpleNamespace(begin=lambda *args: {}, finish=finish, abort=lambda *args: phases.append('abort'))
+            result, _, count = self.run_collection(duration=900, stop=stop, trace=trace,
+                outlier=True, concurrent=True, probes=probe)
+            self.assertEqual(result['collection_status'], 'BOUND_WINDOW_CAPTURED')
+            self.assertEqual(phases, ['trace-finish'])
+            self.assertLess(count, 450)
+            self.assertEqual(result['trigger_status'], 'COMPANION_ANOMALY_CAPTURED_REQUIRES_CORRELATION')
+            self.assertEqual(result['trigger']['source'], 'companion')
+            self.assertEqual(result['concurrent_trigger']['endpoint'], 'image')
+            closed = json.loads((self.folder/'evidence/concurrent-api-closeout.json').read_bytes())
+            self.assertEqual(closed['load_status'], 'CAPTURE_COMPLETE')
+            self.assertEqual(closed['trigger'], result['concurrent_trigger'])
+            self.assertEqual(closed['job_after_cleanup']['active_processes'], 0)
+            self.assertFalse(closed['forced_termination'])
+        finally:
+            deadline.cancel()
+            deadline.join()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+            self.assertFalse(thread.is_alive())
 
     def test_no_outlier_preserves_all_450_probes_and_does_not_claim_performance_pass(self):
         result, count, phases = self.run_outlier([10] * 450)
