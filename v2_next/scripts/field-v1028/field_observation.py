@@ -24,6 +24,8 @@ import field_generation_binding as generation_binding
 import field_configuration_binding as configuration_binding
 import field_shutdown_binding as shutdown_binding
 import field_http_sampling as http
+import field_health_timing as health_timing
+from field_host_sampling import WindowsProcessReader
 import field_resource_sampling as resource
 from field_windows_job import CollectorJob
 
@@ -60,6 +62,26 @@ class ObservationSpec:
         binding.require(isinstance(self.configuration_reference_sha256, str)
                         and re.fullmatch('[0-9a-f]{64}', self.configuration_reference_sha256),
                         'invalid-configuration-reference-hash')
+
+
+@dataclass(frozen=True)
+class TimingObservationSpec(ObservationSpec):
+    """Opt-in diagnostic only; the ordinary observation contract stays unchanged."""
+    backend_created_filetime: int = 0
+
+    def validate(self):
+        super().validate()
+        binding.require(self.candidate == binding.CANDIDATE_1029, 'timing-observation-candidate')
+        binding.require(type(self.backend_created_filetime) is int
+                        and 0 < self.backend_created_filetime < 2**64, 'timing-observation-native-generation')
+
+
+def timing_native_boundary(spec, output, name):
+    value = WindowsProcessReader().read(spec.backend.pid)
+    write_json(output / name, value)
+    binding.require(value.get('status') == 'CAPTURED' and value.get('pid') == spec.backend.pid
+                    and value.get('created_100ns') == spec.backend_created_filetime,
+                    'timing-observation-native-generation-changed')
 
 
 def write_json(path, value):
@@ -194,7 +216,7 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
                  (('http', 100010), ('resources', 5010), ('processes', 1450))}
     summary = {name: read_json(output / name / 'summary.json')[0]
                for name in ('http', 'resources', 'processes')}
-    issues, health_records, resource_rows = [], [], 0
+    issues, health_records, resource_rows, timing_records = [], [], 0, []
     if any(value.get('origin_ns') != origin_ns for value in summary.values()):
         issues.append('origin-mismatch')
     if summary['http']['http_component_status'] != 'PASS':
@@ -205,6 +227,8 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
         issues.append('resource-component-incomplete')
     if summary['processes']['status'] != 'PASS':
         issues.append('process-component-failed')
+    if isinstance(spec, TimingObservationSpec):
+        review_progress(output / 'http', origin_ns, duration_seconds)
     for index, boundary in enumerate(boundaries):
         if boundary.get('binding_status') != 'PASS' or boundary.get('sessions') != sessions:
             issues.append(f'boundary-{index}-binding')
@@ -227,6 +251,13 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
         except Exception as error:
             issues.append(f'health-{sequence}-{type(error).__name__}')
         health_records.append(row)
+        if isinstance(spec, TimingObservationSpec):
+            timed = health_timing.validate_health_sample(row, raw, probe_id=row.get('health_probe_id'),
+                backend_pid=spec.backend.pid, backend_created_filetime=spec.backend_created_filetime)
+            timing_records.append(dict(sequence=sequence, request_ms=row.get('client_request_and_body_ms'),
+                                       validation=timed))
+            if timed['status'] != 'REQUEST_AND_NATIVE_CLOCK_BOUND':
+                issues.append(f'health-{sequence}-timing-not-bound')
     for sequence in range(math.floor(duration_seconds / 5) + 1):
         row, _ = read_json(output / 'resources' / f'resource-{sequence:05d}.json')
         records = row.get('process', {}).get('records', [])
@@ -245,7 +276,45 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
             'summary': summary, 'health_requests_including_boundaries': len(health_records),
             'first_health_ms': health_records[0]['client_request_and_body_ms'] if health_records else None,
             'max_health_ms': max((r['client_request_and_body_ms'] for r in health_records), default=None),
-            'resource_rows_checked_for_backend': resource_rows}
+            'resource_rows_checked_for_backend': resource_rows, 'diagnostic_timings': timing_records}
+
+
+def review_progress(folder, origin_ns, duration_seconds):
+    value, _ = read_json(folder / 'progress.json')
+    binding.require(value.get('schema') == 'sfl-http-worker-progress-v1'
+                    and value.get('release_gate') == 'HOLD' and value.get('promotion_allowed') is False,
+                    'timing-progress-scope')
+    channels = value.get('channels')
+    binding.require(type(channels) is dict and set(channels) == {e.name for e in http.ENDPOINTS},
+                    'timing-progress-channels')
+    for endpoint in http.ENDPOINTS:
+        rows = channels[endpoint.name]
+        binding.require(type(rows) is list and len(rows) == math.ceil(duration_seconds / endpoint.interval_seconds),
+                        'timing-progress-count')
+        previous = None
+        for sequence, row in enumerate(rows):
+            record, _ = read_json(folder / f'{endpoint.name}-{sequence:05d}.json')
+            times = [row.get(k) for k in ('loop_entered_ns', 'queued_ns', 'metadata_ready_ns',
+                'lock_acquired_ns', 'enqueue_return_ns', 'worker_turn_finished_ns')]
+            binding.require(all(type(t) is int and t > 0 for t in times)
+                            and times == sorted(times), 'timing-progress-clock-order')
+            binding.require(row.get('sequence') == sequence and row.get('kind') == record['kind']
+                and row.get('queued_ns') == record['queued_ns']
+                and row.get('scheduled_ns') == record['scheduled_ns']
+                == origin_ns + round(sequence * endpoint.interval_seconds * 1e9), 'timing-progress-request-binding')
+            prior_finish = row.get('previous_finished_ns')
+            if previous is None:
+                binding.require(prior_finish is None, 'timing-progress-first-turn')
+            else:
+                binding.require(times[0] >= previous['worker_turn_finished_ns'], 'timing-progress-turn-order')
+                if previous['kind'] == 'request':
+                    binding.require(type(prior_finish) is int
+                        and previous['enqueue_return_ns'] <= prior_finish <= previous['worker_turn_finished_ns'],
+                        'timing-progress-previous-request')
+                else:
+                    binding.require(prior_finish == previous['previous_finished_ns'], 'timing-progress-previous-missed')
+            previous = row
+    return {'status': 'REQUEST_AND_WORKER_PROGRESS_BOUND', 'latency_cause': 'UNDETERMINED'}
 
 
 def _component_entry(name, spec, output, duration, origin, external_stop):
@@ -257,8 +326,9 @@ def _component_entry(name, spec, output, duration, origin, external_stop):
                 (output / f'{name}.stderr.log').open('x', encoding='utf-8') as stderr:
             sys.stdout, sys.stderr = stdout, stderr
             if name == 'http':
+                options = {'diagnostic_timing': True} if isinstance(spec, TimingObservationSpec) else {}
                 result = http.collect_http_window(spec.port, output / name, duration_seconds=duration,
-                                                  origin_ns=origin, stop_event=stop)
+                                                  origin_ns=origin, stop_event=stop, **options)
                 passed = result['http_component_status'] == 'PASS'
             elif name == 'resources':
                 result = resource.collect_resource_window(spec.main, output / name, duration_seconds=duration,
@@ -286,6 +356,9 @@ def run_observation(spec, output, duration_seconds, stop, notify):
     result = {'observation_status': 'FAIL', 'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD',
               'promotion_allowed': False, 'errors': [], 'worker_pid': os.getpid(),
               'started_utc': datetime.now(timezone.utc).isoformat()}
+    if isinstance(spec, TimingObservationSpec):
+        result.update(scope='TIMING_DIAGNOSTIC_NOT_FIELD_PERFORMANCE', latency_cause='UNDETERMINED',
+                      etw_coverage='NOT_EVALUATED')
     try:
         with binding.InstalledPayload(spec.root, spec.reference,
                                       expected_reference_sha256=spec.reference_sha256, extras=spec.extras,
@@ -304,6 +377,8 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                 payload, spec.main, spec.backend, spec.port, sessions, expected_configuration)
             write_json(output / 'configuration-initial.json', configuration_initial)
             binding.require(configuration_initial['configuration_status'] == 'PASS', 'initial-configuration-failed')
+            if isinstance(spec, TimingObservationSpec):
+                timing_native_boundary(spec, output, 'native-initial.json')
             origin = time.perf_counter_ns() + 3_000_000_000
             result['origin_ns'] = origin
             write_json(output / 'observation.json', {'origin_ns': origin, 'duration_seconds': duration_seconds,
@@ -330,6 +405,8 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                     if not job.is_alive():
                         job.close()
             notify({'phase': 'finalizing', 'origin_ns': origin})
+            if isinstance(spec, TimingObservationSpec):
+                timing_native_boundary(spec, output, 'native-final.json')
             final = binding.capture_runtime_binding(payload, spec.main, spec.backend, spec.port,
                                                     expected_sessions=sessions)
             write_json(output / 'final.json', final)

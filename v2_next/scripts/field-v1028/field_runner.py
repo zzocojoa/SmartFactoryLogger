@@ -22,6 +22,7 @@ COMMON = {'schema', 'mode', 'candidate_commit', 'signature_policy'}
 MODE_FIELDS = {
     'observe': {'spec', 'duration_seconds'},
     'host-diagnostic': {'spec', 'duration_seconds'},
+    'timing-observe': {'spec', 'duration_seconds'},
     'closed-data': {'data_root', 'roles', 'expected_files', 'image_files', 'shutdown_expectation',
                     'configuration_reference', 'configuration_reference_sha256', 'validator_timeout_seconds'},
 }
@@ -34,16 +35,21 @@ def validate_request(value):
     mode = value.get('mode')
     binding.require(isinstance(mode, str) and mode in MODE_FIELDS
                     and set(value) == COMMON | MODE_FIELDS[mode], 'request-mode-fields')
-    if mode in ('observe', 'host-diagnostic'):
-        durations = (300,) if mode == 'host-diagnostic' else (900, 7200)
+    if mode in ('observe', 'host-diagnostic', 'timing-observe'):
+        durations = (300,) if mode == 'host-diagnostic' else (900,) if mode == 'timing-observe' else (900, 7200)
         binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] in durations,
                         'duration-does-not-match-request-mode')
         data = value['spec']
-        spec_fields = {f.name for f in fields(observation.ObservationSpec)}
+        spec_type = observation.TimingObservationSpec if mode == 'timing-observe' else observation.ObservationSpec
+        spec_fields = {f.name for f in fields(spec_type)}
         binding.require(isinstance(data, dict) and set(data) in (spec_fields, spec_fields - {'candidate_commit'}),
                         'observation-spec-fields')
         binding.require(data.get('candidate_commit', binding.BUILD) == candidate.commit,
                         'observation-candidate-mismatch')
+        if mode == 'timing-observe':
+            binding.require(candidate == binding.CANDIDATE_1029, 'timing-observation-candidate')
+            native = data['backend_created_filetime']
+            binding.require(type(native) is int and 0 < native < 2**64, 'timing-observation-native-generation')
         reference_sha = (binding.REFERENCE_SHA if candidate == binding.CANDIDATE_1028
                          else binding.REFERENCE_SHA_1029)
         binding.require(data['reference_sha256'] == reference_sha, 'production-payload-reference-pin')
@@ -63,11 +69,12 @@ def validate_request(value):
 def execute_phase(request, folder, package):
     mode = validate_request(request)
     candidate = binding.candidate_from_commit(request['candidate_commit'])
-    if mode in ('observe', 'host-diagnostic'):
+    if mode in ('observe', 'host-diagnostic', 'timing-observe'):
         data = dict(request['spec'])
         data['main'] = ProcessIdentity(**data['main'])
         data['backend'] = ProcessIdentity(**data['backend'])
-        spec = observation.ObservationSpec(**data)
+        spec_type = observation.TimingObservationSpec if mode == 'timing-observe' else observation.ObservationSpec
+        spec = spec_type(**data)
         spec.validate()
         options = {'_worker_target': host_diagnostic.worker_entry} if mode == 'host-diagnostic' else {}
         result = observation.supervise_observation(spec, folder / 'observation',
@@ -104,7 +111,7 @@ def run(request_path, request_sha256, output_root, package):
             request = binding.strict_json(raw)
             result['mode'] = validate_request(request)
             input_paths = ([request['spec']['root'], request['spec']['configuration_reference'], request['spec']['reference']]
-                           if result['mode'] in ('observe', 'host-diagnostic')
+                           if result['mode'] in ('observe', 'host-diagnostic', 'timing-observe')
                            else [request['data_root'], request['configuration_reference']])
             for path in input_paths:
                 path = binding.plain_path(path)

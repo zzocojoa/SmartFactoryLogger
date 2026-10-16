@@ -19,6 +19,7 @@ import re
 import socket
 import threading
 import time
+from uuid import uuid4
 
 from PIL import Image
 
@@ -318,7 +319,7 @@ def _prepare_output(output):
 def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3,
                         origin_ns=None, pending_byte_budget=64 * 1024**2, pending_record_budget=256,
-                        include_native_timing=True):
+                        include_native_timing=True, diagnostic_timing=False):
     """Collect a bounded component window. Caller owns installation/session binding."""
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
@@ -334,6 +335,8 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         raise ValueError('Pending record budget must be in [1, 4096]')
     if type(include_native_timing) is not bool:
         raise ValueError('Native timing flag must be boolean')
+    if type(diagnostic_timing) is not bool or (diagnostic_timing and not include_native_timing):
+        raise ValueError('Diagnostic timing requires native timing')
     endpoints = tuple(endpoints)
     if not endpoints or len({endpoint.name for endpoint in endpoints}) != len(endpoints):
         raise ValueError('Nonempty unique endpoints required')
@@ -351,6 +354,7 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
     stop = stop_event if stop_event is not None else threading.Event()
     lock = threading.Lock()
     files, rows, errors = {}, {e.name: [] for e in endpoints}, []
+    progress = {e.name: [] for e in endpoints}
     write_timings = []
     body_bytes = 0
     pending = queue.Queue(maxsize=pending_record_budget)
@@ -392,7 +396,10 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         record['queued_ns'] = time.perf_counter_ns()
         metadata = (json.dumps(record, ensure_ascii=False, allow_nan=False) + '\n').encode('utf-8')
         size = len(metadata) + (len(body) if body is not None else 0)
+        timing = {'metadata_ready_ns': time.perf_counter_ns()} if diagnostic_timing else None
         with lock:
+            if timing is not None:
+                timing['lock_acquired_ns'] = time.perf_counter_ns()
             if writer_failed.is_set():
                 raise RuntimeError('persistence-worker-failed')
             if backlog['pending_bytes'] + size > pending_byte_budget:
@@ -405,6 +412,9 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
             backlog['submitted_records'] += 1
             for key in ('bytes', 'records'):
                 backlog['peak_pending_' + key] = max(backlog['peak_pending_' + key], backlog['pending_' + key])
+        if timing is not None:
+            timing['enqueue_return_ns'] = time.perf_counter_ns()
+        return timing
 
     def persist():
         while True:
@@ -440,6 +450,7 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                'pending_byte_budget': pending_byte_budget, 'pending_record_budget': pending_record_budget,
                'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                'native_timing_enabled': include_native_timing,
+               'diagnostic_timing_enabled': diagnostic_timing,
                'scope': 'HTTP_COMPONENT_ONLY', 'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD'})
 
     def worker(endpoint):
@@ -449,6 +460,8 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         try:
             for sequence in range(counts[name]):
                 target = origin + sequence * step
+                turn = dict(sequence=sequence, scheduled_ns=target, loop_entered_ns=time.perf_counter_ns(),
+                            previous_finished_ns=previous_finished) if diagnostic_timing else None
                 body = None
                 if stop.is_set():
                     record = {'kind': 'cancelled_remaining', 'sequence': sequence, 'scheduled_ns': target,
@@ -463,8 +476,9 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                     record = {'kind': 'missed_slot', 'sequence': sequence, 'scheduled_ns': target,
                               'reason': 'scheduler-missed-entire-slot'}
                 else:
+                    options = {'health_probe_id': uuid4().hex} if diagnostic_timing and name == 'health' else {}
                     record, body = fetch_sample(port, endpoint, timeout_seconds=timeout_seconds,
-                                               include_native_timing=include_native_timing)
+                                               include_native_timing=include_native_timing, **options)
                     record.update(sequence=sequence, scheduled_ns=target,
                                   start_lateness_ms=(record['started_ns'] - target) / 1e6,
                                   body_file=f'{name}-{sequence:05d}.body')
@@ -472,9 +486,13 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         if body_bytes + len(body) > body_byte_budget:
                             raise ValueError('window-body-byte-budget')
                         body_bytes += len(body)
-                enqueue(name, record, body)
+                enqueued = enqueue(name, record, body)
                 if record['kind'] == 'request':
                     previous_finished = time.perf_counter_ns()
+                if turn is not None:
+                    turn.update(kind=record['kind'], queued_ns=record['queued_ns'], **enqueued,
+                                worker_turn_finished_ns=time.perf_counter_ns())
+                    progress[name].append(turn)
                 if record['kind'] == 'cancelled_remaining':
                     break
         except Exception as error:
@@ -519,6 +537,9 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                                'server_or_scheduling_cause_established': False}
     summary['http_component_status'] = 'PASS' if not errors and not persistence_errors and not stop.is_set() and all(
         row['http_component_status'] == 'PASS' for row in summary['channels'].values()) else 'FAIL'
+    if diagnostic_timing:
+        write_json('progress.json', dict(schema='sfl-http-worker-progress-v1', channels=progress,
+            scope='WALL_CLOCK_BOUNDARIES_NOT_LOCK_OR_SCHEDULER_CAUSATION', release_gate='HOLD', promotion_allowed=False))
     write_json('summary.json', summary)
     write_json('manifest.json', {'schema_version': 'sfl-field-http-component-v1', 'files': dict(files)})
     return summary
