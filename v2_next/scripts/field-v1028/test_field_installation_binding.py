@@ -94,7 +94,12 @@ class InstallationBindingTests(unittest.TestCase):
                                         candidate=candidate)
 
     def test_explicit_1029_identity_rejects_mixed_payload_provenance_and_runtime(self):
-        candidate = binding.CANDIDATE_1029
+        self.check_explicit_candidate(binding.CANDIDATE_1029)
+
+    def test_explicit_1030_identity_rejects_mixed_payload_provenance_and_runtime(self):
+        self.check_explicit_candidate(binding.CANDIDATE_1030)
+
+    def check_explicit_candidate(self, candidate):
         self.document.update(candidate_commit=candidate.commit, version=candidate.version,
                              installer_sha256=candidate.installer_sha256,
                              installer_bytes=candidate.installer_bytes)
@@ -114,6 +119,9 @@ class InstallationBindingTests(unittest.TestCase):
             self.assertEqual(payload.receipt['build_commit'], candidate.commit)
             self.assertEqual(self.capture(payload, health)['binding_status'], 'PASS')
             self.assertEqual(self.capture(payload, self.health())['binding_status'], 'FAIL')
+            previous = dict(health, app_version=binding.CANDIDATE_1029.version)
+            if candidate == binding.CANDIDATE_1030:
+                self.assertEqual(self.capture(payload, previous)['binding_status'], 'FAIL')
         wrong = dict(self.document, installer_sha256=binding.INSTALLER_SHA)
         with self.assertRaisesRegex(ValueError, 'candidate-identity'):
             with self.payload(candidate=candidate, document=wrong):
@@ -132,6 +140,8 @@ class InstallationBindingTests(unittest.TestCase):
             self.payload(candidate=replace(binding.CANDIDATE_1029, commit='0' * 40))
         with self.assertRaisesRegex(ValueError, 'candidate-identity-type'):
             self.payload(candidate={'version': '1.0.29'})
+        with self.assertRaisesRegex(ValueError, 'unsupported-candidate'):
+            binding.candidate_reference_sha256(replace(binding.CANDIDATE_1030, installer_bytes=1))
 
     def health(self):
         return dict(app_version=binding.VERSION, runtime_kind='frozen', mode='REAL',

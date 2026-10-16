@@ -47,11 +47,11 @@ def validate_request(value):
         binding.require(data.get('candidate_commit', binding.BUILD) == candidate.commit,
                         'observation-candidate-mismatch')
         if mode == 'timing-observe':
-            binding.require(candidate == binding.CANDIDATE_1029, 'timing-observation-candidate')
+            binding.require(candidate in (binding.CANDIDATE_1029, binding.CANDIDATE_1030),
+                            'timing-observation-candidate')
             native = data['backend_created_filetime']
             binding.require(type(native) is int and 0 < native < 2**64, 'timing-observation-native-generation')
-        reference_sha = (binding.REFERENCE_SHA if candidate == binding.CANDIDATE_1028
-                         else binding.REFERENCE_SHA_1029)
+        reference_sha = binding.candidate_reference_sha256(candidate)
         binding.require(data['reference_sha256'] == reference_sha, 'production-payload-reference-pin')
         for role in ('main', 'backend'):
             binding.require(isinstance(data[role], dict)
@@ -153,7 +153,8 @@ def main(argv=None):
         if args.describe:
             binding.require(not any(supplied), 'describe-with-run-arguments')
             print(json.dumps(dict(schema=SCHEMA, modes=list(MODE_FIELDS), candidate_commit=binding.BUILD,
-                supported_candidate_commits=[binding.CANDIDATE_1028.commit, binding.CANDIDATE_1029.commit],
+                supported_candidate_commits=[binding.CANDIDATE_1028.commit, binding.CANDIDATE_1029.commit,
+                                             binding.CANDIDATE_1030.commit],
                 frozen=bool(getattr(sys, 'frozen', False)), signature_policy='UNSIGNED_INTERNAL',
                 release_gate='HOLD', promotion_allowed=False)))
             return 0

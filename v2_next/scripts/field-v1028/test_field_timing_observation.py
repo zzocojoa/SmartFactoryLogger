@@ -57,14 +57,23 @@ class TimingObservationTests(unittest.TestCase):
         self.folder = ROOT/self._testMethodName
         self.folder.mkdir()
 
-    def request(self):
+    def request(self, candidate=binding.CANDIDATE_1029):
         data=asdict(observation.TimingObservationSpec('unused','unused',None,None,8000,
-            reference_sha256=binding.REFERENCE_SHA_1029, candidate_commit=binding.CANDIDATE_1029.commit,
+            reference_sha256=binding.candidate_reference_sha256(candidate), candidate_commit=candidate.commit,
             backend_created_filetime=123))
         for role in ('main','backend'):
             data[role]=dict(pid=1,created=1.0,exe='unused')
         return dict(schema=runner.SCHEMA,mode='timing-observe',signature_policy='UNSIGNED_INTERNAL',
-            candidate_commit=binding.CANDIDATE_1029.commit,duration_seconds=900,spec=data)
+            candidate_commit=candidate.commit,duration_seconds=900,spec=data)
+
+    def test_1030_timing_requires_own_reference_and_native_generation(self):
+        request=self.request(binding.CANDIDATE_1030)
+        self.assertEqual(runner.validate_request(request),'timing-observe')
+        for key,value in (('reference_sha256',binding.REFERENCE_SHA_1029),
+                          ('candidate_commit',binding.CANDIDATE_1029.commit),
+                          ('backend_created_filetime',True)):
+            bad=deepcopy(request);bad['spec'][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):runner.validate_request(bad)
 
     def test_explicit_mode_candidate_native_generation_and_budget(self):
         request=self.request()
@@ -115,7 +124,8 @@ class TimingObservationTests(unittest.TestCase):
         health=json.loads((self.folder/'http/health-00000.json').read_bytes())
         self.assertNotIn('health_probe_id',health)
 
-    def run_isolated(self, *, mode='normal', timing=True, wrong_generation=False):
+    def run_isolated(self, *, mode='normal', timing=True, wrong_generation=False,
+                     candidate=binding.CANDIDATE_1029):
         source=fixture.BACKEND_SOURCE
         if timing:
             source=source.replace('class Handler',TIMING_SOURCE+'\nclass Handler')
@@ -125,7 +135,7 @@ class TimingObservationTests(unittest.TestCase):
                 "   self.send_header('X-SFL-Health-Timing',diagnostic_header(self.headers['X-SFL-Health-Probe']))\n"
                 "  self.end_headers();self.wfile.write(body)")
         with patch.object(fixture,'BACKEND_SOURCE',source),fixture.fixture_app(self.folder,mode,
-                candidate=binding.CANDIDATE_1029,disabled_low_signal=True) as spec:
+                candidate=candidate,disabled_low_signal=True) as spec:
             native=WindowsProcessReader().read(spec.backend.pid)
             data=dict(spec.__dict__, backend_created_filetime=native['created_100ns']+int(wrong_generation))
             timed=observation.TimingObservationSpec(**data)
@@ -137,6 +147,19 @@ class TimingObservationTests(unittest.TestCase):
             self.assertFalse(worker['promotion_allowed'])
             self.assertEqual(binding.read_process_binding(spec.main,spec.backend,spec.port)['main']['pid'],spec.main.pid)
             return result,worker,timed
+
+    def test_1030_collectors_bind_native_timing(self):
+        result,worker,_=self.run_isolated(candidate=binding.CANDIDATE_1030)
+        self.assertEqual(result['supervisor_status'],'PASS',worker)
+        timings=worker['review']['diagnostic_timings']
+        self.assertEqual(len(timings),2)
+        self.assertTrue(all(row['validation']['status']=='REQUEST_AND_NATIVE_CLOCK_BOUND' for row in timings))
+
+    def test_1030_slow_diagnostic_remains_failure(self):
+        result,worker,_=self.run_isolated(candidate=binding.CANDIDATE_1030,mode='timing-slow')
+        self.assertEqual(result['supervisor_status'],'FAIL')
+        self.assertIn('all-health-including-boundaries-failed',worker['review']['issues'])
+        self.assertTrue(all(row['request_ms']>200 for row in worker['review']['diagnostic_timings']))
 
     def test_real_owned_collectors_bind_native_timings_and_worker_progress(self):
         result,worker,_=self.run_isolated()

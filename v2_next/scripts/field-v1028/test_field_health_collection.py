@@ -78,6 +78,11 @@ class CollectionTests(unittest.TestCase):
         self.spec = replace(self.spec, candidate_commit=collection.binding.BUILD)
         with self.assertRaisesRegex(ValueError, 'diagnostic-candidate-required'):
             self.run_collection()
+
+    def test_1030_observation_support_does_not_expand_six_second_trace_scope(self):
+        self.spec = replace(self.spec, candidate_commit=collection.binding.CANDIDATE_1030.commit)
+        with self.assertRaisesRegex(ValueError, 'diagnostic-candidate-required'):
+            self.run_collection()
         self.assertFalse((self.folder/'evidence').exists())
 
     def test_initial_configuration_or_control_failure_prevents_probes(self):

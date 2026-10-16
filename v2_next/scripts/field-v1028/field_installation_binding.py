@@ -41,7 +41,7 @@ class CandidateIdentity:
     installer_bytes: int
 
     def validate(self):
-        require(type(self) is CandidateIdentity and self in (CANDIDATE_1028, CANDIDATE_1029),
+        require(type(self) is CandidateIdentity and self in (CANDIDATE_1028, CANDIDATE_1029, CANDIDATE_1030),
                 'unsupported-candidate-identity')
 
 
@@ -50,13 +50,25 @@ CANDIDATE_1029 = CandidateIdentity(
     'acaf77d95101a050f4d3ecd76125d3502036f5a7', '1.0.29',
     '3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7', 164824610)
 REFERENCE_SHA_1029 = '658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
+CANDIDATE_1030 = CandidateIdentity(
+    '0732c8e810be3c46096b397812f53a9767354229', '1.0.30',
+    'e72c042dd4554d5c31e27b8a2edfa6ecdcbdd08c58ed43769e7a84d782b370c1', 164941077)
+REFERENCE_SHA_1030 = '4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
 
 
 def candidate_from_commit(commit):
-    for candidate in (CANDIDATE_1028, CANDIDATE_1029):
+    for candidate in (CANDIDATE_1028, CANDIDATE_1029, CANDIDATE_1030):
         if type(commit) is str and commit == candidate.commit:
             return candidate
     raise ValueError('unsupported-candidate-commit')
+
+
+def candidate_reference_sha256(candidate):
+    require(type(candidate) is CandidateIdentity, 'candidate-identity-type')
+    candidate.validate()
+    return {CANDIDATE_1028: REFERENCE_SHA,
+            CANDIDATE_1029: REFERENCE_SHA_1029,
+            CANDIDATE_1030: REFERENCE_SHA_1030}[candidate]
 
 
 def require(condition, reason):

@@ -70,9 +70,14 @@ class ConfigurationTests(unittest.TestCase):
         observation.write_json(self.folder / 'tamper.json', result)
 
     def test_1029_reference_requires_explicit_candidate_and_new_fingerprint(self):
-        candidate = binding.CANDIDATE_1029
+        self.check_explicit_reference(binding.CANDIDATE_1029)
+
+    def test_1030_reference_requires_explicit_candidate_and_new_fingerprint(self):
+        self.check_explicit_reference(binding.CANDIDATE_1030)
+
+    def check_explicit_reference(self, candidate):
         value = dict(self.snapshot, build_git_commit=candidate.commit)
-        # A copied 1.0.28 attestation is not a 1.0.29 attestation.
+        # A copied old attestation cannot identify another build.
         self.assertIn('fingerprint-recomputed-mismatch',
                       configuration.review_snapshot(value, candidate=candidate)['issues'])
         fingerprint = configuration.canonical_fingerprint(value)

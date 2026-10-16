@@ -71,7 +71,8 @@ class TimingObservationSpec(ObservationSpec):
 
     def validate(self):
         super().validate()
-        binding.require(self.candidate == binding.CANDIDATE_1029, 'timing-observation-candidate')
+        binding.require(self.candidate in (binding.CANDIDATE_1029, binding.CANDIDATE_1030),
+                        'timing-observation-candidate')
         binding.require(type(self.backend_created_filetime) is int
                         and 0 < self.backend_created_filetime < 2**64, 'timing-observation-native-generation')
 

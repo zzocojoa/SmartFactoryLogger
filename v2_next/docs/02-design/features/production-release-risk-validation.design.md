@@ -694,3 +694,26 @@ set을 약 496MiB에서 546MiB로 늘렸다. 전체 문자열의 중간 사본�
 각 record를 UTF-8로 순차 기록하고 최종 bytes를 반환한다. 이는 HTTP streaming 전환이
 아니며 기존 한 응답의 Content-Length와 bytes 응답 계약을 유지한다. 같은 최대 페이지의
 해시, 조회 시간, peak working set/commit을 새 프로세스에서 수정 전후 재비교한다.
+
+### 5.24 검증된 1.0.30 후보의 현장 도우미 연결
+
+제품 build는 `0732c8e810be3c46096b397812f53a9767354229`, installer는
+164,941,077bytes / `e72c042dd4554d5c31e27b8a2edfa6ecdcbdd08c58ed43769e7a84d782b370c1`로 고정한다.
+이미 검증한 같은 설치본을 사용하며 도우미 변경만으로 제품을 재빌드하지 않는다.
+`CandidateIdentity`에 이 정확한 1.0.30 값만 추가한다. 기존 1.0.28 기본값과 1.0.29
+식별자는 유지한다. 1.0.30 payload 기준은 기존 검산 JSON 원문 SHA256
+`4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97`이다.
+
+관찰 요청의 outer/spec commit과 후보별 기준 SHA를 함께 검증한다. 900/7200초 일반 관찰,
+300초 host 진단과 900초 timing 진단의 기존 시간 예산을 유지한다. timing 진단에만
+1.0.29/1.0.30을 허용하고 native 생성 FILETIME 검증을 유지한다. 6초 WPR 전용 수집기는
+계속 1.0.29만 허용한다. 승인된 Low Signal OFF 범위와 실제 설정 snapshot은 새 후보로
+명시적으로 검증하며 과거 attestation/기준 파일을 수정하지 않는다.
+
+성공 조건은 새 후보의 실제 격리 collector 및 닫힌 CSV·이미지 경로에서 후보 식별이
+끝까지 유지되는 것이다. 잘못된 payload/provenance/runtime/기준 SHA, 생략된 새 spec
+commit, 과거 fingerprint, 혼합 종료 metadata를 거부해야 한다. 느린 첫 health, 변경된
+실행 세대·잘못된 timing header와 200ms 실패 기준, 소유 수집 프로세스 정리도 유지한다.
+기존 후보 회귀와 새 후보 정상/오류 조건을 함께 검사한다. 제품별 현장 설치 도우미의
+1.0.29→1.0.30 연결 및 실제 서버 설치·15분/120분 QA는 이 계약 시험 뒤 별도로 확인한다.
+어떤 합성 PASS도 현장 효과·물리 경계·전체 데이터·운영 승격으로 올리지 않는다.

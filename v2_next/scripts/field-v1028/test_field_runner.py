@@ -170,7 +170,12 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):runner.validate_request(request)
 
     def test_candidate_1029_closed_copy_and_mixed_metadata_rejection(self):
-        candidate=runner.binding.CANDIDATE_1029
+        self.check_candidate_closed_copy(runner.binding.CANDIDATE_1029)
+
+    def test_candidate_1030_closed_copy_and_mixed_metadata_rejection(self):
+        self.check_candidate_closed_copy(runner.binding.CANDIDATE_1030)
+
+    def check_candidate_closed_copy(self, candidate):
         request,path,output,package=self.prepare(True, disabled_low_signal=True)
         request['candidate_commit']=candidate.commit
         request['shutdown_expectation']['build_git_commit']=candidate.commit
@@ -196,7 +201,8 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(receipt['formal_qa_gate'],'HOLD')
         self.assertFalse(receipt['promotion_allowed'])
         mixed=self.folder/'mixed';mixed.mkdir()
-        request['shutdown_expectation']['build_git_commit']=runner.binding.BUILD
+        request['shutdown_expectation']['build_git_commit']=(runner.binding.CANDIDATE_1029.commit
+            if candidate==runner.binding.CANDIDATE_1030 else runner.binding.BUILD)
         fixtures.save(path,request)
         code,receipt=self.invoke(path,mixed,package)
         self.assertEqual(code,1,receipt)

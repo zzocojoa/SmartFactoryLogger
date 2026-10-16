@@ -26,7 +26,7 @@ class CandidateObservationTests(unittest.TestCase):
     def request(self, candidate):
         spec = observation.ObservationSpec('unused', 'unused', None, None, 8000,
             candidate_commit=candidate.commit,
-            reference_sha256=binding.REFERENCE_SHA if candidate == binding.CANDIDATE_1028 else binding.REFERENCE_SHA_1029)
+            reference_sha256=binding.candidate_reference_sha256(candidate))
         data = asdict(spec)
         for role in ('main','backend'):
             data[role] = dict(pid=1,created=1.0,exe='unused')
@@ -34,7 +34,7 @@ class CandidateObservationTests(unittest.TestCase):
             signature_policy='UNSIGNED_INTERNAL',duration_seconds=900,spec=data)
 
     def test_request_accepts_exact_candidates_and_legacy_1028_only(self):
-        for candidate in (binding.CANDIDATE_1028,binding.CANDIDATE_1029):
+        for candidate in (binding.CANDIDATE_1028,binding.CANDIDATE_1029,binding.CANDIDATE_1030):
             request=self.request(candidate)
             for seconds in (900,7200):
                 request['duration_seconds']=seconds
@@ -60,15 +60,21 @@ class CandidateObservationTests(unittest.TestCase):
                 runner.validate_request(value)
 
     def test_candidate_1029_actual_collectors_and_shutdown_expectation(self):
-        with fixture_app(self.folder,disabled_low_signal=True,candidate=binding.CANDIDATE_1029) as spec:
+        self.check_actual_collectors(binding.CANDIDATE_1029)
+
+    def test_candidate_1030_actual_collectors_and_shutdown_expectation(self):
+        self.check_actual_collectors(binding.CANDIDATE_1030)
+
+    def check_actual_collectors(self, candidate):
+        with fixture_app(self.folder,disabled_low_signal=True,candidate=candidate) as spec:
             output=self.folder/'out'
             result=observation.supervise_observation(spec,output,duration_seconds=6.2)
             self.assertEqual(result['supervisor_status'],'PASS',result)
             worker,_=observation.read_json(output/'worker-result.json')
             self.assertEqual(worker['review']['health_requests_including_boundaries'],6)
             self.assertEqual(worker['review']['resource_rows_checked_for_backend'],2)
-            self.assertEqual(worker['shutdown_expectation']['build_git_commit'],binding.CANDIDATE_1029.commit)
-            shutdown.validate_expectation(worker['shutdown_expectation'],candidate=binding.CANDIDATE_1029)
+            self.assertEqual(worker['shutdown_expectation']['build_git_commit'],candidate.commit)
+            shutdown.validate_expectation(worker['shutdown_expectation'],candidate=candidate)
             with self.assertRaisesRegex(ValueError,'shutdown-expectation-build'):
                 shutdown.validate_expectation(worker['shutdown_expectation'])
             self.assertEqual(worker['physical_device_gate'],'NOT_TESTED')
@@ -76,6 +82,26 @@ class CandidateObservationTests(unittest.TestCase):
             self.assertFalse(worker['promotion_allowed'])
             self.assertEqual(result['job_after_cleanup']['active_processes'],0)
             self.assertEqual(binding.read_process_binding(spec.main,spec.backend,spec.port)['main']['pid'],spec.main.pid)
+
+    def test_1030_outer_spec_reference_and_mode_must_agree(self):
+        request=self.request(binding.CANDIDATE_1030)
+        for mode,seconds in (('observe',900),('observe',7200),('host-diagnostic',300)):
+            request.update(mode=mode,duration_seconds=seconds)
+            self.assertEqual(runner.validate_request(request),mode)
+            for key in ('candidate_commit','reference_sha256'):
+                wrong=deepcopy(request)
+                wrong['spec'][key]=(binding.CANDIDATE_1029.commit if key=='candidate_commit'
+                                    else binding.REFERENCE_SHA_1029)
+                with self.subTest(mode=mode,key=key),self.assertRaises(ValueError):
+                    runner.validate_request(wrong)
+
+    def test_1030_payload_rejects_previous_candidate_before_http(self):
+        with fixture_app(self.folder,candidate=binding.CANDIDATE_1030) as spec:
+            result=observation.supervise_observation(replace(spec,candidate_commit=binding.CANDIDATE_1029.commit),
+                self.folder/'out',duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'],'FAIL')
+            self.assertFalse((self.folder/'out/http').exists())
+            self.assertEqual(result['job_after_cleanup']['active_processes'],0)
 
     def test_candidate_1029_payload_does_not_accept_1028_spec(self):
         with fixture_app(self.folder,candidate=binding.CANDIDATE_1029) as spec:
