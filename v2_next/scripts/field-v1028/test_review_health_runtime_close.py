@@ -1,12 +1,16 @@
 """Synthetic contracts and actual locked-file/CLI tests, not server QA."""
 from copy import deepcopy
 from datetime import datetime
+import csv
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 import review_health_runtime_close as reviewer
 
@@ -64,6 +68,21 @@ def seal(files):
     return files
 
 
+def rollover_fixture():
+    files = fixture()
+    request = json.loads(files['request.json'])
+    request.update(schema='sfl-health-runtime-close-request-v2', csv_first_sample_seq=18573)
+    files['request.json'] = raw(request)
+    health = json.loads(files['health-before.json'])
+    health['spot_temperature']['v2_4_operational'].update(rows_total=18574, last_sample_seq=18574)
+    files['health-before.json'] = raw(health)
+    metadata = json.loads(files[META])
+    metadata['csv_closeout']['final_persisted_sample_seq'] = 18575
+    files[META] = raw(metadata)
+    files[CSV] = files[CSV].replace(b'\n1,', b'\n18573,').replace(b'\n2,', b'\n18574,').replace(b'\n3,', b'\n18575,')
+    return seal(files)
+
+
 class ReviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -91,6 +110,111 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result['configuration_attestation'], 'NOT_EVALUATED')
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
+
+    def test_rollover_pinned_start_and_session_counters(self):
+        result = self.invoke(rollover_fixture())
+        self.assertEqual((result['csv_rows'], result['csv_first_sample_seq'], result['csv_last_sample_seq']), (3, 18573, 18575))
+        self.assertEqual(result['prior_csv_content'], 'NOT_EVALUATED')
+
+    def test_rollover_missing_invalid_and_legacy_override_start_rejected(self):
+        for value in (None, True, 0, -1, 1.5, '18573'):
+            self.files = rollover_fixture()
+            self.mutate_json('request.json', lambda v: v.update(csv_first_sample_seq=value))
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'request-first-sequence'):
+                self.invoke()
+        self.files = rollover_fixture()
+        self.mutate_json('request.json', lambda v: v.pop('csv_first_sample_seq'))
+        with self.assertRaisesRegex(ValueError, 'request-first-sequence'):
+            self.invoke()
+        self.files = fixture()
+        self.mutate_json('request.json', lambda v: v.update(csv_first_sample_seq=1))
+        with self.assertRaisesRegex(ValueError, 'legacy-first-sequence-not-configurable'):
+            self.invoke()
+
+    def test_rollover_truncated_head_gap_duplicate_and_logger_rejected(self):
+        original = rollover_fixture()
+        lines = original[CSV].splitlines(keepends=True)
+        for changed in (b''.join(lines[:1]+lines[2:]), b''.join(lines[:2]+lines[3:]),
+                        b''.join(lines[:2]+lines[1:]), original[CSV].replace(LOGGER.encode(), b'x'*36, 1)):
+            files = dict(original, **{CSV: changed})
+            with self.subTest(changed=changed[-50:]), self.assertRaisesRegex(ValueError, 'csv-sequence-generation'):
+                self.invoke(seal(files))
+
+    def test_rollover_final_and_before_sequence_limits(self):
+        self.files = rollover_fixture()
+        self.mutate_json(META, lambda v: v['csv_closeout'].update(final_persisted_sample_seq=3))
+        with self.assertRaisesRegex(ValueError, 'csv-final-count'):
+            self.invoke()
+        for value in (True, 18572, 18576):
+            self.files = rollover_fixture()
+            self.mutate_json('health-before.json', lambda v: v['spot_temperature']['v2_4_operational'].update(last_sample_seq=value))
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'csv-before-sequence'):
+                self.invoke()
+
+    def test_stream_reads_are_bounded_and_byte_limits_enforced(self):
+        class BoundedStream(io.BytesIO):
+            def read(self, size=-1):
+                self_assert.assertTrue(0 < size <= reviewer.CHUNK_BYTES)
+                return super().read(size)
+        self_assert = self
+        with BoundedStream(b'a'*(reviewer.CHUNK_BYTES+10)) as stream:
+            fact = reviewer.csv_fact(stream, reviewer.STREAM_CSV_LIMIT)
+            self.assertEqual(fact['bytes'], reviewer.CHUNK_BYTES+10)
+            self.assertEqual(stream.tell(), 0)
+            with self.assertRaisesRegex(ValueError, 'file-byte-budget'):
+                reviewer.csv_fact(stream, 10)
+
+    def test_malformed_csv_utf8_and_long_line_rejected(self):
+        for tail, error in ((b'\xff', UnicodeError), (b'"unterminated', csv.Error),
+                            (b'x'*(reviewer.CHUNK_BYTES+1), ValueError)):
+            files = fixture()
+            files[CSV] += tail
+            with self.subTest(error=error), self.assertRaises(error):
+                self.invoke(seal(files))
+
+    def test_actual_large_locked_csv_cli_and_legacy_budget(self):
+        directory = ROOT/'large'
+        directory.mkdir()
+        files = rollover_fixture()
+        rows, first = 2200, 18573
+        metadata = json.loads(files[META])
+        metadata['csv_closeout']['final_persisted_sample_seq'] = first + rows - 1
+        files[META] = raw(metadata)
+        files = seal(files)
+        for name, data in files.items():
+            if name != CSV:
+                (directory/name).write_bytes(data)
+        digest, total = hashlib.sha256(), 0
+        with (directory/CSV).open('xb') as output:
+            header = b'sample_seq,logger_service_instance_id,temperature_output_status,temperature_unavailable_reason,padding\n'
+            output.write(header);digest.update(header);total += len(header)
+            for seq in range(first, first+rows):
+                row = f'{seq},{LOGGER},valid,,'.encode()+b'x'*65536+b'\n'
+                output.write(row);digest.update(row);total += len(row)
+        self.assertGreater(total, reviewer.LEGACY_CSV_LIMIT)
+        manifest = json.loads(files['result.json'])
+        manifest['files'][CSV] = dict(bytes=total, sha256=digest.hexdigest())
+        result_bytes = raw(manifest)
+        (directory/'result.json').write_bytes(result_bytes)
+        request_sha = reviewer.sha(files['request.json'])
+        result_sha = reviewer.sha(result_bytes)
+        original = reviewer.csv_fact
+        def check_lock(stream, limit):
+            with self.assertRaises(OSError):
+                with (directory/CSV).open('r+b'):
+                    pass
+            return original(stream, limit)
+        with patch.object(reviewer, 'csv_fact', side_effect=check_lock):
+            result = reviewer.review(directory, result_sha, request_sha, 0)
+        self.assertEqual(result['csv_rows'], rows)
+        command = [sys.executable, '-W', 'error', str(Path(reviewer.__file__)), '--source', str(directory),
+                   '--result-sha256', result_sha, '--request-sha256', request_sha, '--launch-exit', '0',
+                   '--output', str(ROOT/'large-cli-review.json')]
+        run = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+        self.assertEqual(json.loads(run.stdout)['csv_last_sample_seq'], first+rows-1)
+        with (directory/CSV).open('rb') as stream, self.assertRaisesRegex(ValueError, 'file-byte-budget'):
+            reviewer.csv_fact(stream, reviewer.LEGACY_CSV_LIMIT)
 
     def test_nonzero_or_boolean_launcher_rejected(self):
         for value in (1, True, False):

@@ -33,6 +33,31 @@ function Write-RuntimeBytes([string]$Path,[byte[]]$Bytes) {
     try{$s.Write($Bytes,0,$Bytes.Length);$s.Flush($true)}finally{$s.Dispose()}
     return [ordered]@{bytes=$Bytes.Length;sha256=(Hash-Runtime $Bytes)}
 }
+function Copy-RuntimeFile([string]$Source,[string]$Destination,[long]$Limit) {
+    Require-Runtime ($Limit -gt 0 -and $Limit -le 1073741824) 'copy-byte-budget'
+    $sourcePath=Plain-Runtime $Source;$destinationPath=Plain-Runtime $Destination
+    Require-Runtime ($sourcePath -ine $destinationPath) 'copy-paths-must-differ'
+    $inputStream=[IO.File]::Open($sourcePath,'Open','Read','Read')
+    $outputStream=$null;$hasher=$null
+    try{
+        $length=$inputStream.Length
+        Require-Runtime ($length -gt 0 -and $length -le $Limit) 'file-byte-budget'
+        $outputStream=[IO.File]::Open($destinationPath,'CreateNew','Write','None')
+        $hasher=[Security.Cryptography.SHA256]::Create()
+        $buffer=New-Object byte[] 1048576;$total=0L;$watch=[Diagnostics.Stopwatch]::StartNew()
+        while(($count=$inputStream.Read($buffer,0,$buffer.Length)) -gt 0){
+            Require-Runtime ($watch.ElapsedMilliseconds -le 300000) 'copy-time-budget'
+            $total+=$count;Require-Runtime ($total -le $length) 'copy-length-changed'
+            $outputStream.Write($buffer,0,$count)
+            $null=$hasher.TransformBlock($buffer,0,$count,$null,0)
+        }
+        Require-Runtime ($total -eq $length -and $inputStream.Length -eq $length) 'copy-length-changed'
+        $null=$hasher.TransformFinalBlock([byte[]]@(),0,0)
+        $outputStream.Flush($true)
+        Require-Runtime ($watch.ElapsedMilliseconds -le 300000) 'copy-time-budget'
+        return [ordered]@{bytes=$total;sha256=[BitConverter]::ToString($hasher.Hash).Replace('-','').ToLowerInvariant()}
+    }finally{if($hasher){$hasher.Dispose()};if($outputStream){$outputStream.Dispose()};$inputStream.Dispose()}
+}
 function Write-RuntimeJson([string]$Path,$Value) {
     return Write-RuntimeBytes $Path ([Text.UTF8Encoding]::new($false).GetBytes(($Value|ConvertTo-Json -Depth 35)))
 }
@@ -117,9 +142,13 @@ function New-RuntimeResult([string]$Parent,[string]$Sid) {
     return $path
 }
 function Assert-RuntimeRequest($Request) {
-    Require-Runtime ($Request.schema -ceq 'sfl-health-runtime-close-request-v1' -and $Request.candidate_commit -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7') 'request-contract'
+    Require-Runtime ($Request.schema -cin @('sfl-health-runtime-close-request-v1','sfl-health-runtime-close-request-v2') -and $Request.candidate_commit -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7') 'request-contract'
     Require-Runtime ($Request.logger_service_instance_id -cmatch '^[a-f0-9-]{36}$' -and $Request.csv_name -cmatch '^Factory_Integrated_Log_v2_[0-9]{8}_[0-9]{6}\.csv$') 'request-generation'
     Require-Runtime ($Request.config_sha256 -cmatch '^[a-f0-9]{64}$') 'request-config-pin'
+    if($Request.schema -ceq 'sfl-health-runtime-close-request-v2'){
+        Require-Runtime ($null -ne $Request.PSObject.Properties['csv_first_sample_seq']) 'request-first-sequence'
+        Require-Runtime (($Request.csv_first_sample_seq -is [int] -or $Request.csv_first_sample_seq -is [long]) -and $Request.csv_first_sample_seq -gt 0) 'request-first-sequence'
+    }else{Require-Runtime ($null -eq $Request.PSObject.Properties['csv_first_sample_seq']) 'legacy-first-sequence-not-configurable'}
 }
 function Write-RuntimeIdentityResult([string]$Root,[string]$RequestSha256,$Files) {
     return Write-RuntimeJson ($Root+'\result.json') ([ordered]@{
@@ -196,7 +225,8 @@ try{
     Require-Runtime ($metadata.schema_metadata.git_commit -ceq $request.candidate_commit -and $metadata.schema_metadata.logger_service_instance_id -ceq $request.logger_service_instance_id) 'metadata-generation'
     Require-Runtime ($metadata.csv_closeout.finalized -eq $true -and $metadata.csv_closeout.closeout_reason -ceq 'shutdown' -and $metadata.csv_closeout.csv_file_name -ceq $request.csv_name -and $metadata.csv_closeout.logger_service_instance_id -ceq $request.logger_service_instance_id) 'metadata-not-finalized'
     $files[$metadataName]=Write-RuntimeBytes ($resultRoot+'\'+$metadataName) $metadataBytes
-    $files[$request.csv_name]=Write-RuntimeBytes ($resultRoot+'\'+$request.csv_name) (Read-RuntimeBytes $csvPath 134217728)
+    $csvLimit=if($request.schema -ceq 'sfl-health-runtime-close-request-v2'){1073741824}else{134217728}
+    $files[$request.csv_name]=Copy-RuntimeFile $csvPath ($resultRoot+'\'+$request.csv_name) $csvLimit
     Assert-RuntimeCold (Observe-Runtime)
     $receipt=Write-RuntimeJson ($resultRoot+'\result.json') ([ordered]@{schema='sfl-health-runtime-close-result-v1';status='CLOSED_RUNTIME_CAPTURED_REQUIRES_REVIEW';request_sha256=$ExpectedRequestSha256;files=$files;configuration_changed=$false;application_started=$false;forced_termination=$false;full_backup_created=$false;file_content_qa='NOT_EVALUATED';release_gate='HOLD';promotion_allowed=$false})
     Write-Host ('RESULT_PATH='+$resultRoot);Write-Host ('RESULT_SHA256='+$receipt.sha256);exit 0

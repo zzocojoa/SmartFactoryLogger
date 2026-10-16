@@ -25,6 +25,9 @@ INSTALL = r'C:\Users\user\AppData\Local\Programs\smart-factory-logger-v2'
 MAIN = INSTALL + r'\smart-factory.exe'
 BACKEND = INSTALL + r'\resources\backend\SmartFactoryBackend.exe'
 FILETIME_EPOCH = 116444736000000000
+LEGACY_CSV_LIMIT = 128 * 1024**2
+STREAM_CSV_LIMIT = 1024**3
+CHUNK_BYTES = 1024**2
 require = binding.require
 
 
@@ -60,11 +63,43 @@ def native_identity(identity):
 
 
 def review_bytes(files, request_sha256, launch_exit):
+    with ExitStack() as stack:
+        streams = {name: stack.enter_context(io.BytesIO(data)) if name.endswith('.csv') else data
+                   for name, data in files.items()}
+        return review_streams(streams, request_sha256, launch_exit)
+
+
+def csv_fact(stream, limit):
+    stream.seek(0, io.SEEK_END)
+    length = stream.tell()
+    require(0 < length <= limit, 'file-byte-budget')
+    stream.seek(0)
+    digest, total = hashlib.sha256(), 0
+    while chunk := stream.read(CHUNK_BYTES):
+        total += len(chunk)
+        require(total <= length, 'csv-length-changed')
+        digest.update(chunk)
+    require(total == length, 'csv-length-changed')
+    stream.seek(0)
+    return dict(bytes=total, sha256=digest.hexdigest())
+
+
+def csv_lines(text):
+    while line := text.readline(CHUNK_BYTES + 1):
+        require(len(line) <= CHUNK_BYTES, 'csv-line-budget')
+        yield line
+
+
+def review_streams(files, request_sha256, launch_exit):
     require(type(launch_exit) is int and launch_exit == 0, 'launcher-nonzero')
     request = decode(files['request.json'])
     require(sha(files['request.json']) == request_sha256, 'external-request-pin')
-    require(request['schema'] == 'sfl-health-runtime-close-request-v1'
+    require(request['schema'] in ('sfl-health-runtime-close-request-v1', 'sfl-health-runtime-close-request-v2')
             and request['candidate_commit'] == BUILD, 'request-build-schema')
+    rollover = request['schema'] == 'sfl-health-runtime-close-request-v2'
+    first_seq = request.get('csv_first_sample_seq') if rollover else 1
+    require(integer(first_seq, 1), 'request-first-sequence')
+    require(rollover or 'csv_first_sample_seq' not in request, 'legacy-first-sequence-not-configurable')
     logger = request['logger_service_instance_id']
     require(type(logger) is str and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', logger), 'logger-id')
     csv_name = request['csv_name']
@@ -78,7 +113,9 @@ def review_bytes(files, request_sha256, launch_exit):
             and result['status'] == 'CLOSED_RUNTIME_CAPTURED_REQUIRES_REVIEW'
             and result['request_sha256'] == request_sha256 and set(result['files']) == names, 'result-contract')
     for name in names:
-        require(result['files'][name] == {'bytes': len(files[name]), 'sha256': sha(files[name])}, 'file-pin:' + name)
+        fact = (csv_fact(files[name], STREAM_CSV_LIMIT if rollover else LEGACY_CSV_LIMIT) if name == csv_name
+                else {'bytes': len(files[name]), 'sha256': sha(files[name])})
+        require(result['files'][name] == fact, 'file-pin:' + name)
     for name in ('configuration_changed', 'application_started', 'forced_termination', 'full_backup_created', 'promotion_allowed'):
         require(result[name] is False, 'unexpected-side-effect:' + name)
     require(result['release_gate'] == 'HOLD' and result['file_content_qa'] == 'NOT_EVALUATED', 'result-scope')
@@ -138,23 +175,34 @@ def review_bytes(files, request_sha256, launch_exit):
     require(schema['git_commit'] == BUILD and schema['logger_service_instance_id'] == logger, 'metadata-generation')
     require(close['finalized'] is True and close['closeout_reason'] == 'shutdown'
             and close['csv_file_name'] == csv_name and close['logger_service_instance_id'] == logger, 'csv-not-finalized')
-    reader = csv.DictReader(io.StringIO(files[csv_name].decode('utf-8-sig'), newline=''))
-    header = reader.fieldnames
-    required = {'sample_seq', 'logger_service_instance_id', 'temperature_output_status', 'temperature_unavailable_reason'}
-    require(header is not None and len(header) == len(set(header)) and required <= set(header), 'csv-header')
     statuses, reasons = Counter(), Counter()
     rows = 0
-    for rows, row in enumerate(reader, 1):
-        require(None not in row and all(value is not None for value in row.values()), 'csv-row-shape')
-        require(row['sample_seq'] == str(rows) and row['logger_service_instance_id'] == logger, 'csv-sequence-generation')
-        statuses[row['temperature_output_status']] += 1
-        reasons[row['temperature_unavailable_reason']] += 1
+    text = io.TextIOWrapper(files[csv_name], encoding='utf-8-sig', newline='')
+    try:
+        reader = csv.DictReader(csv_lines(text), strict=True)
+        header = reader.fieldnames
+        required = {'sample_seq', 'logger_service_instance_id', 'temperature_output_status', 'temperature_unavailable_reason'}
+        require(header is not None and len(header) == len(set(header)) and required <= set(header), 'csv-header')
+        for rows, row in enumerate(reader, 1):
+            require(None not in row and all(value is not None for value in row.values()), 'csv-row-shape')
+            require(row['sample_seq'] == str(first_seq + rows - 1) and row['logger_service_instance_id'] == logger,
+                    'csv-sequence-generation')
+            statuses[row['temperature_output_status']] += 1
+            reasons[row['temperature_unavailable_reason']] += 1
+    finally:
+        text.detach()  # Keep the caller's Windows read lock until every receipt is checked.
+    last_seq = first_seq + rows - 1
     require(rows > 0 and integer(close['final_persisted_sample_seq'], 1)
-            and rows == close['final_persisted_sample_seq'], 'csv-final-count')
-    require(integer(operational['rows_total']) and operational['rows_total'] <= rows, 'csv-before-count')
+            and last_seq == close['final_persisted_sample_seq'], 'csv-final-count')
+    require(integer(operational['rows_total']) and operational['rows_total'] <= last_seq, 'csv-before-count')
+    if rollover:
+        require(integer(operational['last_sample_seq'], 1)
+                and first_seq <= operational['last_sample_seq'] <= last_seq, 'csv-before-sequence')
     return dict(status='LIMITED_RUNTIME_CLOSE_RECEIPTS_VERIFIED', candidate_commit=BUILD,
                 logger_service_instance_id=logger, native_processes=len(native), main_pid=main, backend_pid=backend,
                 csv_rows=rows, csv_status_counts=dict(statuses), csv_reason_counts=dict(reasons),
+                csv_first_sample_seq=first_seq, csv_last_sample_seq=last_seq,
+                prior_csv_content='NOT_EVALUATED',
                 config_sha256=request['config_sha256'], metadata_sha256=sha(files[metadata_name]),
                 configuration_attestation='NOT_EVALUATED', image_fact_and_byte_qa='NOT_EVALUATED',
                 worker_shutdown_receipts='NOT_EVALUATED', formal_startup_timing='NOT_EVALUATED',
@@ -171,12 +219,15 @@ def review(source, result_sha256, request_sha256, launch_exit):
     with ExitStack() as stack:
         for path in entries:
             stream = stack.enter_context(binding.locked_read(path))
-            limit = 128 * 1024**2 if path.suffix == '.csv' else 4 * 1024**2
+            if path.suffix == '.csv':
+                files[path.name] = stream
+                continue
+            limit = 4 * 1024**2
             raw = stream.read(limit + 1)
             require(0 < len(raw) <= limit, 'file-byte-budget')
             files[path.name] = raw
         require(sha(files['result.json']) == result_sha256, 'console-result-pin')
-        result = review_bytes(files, request_sha256, launch_exit)
+        result = review_streams(files, request_sha256, launch_exit)
         require(set(p.name for p in root.iterdir()) == set(files), 'result-membership-changed')
         result.update(console_result_sha256=result_sha256, request_sha256=request_sha256,
                       scope='RECOVERED_PINNED_RECEIPTS_CURRENT_CSV_SEQUENCE_ONLY', files_verified=9)
@@ -196,7 +247,7 @@ def main():
     try:
         result = review(args.source, args.result_sha256, args.request_sha256, args.launch_exit)
         code = 0
-    except (ValueError, OSError, KeyError, TypeError, OverflowError) as error:
+    except (ValueError, OSError, KeyError, TypeError, OverflowError, csv.Error) as error:
         result = dict(status='HOLD', error_type=type(error).__name__, reason=str(error),
                       release_gate='HOLD', promotion_allowed=False)
         code = 1

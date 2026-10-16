@@ -57,6 +57,43 @@ Check 'no-overwrite-and-byte-budget' {
     $failed=$false;try{$null=Write-RuntimeBytes $path ([byte[]]@(1))}catch{$failed=$true}
     Require-Runtime ($failed -and (Hash-Runtime (Read-RuntimeBytes $path)) -ceq $pin.sha256) 'existing-file-modified'
 }
+Check 'actual-stream-copy-above-legacy-limit-and-independent-hash' {
+    $inputPath=$root+'\large-source.csv';$outputPath=$root+'\large-copy.csv'
+    $file=[IO.File]::Open($inputPath,'CreateNew','Write','None')
+    try{
+        $file.SetLength(134217745);$file.WriteByte(17)
+        $null=$file.Seek(67108864,'Begin');$file.WriteByte(41)
+        $null=$file.Seek(-1,'End');$file.WriteByte(99);$file.Flush($true)
+    }finally{$file.Dispose()}
+    Reject {Copy-RuntimeFile $inputPath ($root+'\over-budget.csv') 134217728} 'file-byte-budget'
+    Require-Runtime (-not [IO.File]::Exists($root+'\over-budget.csv')) 'budget-created-output'
+    $fact=Copy-RuntimeFile $inputPath $outputPath 1073741824
+    Require-Runtime ($fact.bytes -eq 134217745) 'copy-length'
+    $h=[Security.Cryptography.SHA256]::Create()
+    try{
+        foreach($path in @($inputPath,$outputPath)){
+            $file=[IO.File]::OpenRead($path)
+            try{$pin=[BitConverter]::ToString($h.ComputeHash($file)).Replace('-','').ToLowerInvariant()}finally{$file.Dispose()}
+            Require-Runtime ($pin -ceq $fact.sha256) 'independent-copy-hash'
+        }
+    }finally{$h.Dispose()}
+    $null=Write-RuntimeJson ($root+'\large-copy-fact.json') $fact
+}
+Check 'stream-copy-writer-lock-existing-target-and-budgets' {
+    $path=$root+'\source.dat';$target=$root+'\locked-copy.dat'
+    $writer=[IO.File]::Open($path,'Open','Write','ReadWrite')
+    try{
+        $failed=$false;try{$null=Copy-RuntimeFile $path $target 20}catch{$failed=$true}
+        Require-Runtime ($failed -and -not [IO.File]::Exists($target)) 'writer-not-excluded'
+    }finally{$writer.Dispose()}
+    $before=Hash-Runtime (Read-RuntimeBytes $path)
+    Reject {Copy-RuntimeFile $path $path 20} 'copy-paths-must-differ'
+    Reject {Copy-RuntimeFile $path $target 0} 'copy-byte-budget'
+    Reject {Copy-RuntimeFile $path $target 1073741825} 'copy-byte-budget'
+    $null=Copy-RuntimeFile $path $target 20
+    $failed=$false;try{$null=Copy-RuntimeFile $path $target 20}catch{$failed=$true}
+    Require-Runtime ($failed -and (Hash-Runtime (Read-RuntimeBytes $path)) -ceq $before -and (Hash-Runtime (Read-RuntimeBytes $target)) -ceq $before) 'existing-stream-copy-modified'
+}
 Check 'path-and-stream-guards' {
     Reject {Plain-Runtime 'relative.txt'} 'absolute-local-path'
     Reject {Plain-Runtime 'C:\tmp\file:stream'} 'absolute-local-path'
@@ -72,6 +109,17 @@ Check 'request-build-and-csv-guards' {
     Assert-RuntimeRequest $r
     $r.csv_name='..\outside.csv';Reject {Assert-RuntimeRequest $r} 'request-generation'
     $r.candidate_commit='wrong';Reject {Assert-RuntimeRequest $r} 'request-contract'
+}
+Check 'v2-first-sequence-and-legacy-isolation' {
+    $r=[pscustomobject]@{schema='sfl-health-runtime-close-request-v2';candidate_commit='acaf77d95101a050f4d3ecd76125d3502036f5a7';logger_service_instance_id='c7bad677-3827-4da6-b4a0-920f9e5629e6';csv_name='Factory_Integrated_Log_v2_20261016_000000.csv';config_sha256=('a'*64);csv_first_sample_seq=18573}
+    Assert-RuntimeRequest $r
+    foreach($bad in @($null,$true,0,-1,1.5,'18573')){
+        $r.csv_first_sample_seq=$bad;Reject {Assert-RuntimeRequest $r} 'request-first-sequence'
+    }
+    $r.csv_first_sample_seq=18573;$r.schema='sfl-health-runtime-close-request-v1'
+    Reject {Assert-RuntimeRequest $r} 'legacy-first-sequence-not-configurable'
+    $r.schema='sfl-health-runtime-close-request-v2';$r.PSObject.Properties.Remove('csv_first_sample_seq')
+    Reject {Assert-RuntimeRequest $r} 'request-first-sequence'
 }
 Check 'real-controller-development-host-denied' {
     Require-Runtime ($env:COMPUTERNAME -cne 'DESKTOP-CIIT7LK') 'test-must-run-on-development-host'
