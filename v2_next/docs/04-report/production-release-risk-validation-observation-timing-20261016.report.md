@@ -8,6 +8,12 @@
 원인은 아직 확정하지 않았으며, 기존 실패와 200ms 기준을 보존한다.
 정식 QA·운영 승격은 HOLD이고 120분 시험을 시작하지 않았다.
 
+추가 계측한 15분 진단 `run-45e6bd379d57`도 FAIL이다. health 200ms 초과 1회와
+영상 조회 시점 누락 11개를 원본 재계산으로 확인했다. 450개 health 요청 모두
+요청 식별자·프로세스/스레드 세대·native clock을 결합했다. 가장 느린 응답은 한 함수의
+단독 지연이 아니라 route 진입 전·worker 시작 전·runtime 정보·route 재개 후 등 여러
+구간에 나뉘었다. OS 실행 대기와 실제 처리 시간을 구분할 후속 근거가 필요하다.
+
 설치 후보는 미서명 내부 운영 정책의 1.0.29,
 build `acaf77d95101a050f4d3ecd76125d3502036f5a7`이다.
 이번 변경은 진단 도우미에만 적용한다. 제품 설치·재시작·전체 백업은 수행하지 않는다.
@@ -60,6 +66,23 @@ build `acaf77d95101a050f4d3ecd76125d3502036f5a7`이다.
 7. 이 측정은 `TIMING_DIAGNOSTIC_NOT_FIELD_PERFORMANCE`이다. 추가 계측의 영향이 있으므로
    일반 관찰의 PASS 대체 자료로 쓰지 않는다. 구간별 경과 시간은 정확한 CPU 시간이나
    스케줄링 원인 판정이 아니다. 필요한 구간을 좁힌 뒤 ETW 증거를 별도로 연결한다.
+
+시간 구간 해석은 실제 설치 commit의 `backend/app.py`와 대조한다. 현재 소스의
+해당 파일·`backend/version.py`·`backend/FacilityData/service.py`는 설치 commit
+`acaf77d95101a050f4d3ecd76125d3502036f5a7`와 차이가 없다.
+
+| 구간 | 포함되는 작업과 해석 한계 |
+| --- | --- |
+| 요청 시작 → route 진입 | 연결·송신·서버 진입 전 시간. 서버 큐 대기만으로 단정할 수 없음 |
+| submitted → worker 진입 | `asyncio.to_thread` 제출 이후 worker 시작까지. 큐·스케줄링·계측 비용 포함 |
+| worker 진입 → plc_done | native 시작 계측 및 PLC/온도 상태 읽기. 내부 잠금과 통신 통계 읽기 포함 |
+| plc_done → runtime_done | 실행 파일 경로·수정 시각 등 런타임 정보 읽기 |
+| runtime_done → frontend_done | 프런트엔드 경로·index·assets·누락 자원·후보 경로 상태 읽기 |
+| worker 종료 → route 재개 | native 종료 계측 및 비동기 route가 재개되기까지 |
+| route 재개 → 응답 수신 완료 | native/헤더 생성·직렬화·middleware·전송·클라이언트 수신. 단일 원인으로 단정 불가 |
+
+진단기의 `metadata_ready → lock_acquired`도 벽시계 경과 시간이다. 실제 잠금 경합 시간과
+OS의 실행 지연을 이 두 시각만으로 분리하지 않는다.
 
 ## 개발 검증
 
@@ -122,4 +145,93 @@ descriptor를 검사했으며 관리자 소유 ACL 실제 적용은 개발 일�
 결과: `PDCA_OBS_LATENCY_20261016_4b21c68f/native-drain-r2/summary.json`.
 최종 실행기 SHA256은 `65d37c5c1722efc0a572f36b2d792df611a96406d7a879e8b332fe72c775c41c`다.
 전체 health는 앞의 Python 변경 상태에서 통과했으며, 이후 실행기 수정은 위 native 시험과
-Ruff·diff 검사를 적용했다. 새 묶음 재포장 검증과 현장 진단은 후속 단계다.
+Ruff·diff 검사를 적용했다.
+
+## 수정 묶음 검증과 서버 전달
+
+수정된 clean commit `f937029fff2c34d03c9072ccdb17052d5912530d`에서 다시 빌드했다.
+`PDCA_TIMING_BUILD_20261016_7e8a9c03_R2/portable-r1/summary.json`의 포장 검사는
+PASS, exit 0이다. 실제 frozen 실행 6건에서 정상 fixture, 실제 attestation의 의도된
+거절, 중복 JSON 거절, 일반 권한의 관리자 실행 거절, 잘못된 요청 해시 거절 및
+describe 출력을 확인했다. 각 결과의 `native-child.json` 해시·내용이 launcher와
+일치했고 소유 작업 묶음 active 0·강제 정리 없음도 확인했다. 개발 fixture용 실행기와
+서버에 전달한 관리자 실행기는 구분한다.
+
+서버 전달 위치는 `C:\Users\user\Desktop\SmartFactory\TO29_20261016_7e8a9c03_R2`다.
+`Z:\SmartFactory\20261016\send`에서 Chrome 원격 데스크톱의 탐색기로 복사하고,
+최종 절대경로를 화면에서 확인한 뒤 인증된 SSH로 13개 파일의 길이·SHA256을 대조했다.
+`server-delivery-verification.json`은 exit 0이며 제품 프로세스 세대와 작업 정보
+60313·1도 동일했다. 운영 앱의 설치·재시작·전체 백업은 수행하지 않았다.
+
+| 식별 항목 | SHA256 |
+| --- | --- |
+| frozen `field_runner.exe` (16,097,208 bytes) | `b464c2ec9e3669a17c3a62ef50d1c326237a9dbf2bb5c77e89e37eb64fc05847` |
+| 패키지 manifest | `879e6e3d467167aa74a1bdc8c35d4990af19791859b562d4208550c93c63ef12` |
+| 현장 진단 request | `dd47d4432ad9eb981b4ba0b0880fb89b9201e27c9621d7b9505ae926a6c6e995` |
+| 잠금 실행 명령 | `25cc69a219eedaec3959ef35a293346206c6bc75361e0f32c524fa9bc003d7e5` |
+
+Smart Factory를 전면에 복원한 뒤 SSH로 한 번 실행했다. 서버 결과 폴더는
+`C:\Users\user\Desktop\SmartFactory\run-45e6bd379d57`이며 HTTP origin 기록 시각은
+2026-10-16 03:30:40.744606 UTC다. 900초 진단을 완료한 뒤 회수·검산했다.
+측정 중 읽기 전용 시작 확인을 두 번 수행했다. 첫 확인의 UTC/local 필터 오류로
+폴더가 0개 반환돼 실제 측정 파일을 읽지 못했고, 두 번째 확인에서 UTC로 맞춰
+요청 해시와 origin만 읽었다. 진단을 재실행하거나 원본을 변경하지 않았다.
+
+## 실제 진단 결과와 원본 재계산
+
+SSH 출력의 `LAUNCH_EXIT=1`과 launcher SHA256
+`12d2e10740099cbd2365220336be0ffbd986a91ce4a314f270303084de7521ee`를 회수 파일과
+대조했다. tar에는 8,788개 파일, 60,036,232 bytes가 있으며 tar 자체는 67,430,400 bytes,
+SHA256 `ea344dbcb3b7a8b6f5b7ca338c743a364282c49f6d15d577764dc52a988c0488`이다.
+session manifest의 8,783개 파일을 모두 확인하고 frozen source 85개를 대조했다.
+HTTP·자원·전체 결합 요약과 진행 기록을 다시 계산해 모두 일치했다.
+`review_timing_ssh.py` exit 0, `RECORDED_SUMMARIES_REPRODUCED`, replay errors 0이다.
+검산 성공은 진단의 FAIL을 바꾸지 않는다.
+
+| 채널 | 실행/예정 | 최대 응답 | 기록 결과 |
+| --- | ---: | ---: | --- |
+| health | 450/450 | 207.5919ms | 200ms 초과 1건, 오류·timeout 0 |
+| data | 150/150 | 123.2425ms | 500ms 초과 0건, 오류·timeout 0 |
+| image | 3,589/3,600 | 552.3252ms | 조회 시점 누락 11개, 오류·timeout 0 |
+
+health 초기·최종 경계까지 452개를 검사했고, 예약 health 450개 모두
+`REQUEST_AND_NATIVE_CLOCK_BOUND`다. 영속 기록은 4,200개 모두 저장됐으며
+discarded 0, 최고 pending 3이다. 소유 작업 묶음의 잔여 프로세스는 안쪽·바깥쪽 모두
+0이고 강제 정리도 없었다. 종료 후 SSH 확인에서도 진단 프로세스는 없었다.
+
+200ms 초과는 health 순번 65, 서버 시각 03:32:53.304527 UTC의 207.5919ms다.
+이 시점은 시작 확인용 SSH 읽기 두 번보다 앞선다.
+
+| 벽시계 구간 | 시간 |
+| --- | ---: |
+| 클라이언트 요청 시작 → route 진입 | 45.0063ms |
+| route 진입 → worker 제출 | 0.0486ms |
+| 제출 → worker 진입 | 30.7151ms |
+| worker 진입 → PLC 상태 완료 | 0.9607ms |
+| PLC 상태 완료 → runtime 정보 완료 | 22.4122ms |
+| runtime → frontend 상태 완료 | 3.4724ms |
+| frontend 완료 → worker 종료 | 0.0085ms |
+| worker 종료 → route 재개 | 10.3838ms |
+| route 재개 → 클라이언트 응답 수신 완료 | 94.5843ms |
+
+영상 조회 누락 순번은 75, 416, 859, 860, 1045, 1046, 1196, 1655, 2336,
+3136, 3330이다. 앞선 실제 응답 9건이 다음 250ms 시점을 넘겼고, 이 중 2건은
+각각 두 시점을 넘겼다. 직전 요청 이후 metadata 준비·잠금 획득·enqueue 반환의
+기록은 모두 짧았으며 이 11개 누락을 설명하지 않는다. 앞선 일반 관찰의 두
+enqueue 이후 지연 사례를 이번 진단에서 재현했다는 뜻은 아니다.
+
+`timing-review.json` SHA256:
+`19e74815338117982a7f5d1d55b5f0fb27064188b9e70a3494550baefc14aa66`.
+`timing-analysis.json` SHA256:
+`613332f28d14917a2c37b767aad8dd891983b114bdeb0b866abf993e14b10367`.
+분석 명령 exit 0. 회수·분석 원본은 위 R2 빌드 폴더에, 공유 사본은
+`Z:\SmartFactory\20261016\return\TIMING_run-45e6bd379d57`에 보존한다.
+
+앱 1.0.29와 main/backend의 native 생성 시각은 실행 전후 동일했다. 제품 60313·금형 1,
+Running 상태와 전면 Smart Factory 화면을 확인했다. 설치·재시작·전체 백업은 없었다.
+제조사 문의의 정확한 Gmail thread도 다시 읽었으나 보낸 메일 1개만 확인됐다.
+
+다음 원인 조사는 위 느린 구간의 backend loop·worker·collector 스레드에 대한
+실행/대기 근거와 route 재개 이후 직렬화·전송 구간을 대상으로 한다. 특정 함수의
+캐시 변경, 잠금 제거, 임계값 완화 또는 원인 미확정 상태의 120분 시험은 수행하지 않는다.
+물리 경계·전체 QA·운영 승격은 여전히 미완료다.
