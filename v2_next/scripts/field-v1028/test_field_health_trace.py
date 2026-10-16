@@ -91,8 +91,9 @@ class TraceTests(unittest.TestCase):
     def coordinator_go(self, handshake):
         directory = self.root/'SmartFactory'/('T'+'d'*12)
         directory.mkdir(parents=True)
-        lease = dict(schema='sfl-health-trace-lease-v1', scope=trace.SCOPE, run_id=self.contract['run_id'],
-            run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=30, capture_seconds=6,
+        policy = trace.capture_policy(self.spec.outlier_capture)
+        lease = dict(schema=policy['lease_schema'], scope=policy['scope'], run_id=self.contract['run_id'],
+            run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=policy['guard'], capture_seconds=policy['duration'],
             stop_timeout_seconds=60, profile_sha256=trace.PROFILE_SHA256,
             contract_sha256=self.spec.trace_contract_sha256, package_sha256=self.contract['package_sha256'],
             parent_pid=200, parent_created_filetime='2000', release_gate='HOLD', promotion_allowed=False)
@@ -180,6 +181,32 @@ class TraceTests(unittest.TestCase):
             reader.return_value.read.return_value = dict(status='UNAVAILABLE')
             with self.assertRaisesRegex(ValueError, 'trace-owner-generation-unavailable-or-changed'):
                 trace.generation_alive(20, 1000)
+
+    def test_outlier_handshake_binds_separate_contract_and_rejects_legacy_or_mixed_limits(self):
+        self.contract.update(schema='sfl-health-outlier-contract-v1', scope=trace.OUTLIER_SCOPE,
+                             duration_seconds=900, guard_seconds=960)
+        for change in ({}, {'schema': 'sfl-health-trace-contract-v1'}, {'duration_seconds': 6},
+                       {'guard_seconds': 30}, {'scope': trace.SCOPE}):
+            changed = dict(self.contract, **change)
+            self.path.write_text(json.dumps(changed))
+            self.spec = replace(self.spec, outlier_capture=True,
+                                trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+            if change:
+                with self.assertRaises(ValueError):
+                    with trace.HealthTraceHandshake(self.spec, 900, self.evidence):
+                        pass
+            else:
+                with trace.HealthTraceHandshake(self.spec, 900, self.evidence) as h:
+                    self.assertEqual(h.common()['scope'], trace.OUTLIER_SCOPE)
+        self.path.write_text(json.dumps(self.contract))
+        self.spec = replace(self.spec, trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+        with trace.HealthTraceHandshake(self.spec, 900, self.evidence) as h:
+            self.bind(h)
+            with patch.object(h, 'wait', side_effect=lambda *args: self.stopped(h)):
+                result = h.finish({}, self.stop)
+            self.assertGreater(result['etl']['bytes'], 0)
+        with self.assertRaises(ValueError):
+            replace(self.spec, outlier_capture=1).validate()
 
 
 if __name__ == '__main__':

@@ -70,6 +70,38 @@ $ready.worker.created_filetime=[long]134365056356121274;$ready.initial_files.'na
 $rejected=$false;try{Assert-HealthTraceReady $ready $c $h}catch{$rejected=$true};Check $rejected 'initial file hash'
 @{status='PASS';accepted=1;rejected=2}|ConvertTo-Json
 ''')
+    run('outlier-contracts', r'''
+$c=[pscustomobject]@{schema='sfl-health-outlier-contract-v1';scope='LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC';run_id=('a'*32);channel_path='C:\fixture\trace-channel';package_sha256=('b'*64);backend_pid=100;backend_created_filetime=[long]134365056356121274;main_pid=101;duration_seconds=900;guard_seconds=960;release_gate='HOLD';promotion_allowed=$false}
+Assert-HealthTraceContract $c $c.channel_path $c.package_sha256
+$lease=[pscustomobject]@{schema='sfl-health-outlier-lease-v1';scope=$c.scope;run_id=$c.run_id;instance=('SFLTrace_'+('d'*32));run_path='C:\fixture\T111111111111';parent_pid=500;parent_created_filetime='134365056356121274';guard_seconds=960;capture_seconds=900;stop_timeout_seconds=60;contract_sha256=('e'*64);package_sha256=$c.package_sha256;profile_sha256='603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486';release_gate='HOLD';promotion_allowed=$false}
+Assert-HealthTraceLease $lease $lease.run_path $c.package_sha256
+$bad=@(@('schema','sfl-health-trace-contract-v1'),@('scope','LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'),@('duration_seconds',6),@('duration_seconds',901),@('guard_seconds',30),@('guard_seconds',961))
+foreach($row in $bad){$changed=$c|ConvertTo-Json|ConvertFrom-Json;$changed.($row[0])=$row[1];$rejected=$false;try{Assert-HealthTraceContract $changed $c.channel_path $c.package_sha256}catch{$rejected=$true};Check $rejected ('outlier:'+ $row[0])}
+$lease.guard_seconds=30
+$rejected=$false;try{Assert-HealthTraceLease $lease $lease.run_path $c.package_sha256}catch{$rejected=$true};Check $rejected 'mixed lease guard'
+$s=@{active=$false;elapsed=0}
+$command={param($op,$file) if($op -ceq 'start'){$s.active=$true};if($op -ceq 'stop'){$s.active=$false};@{status='PASS';actual_exit_code=0;stdout=$(if($s.active){'WPR recording is in progress...'}else{'WPR is not recording'});stderr=''}}
+$result=Invoke-TraceLifecycle @{instance=('SFLTrace_'+('f'*32));guard_seconds=960} $command {$true} {$false} {} {$s.elapsed} {$s.elapsed+=30} {}
+Check ($result.reason -ceq 'guard-deadline' -and $s.elapsed -eq 960 -and $result.cleanup_confirmed -and -not $s.active) 'outlier independent deadline'
+@{status='PASS';accepted=2;rejected=7;deadline=$s.elapsed;cleanup=$result.cleanup_confirmed;actual_etw_started=$false}|ConvertTo-Json
+''')
+    run('independent-native-bootstrap', r'''
+Initialize-TraceHandles
+foreach($encoded in @('', 'bad-command', ('a'*24001))){
+ $rejected=$false;try{[void][SflTraceParent]::StartIndependent($encoded,[Environment]::SystemDirectory)}catch{$rejected=$_.Exception.InnerException -is [ArgumentException]};Check $rejected 'invalid native command accepted'
+}
+$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('exit 7'))
+$child=$null;$blocked=$false;$actual=$null;$blockedReason=$null
+try{
+ try{$child=[SflTraceParent]::StartIndependent($encoded,[Environment]::SystemDirectory)}catch{
+  $errorNative=$_.Exception.InnerException
+  if($errorNative -is [ComponentModel.Win32Exception] -and $errorNative.NativeErrorCode -eq 5){$blocked=$true;$blockedReason='access-denied'}
+  elseif($errorNative -is [InvalidOperationException] -and $errorNative.Message -ceq 'independent-child-still-in-job'){$blocked=$true;$blockedReason='ancestor-job-retained-child-cleaned-before-resume'}else{throw}
+ }
+ if($child){Check ($child.WaitForExit(10000)) 'independent short child did not exit';$actual=$child.ExitCode;Check ($actual -eq 7) 'independent exit code'}
+}finally{if($child){$child.Dispose()}}
+@{status='PASS';invalid_inputs_rejected=3;ancestor_job_blocked=$blocked;blocked_reason=$blockedReason;child_exit=$actual;actual_etw_started=$false}|ConvertTo-Json
+''')
     channel = root/'messages'
     channel.mkdir()
     run('messages', r'''

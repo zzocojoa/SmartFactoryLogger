@@ -70,7 +70,16 @@ function Assert-HealthEntryPackage($Document){
  Assert-HealthEntry ($Document.files.'candidate-payload.json'.sha256 -ceq '658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69') 'health-package-payload-pin'
  Assert-HealthEntry ($Document.release_gate -ceq 'HOLD' -and $Document.promotion_allowed -is [bool] -and -not $Document.promotion_allowed) 'health-package-gates'
 }
-function Invoke-HealthEntryChild([string]$Executable,[string[]]$Arguments,[string]$Directory,[scriptblock]$OnTick){
+function Get-HealthEntryBudget($Request){
+ Assert-HealthEntry ($Request.duration_seconds -is [int]) 'health-request-duration-type'
+ if($Request.schema -ceq 'sfl-health-diagnostic-request-v1'){
+  Assert-HealthEntry ($Request.duration_seconds -eq 6) 'health-request-identity-budget'
+  return @{seconds=600;scope='SIX_SECOND_CAPTURE_NOT_FIELD_PERFORMANCE'}
+ }
+ Assert-HealthEntry ($Request.schema -ceq 'sfl-health-outlier-request-v1' -and $Request.duration_seconds -eq 900) 'health-request-identity-budget'
+ return @{seconds=1500;scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE'}
+}
+function Invoke-HealthEntryChild([string]$Executable,[string[]]$Arguments,[string]$Directory,[scriptblock]$OnTick,[ValidateRange(1,1500)][int]$TimeoutSeconds=600){
  # The callback starts the coordinator from this outside-job administrator.
  # Neither the application nor that coordinator joins the collection job.
  Initialize-RunNative
@@ -90,7 +99,7 @@ function Invoke-HealthEntryChild([string]$Executable,[string[]]$Arguments,[strin
   $child=[SflOwnedRun]::new($Executable,$Arguments,$block,$Directory,($Directory+'\stdout.log'),($Directory+'\stderr.log'))
   $record.pid=$child.Pid;$record.created_suspended=$true;$record.job_assigned_before_resume=$true
   while(-not $child.Wait(50)){
-   Assert-HealthEntry ($clock.Elapsed.TotalSeconds -lt 600) 'health-outer-deadline'
+   Assert-HealthEntry ($clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) 'health-outer-deadline'
    foreach($name in @('stdout.log','stderr.log')){Assert-HealthEntry (([IO.FileInfo]::new($Directory+'\'+$name)).Length -le 16MB) 'health-child-log-budget'}
    & $OnTick $child
   }
@@ -98,8 +107,9 @@ function Invoke-HealthEntryChild([string]$Executable,[string[]]$Arguments,[strin
   # Job accounting may lag the root's terminal signal. Preserve both observations;
   # bounded natural drainage never turns a live descendant into a passing result.
   $drain=[Diagnostics.Stopwatch]::StartNew()
-  while($child.Accounting()[1] -ne 0 -and $drain.Elapsed.TotalSeconds -lt 2){[Threading.Thread]::Sleep(25)}
+  while($child.Accounting()[1] -ne 0 -and $drain.Elapsed.TotalSeconds -lt 2 -and $clock.Elapsed.TotalSeconds -lt $TimeoutSeconds){[Threading.Thread]::Sleep(25)}
   $record.natural_drain_ms=$drain.ElapsedMilliseconds;$record.job_before_cleanup=$child.Accounting()
+  Assert-HealthEntry ($clock.Elapsed.TotalSeconds -lt $TimeoutSeconds) 'health-outer-deadline'
   Assert-HealthEntry ($record.job_before_cleanup[1] -eq 0) 'health-owned-descendants-remain'
   if($record.actual_exit_code -eq 0){$record.status='PASS'}
  }catch{$record.errors+=$_.Exception.Message}
@@ -156,7 +166,8 @@ try{
  $request=[IO.File]::Open((Get-HealthEntryPath $RequestPath),'Open','Read','Read');$held.Add($request)
  Assert-HealthEntry ($request.Length -gt 0 -and $request.Length -le 64KB -and (Get-HealthEntryHash $request) -ceq $ExpectedRequestSha256) 'health-request-pin'
  $requestValue=Read-HealthEntryStream $request
- Assert-HealthEntry ($requestValue.schema -ceq 'sfl-health-diagnostic-request-v1' -and $requestValue.candidate_commit -ceq $document.candidate_commit -and $requestValue.signature_policy -ceq 'UNSIGNED_INTERNAL' -and $requestValue.duration_seconds -is [int] -and $requestValue.duration_seconds -eq 6) 'health-request-identity-budget'
+ Assert-HealthEntry ($requestValue.candidate_commit -ceq $document.candidate_commit -and $requestValue.signature_policy -ceq 'UNSIGNED_INTERNAL') 'health-request-identity-budget'
+ $budget=Get-HealthEntryBudget $requestValue;$record.scope=$budget.scope
  $configuration=[IO.File]::Open((Get-HealthEntryPath $requestValue.spec.configuration_reference),'Open','Read','Read');$held.Add($configuration)
  Assert-HealthEntry ($configuration.Length -gt 0 -and $configuration.Length -le 1MB -and (Get-HealthEntryHash $configuration) -ceq $requestValue.spec.configuration_reference_sha256) 'health-configuration-reference-pin'
  $payload=[IO.File]::Open((Get-HealthEntryPath $requestValue.spec.reference),'Open','Read','Read');$held.Add($payload)
@@ -182,7 +193,8 @@ try{
   $entryState.record.coordinator_start=@{pid=$coordinator.process.Id;created_filetime=$coordinator.process.StartTime.ToUniversalTime().ToFileTimeUtc().ToString();contract_sha256=$contractSha;ready_sha256=$readySha;owned_worker=$member[0]}
   Write-RunJson ($resultRoot+'\coordinator-start.json') $entryState.record.coordinator_start
  }
- $record.child=Invoke-HealthEntryChild ($archive+'\health_diagnostic_runner.exe') @('--output-root',$resultRoot,'--request-sha256',$ExpectedRequestSha256,'--trace-package-sha256',$traceSha) $resultRoot $tick
+ $record.child=Invoke-HealthEntryChild ($archive+'\health_diagnostic_runner.exe') @('--output-root',$resultRoot,'--request-sha256',$ExpectedRequestSha256,'--trace-package-sha256',$traceSha) $resultRoot $tick $budget.seconds
+ Write-RunJson ($resultRoot+'\native-child.json') $record.child
 }catch{$record.errors+=$_.Exception.Message}
 finally{
  if($coordinator.process){

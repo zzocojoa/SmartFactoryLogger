@@ -38,10 +38,14 @@ def validate_duration(duration):
                     and 0 < duration <= 30, 'diagnostic-duration-budget')
 
 
-def collect(spec, output, duration, stop, notify, *, _trace=None):
+def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False):
     """Run only inside the owned worker; the supervisor bounds blocking calls."""
     spec.validate()
-    validate_duration(duration)
+    if _outlier:
+        binding.require(type(_outlier) is bool and type(duration) is int and duration == 900
+                        and _trace is not None, 'outlier-fixed-bounded-trace-required')
+    else:
+        validate_duration(duration)
     folder = observation.http._prepare_output(Path(output) / 'evidence')
     files = {}
     result = dict(schema='sfl-health-collection-v1', collection_status='INCOMPLETE',
@@ -50,6 +54,9 @@ def collect(spec, output, duration, stop, notify, *, _trace=None):
                   release_gate='HOLD', promotion_allowed=False,
                   started_ns=time.perf_counter_ns(), duration_seconds=duration,
                   scope='READ_ONLY_BOUND_REQUESTS_NOT_FIELD_PERFORMANCE')
+    if _outlier:
+        result.update(scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE', trigger_status='NOT_EVALUATED',
+                      trigger_threshold_ms=200, trigger=None)
 
     def save(name, value):
         files[name] = observation.write_json(folder / name, value)
@@ -105,8 +112,23 @@ def collect(spec, output, duration, stop, notify, *, _trace=None):
                 result['samples'].append(dict(file=name, status=sample['status'], probe_id=sample.get('probe_id')))
                 binding.require(sample['status'] == 'REQUEST_AND_RUNTIME_BOUND', 'diagnostic-request-not-bound')
                 previous_finish = time.perf_counter_ns()
-            if stop.wait(max(0, (origin + round(duration * 1e9) - time.perf_counter_ns()) / 1e9)):
+                if _outlier and sample['health_record']['client_request_and_body_ms'] > 200:
+                    result.update(trigger_status='OUTLIER_CAPTURED_REQUIRES_CORRELATION',
+                        trigger=dict(sequence=index, file=name, probe_id=sample['probe_id'],
+                            client_request_and_body_ms=sample['health_record']['client_request_and_body_ms'],
+                            response_finished_ns=sample['health_record']['response_finished_ns'],
+                            decision_ns=previous_finish))
+                    break
+            triggered = _outlier and result['trigger'] is not None
+            if not triggered and stop.wait(max(0, (origin + round(duration * 1e9) - time.perf_counter_ns()) / 1e9)):
                 raise InterruptedError('diagnostic-stop-requested')
+            if _outlier:
+                if not triggered:
+                    result['trigger_status'] = 'NO_OUTLIER_OBSERVED'
+                save('trigger.json', dict(status=result['trigger_status'], threshold_ms=200,
+                    trigger=result['trigger'], probes=len(result['samples']), expected_slots=expected_slots,
+                    origin_ns=origin, finished_ns=time.perf_counter_ns(),
+                    release_gate='HOLD', promotion_allowed=False))
             notify(dict(phase='finalizing', origin_ns=origin))
             if _trace is not None:
                 save('trace-completion.json', _trace.finish(dict(files), stop))
@@ -142,7 +164,7 @@ def collect(spec, output, duration, stop, notify, *, _trace=None):
     result.update(stop_requested=stop.is_set(), finished_ns=time.perf_counter_ns())
     save('summary.json', result)
     observation.write_json(folder / 'manifest.json', dict(files=files))
-    result['evidence_manifest'] = observation.verify_component_manifest(folder, 32)
+    result['evidence_manifest'] = observation.verify_component_manifest(folder, 512 if _outlier else 32)
     return result
 
 

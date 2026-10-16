@@ -34,7 +34,7 @@ class CollectionTests(unittest.TestCase):
             configuration_reference_sha256='a'*64, backend_created_filetime=1000)
 
     def run_collection(self, *, configuration=None, control=None, probes=None, native=None,
-                       closeout_error=False, stop=None, duration=.01, trace=None):
+                       closeout_error=False, stop=None, duration=.01, trace=None, outlier=False):
         @contextmanager
         def reference(*args, **kwargs):
             yield {}
@@ -58,7 +58,8 @@ class CollectionTests(unittest.TestCase):
                 side_effect=configuration or [{'configuration_status': 'PASS'}]*2))
             call = stack.enter_context(patch.object(collection.diagnostic, 'capture_health_probe',
                 side_effect=probes or [probe]))
-            result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append, _trace=trace)
+            result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append,
+                                        _trace=trace, _outlier=outlier)
         self.assertEqual(result['field_gate'], 'NOT_EVALUATED')
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
@@ -162,6 +163,59 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual((result['collection_status'], count, phases), ('BOUND_WINDOW_CAPTURED', 1, ['begin', 'finish']))
         for name in ('trace-binding.json', 'trace-completion.json'):
             self.assertTrue((self.folder/'evidence'/name).is_file())
+
+    def run_outlier(self, latencies, *, bound=True):
+        clock = {'ns': 1_000_000_000, 'stop': False}
+        def wait(seconds):
+            clock['ns'] += round(seconds * 1e9)
+            return clock['stop']
+        stop = SimpleNamespace(wait=wait, is_set=lambda: clock['stop'], set=lambda: clock.update(stop=True))
+        values = iter(latencies)
+        def probe(*args, **kwargs):
+            elapsed = next(values)
+            clock['ns'] += round(elapsed * 1e6)
+            return dict(status='REQUEST_AND_RUNTIME_BOUND' if bound else 'NOT_BOUND', probe_id=kwargs['probe_id'],
+                        health_record=dict(client_request_and_body_ms=elapsed, response_finished_ns=clock['ns']))
+        phases = []
+        trace = SimpleNamespace(begin=lambda *args: {}, finish=lambda *args: phases.append('finish') or {},
+                                abort=lambda *args: phases.append('abort'))
+        with patch.object(collection.time, 'perf_counter_ns', lambda: clock['ns']):
+            result, events, count = self.run_collection(duration=900, stop=stop, trace=trace,
+                                                       outlier=True, probes=probe)
+        return result, count, phases
+
+    def test_outlier_uses_strict_threshold_and_finishes_after_first_bound_outlier(self):
+        result, count, phases = self.run_outlier([200, 200.01, 999])
+        self.assertEqual((count, phases), (2, ['finish']))
+        self.assertEqual(result['collection_status'], 'BOUND_WINDOW_CAPTURED')
+        self.assertEqual(result['trigger_status'], 'OUTLIER_CAPTURED_REQUIRES_CORRELATION')
+        self.assertEqual(result['trigger']['sequence'], 1)
+        self.assertLess(result['finished_ns'] - result['origin_ns'], 3_000_000_000)
+        trigger = json.loads((self.folder/'evidence/trigger.json').read_bytes())
+        self.assertEqual((trigger['probes'], trigger['expected_slots']), (2, 450))
+        self.assertEqual(trigger['trigger'], result['trigger'])
+
+    def test_no_outlier_preserves_all_450_probes_and_does_not_claim_performance_pass(self):
+        result, count, phases = self.run_outlier([10] * 450)
+        self.assertEqual((count, phases), (450, ['finish']))
+        self.assertEqual(result['trigger_status'], 'NO_OUTLIER_OBSERVED')
+        self.assertEqual(result['collection_status'], 'BOUND_WINDOW_CAPTURED')
+        self.assertIsNone(result['trigger'])
+        self.assertEqual(result['finished_ns'] - result['origin_ns'], 900_000_000_000)
+        self.assertEqual(len(list((self.folder/'evidence').glob('probe-*.json'))), 450)
+
+    def test_slow_unbound_probe_aborts_without_a_valid_outlier_claim(self):
+        result, count, phases = self.run_outlier([250], bound=False)
+        self.assertEqual((result['collection_status'], count, phases), ('INCOMPLETE', 1, ['abort']))
+        self.assertEqual(result['trigger_status'], 'NOT_EVALUATED')
+        self.assertIsNone(result['trigger'])
+
+    def test_outlier_mode_cannot_use_untraced_or_arbitrary_duration_collection(self):
+        for seconds in (6, 899, 901, True, 900.0):
+            with self.assertRaisesRegex(ValueError, 'outlier-fixed-bounded-trace-required'):
+                self.run_collection(duration=seconds, trace=object(), outlier=True)
+        with self.assertRaisesRegex(ValueError, 'outlier-fixed-bounded-trace-required'):
+            self.run_collection(duration=900, outlier=True)
 
 
 if __name__ == '__main__':

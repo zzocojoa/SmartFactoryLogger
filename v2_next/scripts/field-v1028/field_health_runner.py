@@ -1,4 +1,4 @@
-"""Frozen six-second 1.0.29 health/trace collector for the protected launcher.
+"""Frozen bounded 1.0.29 health/trace collector for the protected launcher.
 
 Inputs must already be archived by the launcher. This child owns only collection
 workers; the independent administrator coordinator owns its unique WPR session.
@@ -22,17 +22,19 @@ from field_resource_sampling import ProcessIdentity, error_record
 
 
 SCHEMA = 'sfl-health-diagnostic-request-v1'
+OUTLIER_SCHEMA = 'sfl-health-outlier-request-v1'
 PAYLOAD_SHA256 = '658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
 
 
 def validate_request(value):
     binding.require(isinstance(value, dict) and set(value) == {
         'schema', 'candidate_commit', 'signature_policy', 'duration_seconds', 'spec'}, 'health-request-members')
-    binding.require(value['schema'] == SCHEMA
+    binding.require(value['schema'] in (SCHEMA, OUTLIER_SCHEMA)
                     and value['candidate_commit'] == binding.CANDIDATE_1029.commit
                     and value['signature_policy'] == 'UNSIGNED_INTERNAL', 'health-request-identity-policy')
-    binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] == 6,
-                    'health-request-fixed-six-seconds')
+    policy = trace.capture_policy(value['schema'] == OUTLIER_SCHEMA)
+    binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] == policy['duration'],
+                    'health-request-fixed-duration')
     data = value['spec']
     spec_fields = {f.name for f in fields(collection.HealthCollectionSpec)}
     binding.require(isinstance(data, dict) and set(data) in (spec_fields, spec_fields - {'candidate_commit'}),
@@ -92,6 +94,10 @@ def run(output_root, request_sha256, trace_package_sha256):
 
             request = hold('request.json', request_sha256, 65536)
             data = validate_request(request)
+            outlier = request['schema'] == OUTLIER_SCHEMA
+            policy = trace.capture_policy(outlier)
+            if outlier:
+                result.update(mode='health-outlier-trace', scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
             hold('candidate-payload.json', PAYLOAD_SHA256, 1024**2)
             hold('configuration.json', data['configuration_reference_sha256'], 1024**2)
             hold('trace/manifest.json', trace_package_sha256, 65536)
@@ -99,13 +105,14 @@ def run(output_root, request_sha256, trace_package_sha256):
             result['archived_inputs'] = {name: fact for name, (_, fact) in archived.items()}
             channel = session/'trace-channel'
             channel.mkdir()
-            contract = dict(schema='sfl-health-trace-contract-v1', scope=trace.SCOPE, run_id=uuid4().hex,
+            contract = dict(schema=policy['contract_schema'], scope=policy['scope'], run_id=uuid4().hex,
                 channel_path=str(channel), package_sha256=trace_package_sha256, backend_pid=spec.backend.pid,
                 backend_created_filetime=spec.backend_created_filetime, main_pid=spec.main.pid,
-                duration_seconds=6, guard_seconds=30, release_gate='HOLD', promotion_allowed=False)
+                duration_seconds=policy['duration'], guard_seconds=policy['guard'], release_gate='HOLD', promotion_allowed=False)
             fact = observation.write_json(channel/'contract.json', contract)
             selected = trace.TracedHealthCollectionSpec(**{f.name: getattr(spec, f.name) for f in fields(spec)},
-                trace_contract_path=str(channel/'contract.json'), trace_contract_sha256=fact['sha256'])
+                trace_contract_path=str(channel/'contract.json'), trace_contract_sha256=fact['sha256'],
+                outlier_capture=outlier)
             result['phase'] = trace.supervise(selected, session/'collection')
             binding.require(result['phase'].get('release_gate') == 'HOLD'
                             and result['phase'].get('promotion_allowed') is False, 'health-phase-gates')

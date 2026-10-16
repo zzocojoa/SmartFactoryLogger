@@ -10,21 +10,30 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 
+function Get-HealthTracePolicy([string]$Scope){
+ if($Scope -ceq 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'){
+  return @{contract_schema='sfl-health-trace-contract-v1';lease_schema='sfl-health-trace-lease-v1';duration=6;guard=30}
+ }
+ Assert-Trace ($Scope -ceq 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC') 'health-trace-scope'
+ return @{contract_schema='sfl-health-outlier-contract-v1';lease_schema='sfl-health-outlier-lease-v1';duration=900;guard=960}
+}
 function Assert-HealthTraceContract($Contract,[string]$Channel,[string]$PackageSha){
- Assert-Trace ($Contract.schema -ceq 'sfl-health-trace-contract-v1' -and $Contract.scope -ceq 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC') 'health-trace-contract-schema'
+ $policy=Get-HealthTracePolicy $Contract.scope
+ Assert-Trace ($Contract.schema -ceq $policy.contract_schema) 'health-trace-contract-schema'
  Assert-Trace (@($Contract.PSObject.Properties).Count -eq 12) 'health-trace-contract-members'
  Assert-Trace ($Contract.run_id -cmatch '^[0-9a-f]{32}$' -and $Contract.channel_path -ieq $Channel -and [IO.Path]::GetFileName($Channel) -ceq 'trace-channel') 'health-trace-channel-run'
  Assert-Trace ($Contract.package_sha256 -ceq $PackageSha) 'health-trace-package-binding'
- Assert-Trace ($Contract.duration_seconds -is [int] -and $Contract.duration_seconds -eq 6 -and $Contract.guard_seconds -is [int] -and $Contract.guard_seconds -eq 30) 'health-trace-contract-budget'
+ Assert-Trace ($Contract.duration_seconds -is [int] -and $Contract.duration_seconds -eq $policy.duration -and $Contract.guard_seconds -is [int] -and $Contract.guard_seconds -eq $policy.guard) 'health-trace-contract-budget'
  Assert-Trace ($Contract.backend_pid -is [int] -and $Contract.backend_pid -gt 0 -and $Contract.main_pid -is [int] -and $Contract.main_pid -gt 0 -and $Contract.main_pid -ne $Contract.backend_pid) 'health-trace-app-pids'
  Assert-Trace ($Contract.backend_created_filetime -is [long] -and $Contract.backend_created_filetime -gt 0) 'health-trace-backend-generation'
  Assert-Trace ($Contract.release_gate -ceq 'HOLD' -and $Contract.promotion_allowed -is [bool] -and -not $Contract.promotion_allowed) 'health-trace-contract-gates'
 }
 function Assert-HealthTraceLease($Lease,[string]$Directory,[string]$PackageSha){
- Assert-Trace ($Lease.schema -ceq 'sfl-health-trace-lease-v1' -and $Lease.scope -ceq 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC') 'health-trace-lease-schema'
+ $policy=Get-HealthTracePolicy $Lease.scope
+ Assert-Trace ($Lease.schema -ceq $policy.lease_schema) 'health-trace-lease-schema'
  Assert-Trace ($Lease.instance -cmatch '^SFLTrace_[0-9a-f]{32}$' -and $Lease.run_id -cmatch '^[0-9a-f]{32}$') 'health-trace-lease-id'
  Assert-Trace ($Lease.run_path -ieq $Directory -and $Lease.parent_pid -is [int] -and $Lease.parent_pid -gt 0 -and $Lease.parent_created_filetime -cmatch '^[0-9]{17,20}$') 'health-trace-parent'
- Assert-Trace ($Lease.guard_seconds -is [int] -and $Lease.guard_seconds -eq 30 -and $Lease.capture_seconds -is [int] -and $Lease.capture_seconds -eq 6 -and $Lease.stop_timeout_seconds -is [int] -and $Lease.stop_timeout_seconds -eq 60) 'health-trace-lease-budget'
+ Assert-Trace ($Lease.guard_seconds -is [int] -and $Lease.guard_seconds -eq $policy.guard -and $Lease.capture_seconds -is [int] -and $Lease.capture_seconds -eq $policy.duration -and $Lease.stop_timeout_seconds -is [int] -and $Lease.stop_timeout_seconds -eq 60) 'health-trace-lease-budget'
  Assert-Trace ($Lease.contract_sha256 -cmatch '^[0-9a-f]{64}$' -and $Lease.package_sha256 -ceq $PackageSha) 'health-trace-lease-pins'
  Assert-Trace ($Lease.profile_sha256 -ceq '603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486') 'health-trace-profile-pin'
  Assert-Trace ($Lease.release_gate -ceq 'HOLD' -and $Lease.promotion_allowed -is [bool] -and -not $Lease.promotion_allowed) 'health-trace-lease-gates'
@@ -94,6 +103,7 @@ try{
   $stream=[IO.File]::Open($requestPath,'Open','Read','Read');$held.Add($stream)
   Assert-Trace ($stream.Length -le 64KB -and (Get-TraceHash $stream) -ceq $ExpectedContractSha256) 'health-trace-contract-pin'
   $contract=Read-TraceJson $requestPath;Assert-HealthTraceContract $contract $channel $ExpectedManifestSha256
+  $policy=Get-HealthTracePolicy $contract.scope;$record.scope=$contract.scope
   $stream=[IO.File]::Open(($channel+'\collector-ready.json'),'Open','Read','Read');$held.Add($stream)
   Assert-Trace ($stream.Length -le 64KB -and (Get-TraceHash $stream) -ceq $ExpectedReadySha256) 'health-trace-ready-pin'
   $ready=Read-TraceJson ($channel+'\collector-ready.json');Assert-HealthTraceReady $ready $contract $ExpectedContractSha256
@@ -111,7 +121,7 @@ try{
   Assert-Trace (-not [IO.Directory]::Exists($directory) -and -not [IO.File]::Exists($directory)) 'health-trace-new-run'
   [void][IO.Directory]::CreateDirectory($directory,(New-RunAcl $identity.User.Value));Assert-RunAcl $directory $identity.User.Value
   foreach($key in @('APPDATA','LOCALAPPDATA','TEMP','TMP')){[void][IO.Directory]::CreateDirectory(($directory+'\'+$key))}
-  $lease=[ordered]@{schema='sfl-health-trace-lease-v1';scope=$contract.scope;run_id=$contract.run_id;instance='SFLTrace_'+[Guid]::NewGuid().ToString('N');run_path=$directory;parent_pid=$PID;parent_created_filetime=[Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToFileTimeUtc().ToString();guard_seconds=30;capture_seconds=6;stop_timeout_seconds=60;contract_sha256=$ExpectedContractSha256;package_sha256=$ExpectedManifestSha256;profile_sha256=$manifest.files.'SFLThreadScheduling.wprp'.sha256;release_gate='HOLD';promotion_allowed=$false}
+  $lease=[ordered]@{schema=$policy.lease_schema;scope=$contract.scope;run_id=$contract.run_id;instance='SFLTrace_'+[Guid]::NewGuid().ToString('N');run_path=$directory;parent_pid=$PID;parent_created_filetime=[Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToFileTimeUtc().ToString();guard_seconds=$policy.guard;capture_seconds=$policy.duration;stop_timeout_seconds=60;contract_sha256=$ExpectedContractSha256;package_sha256=$ExpectedManifestSha256;profile_sha256=$manifest.files.'SFLThreadScheduling.wprp'.sha256;release_gate='HOLD';promotion_allowed=$false}
   Assert-HealthTraceLease ([pscustomobject]$lease) $directory $ExpectedManifestSha256
   Write-TraceJson ($directory+'\lease.json') $lease
   $stream=[IO.File]::Open(($directory+'\lease.json'),'Open','Read','Read');$held.Add($stream);$leaseSha=Get-TraceHash $stream
@@ -128,7 +138,7 @@ try{
   $go=@{schema='sfl-health-trace-go-v1';collector_ready_sha256=$ExpectedReadySha256;worker=$ready.worker;trace_run_path=$directory;lease_sha256=$leaseSha;trace_ready_sha256=(Get-RunFact ($directory+'\ready.json')).sha256;instance=$lease.instance;guard=$guardIdentity}
   foreach($key in $common.Keys){$go[$key]=$common[$key]};Write-HealthTraceMessage $channel 'capture-go.json' $go
   $clock.Restart()
-  while(-not [IO.File]::Exists($channel+'\capture-complete.json') -and -not [IO.File]::Exists($channel+'\capture-abort.json') -and $collector.Alive() -and $backend.Alive() -and -not $guard.HasExited -and $clock.Elapsed.TotalSeconds -lt 15){[Threading.Thread]::Sleep(25)}
+  while(-not [IO.File]::Exists($channel+'\capture-complete.json') -and -not [IO.File]::Exists($channel+'\capture-abort.json') -and $collector.Alive() -and $backend.Alive() -and -not $guard.HasExited -and $clock.Elapsed.TotalSeconds -lt ($policy.duration+9)){[Threading.Thread]::Sleep(25)}
   Assert-Trace ([IO.File]::Exists($channel+'\capture-complete.json') -and -not [IO.File]::Exists($channel+'\capture-abort.json') -and $collector.Alive() -and $backend.Alive() -and -not $guard.HasExited) 'health-trace-window-incomplete'
   $window=Read-TraceJson ($channel+'\capture-complete.json');$windowSha=(Get-RunFact ($channel+'\capture-complete.json')).sha256
   Assert-Trace ($window.schema -ceq 'sfl-health-trace-window-v1' -and $window.run_id -ceq $contract.run_id -and $window.contract_sha256 -ceq $ExpectedContractSha256 -and $window.collector_ready_sha256 -ceq $ExpectedReadySha256 -and $window.worker.pid -eq $ready.worker.pid -and $window.worker.created_filetime -eq $ready.worker.created_filetime) 'health-trace-window-binding'

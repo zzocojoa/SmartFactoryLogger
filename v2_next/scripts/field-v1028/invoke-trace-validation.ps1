@@ -46,7 +46,9 @@ function Initialize-TraceHandles {
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 public sealed class SflTraceParent : IDisposable {
     [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint a,bool i,uint p);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr h,out long c,out long e,out long k,out long u);
@@ -54,9 +56,45 @@ public sealed class SflTraceParent : IDisposable {
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr h,uint ms);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr h);
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct SI {
+        public int cb;public string reserved,desktop,title;public uint x,y,cx,cy,xChars,yChars,fill,flags;
+        public ushort show,reservedBytes;public IntPtr reservedPointer,input,output,error;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct PI {public IntPtr process,thread;public uint pid,tid;}
+    [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode)] static extern bool CreateProcessW(string app,StringBuilder command,IntPtr pa,IntPtr ta,bool inherit,uint flags,IntPtr env,string cwd,ref SI si,out PI pi);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr process,uint code);
     IntPtr handle;
     static void Check(bool ok){if(!ok)throw new Win32Exception(Marshal.GetLastWin32Error());}
     public static bool CurrentInJob(){bool member;Check(IsProcessInJob(GetCurrentProcess(),IntPtr.Zero,out member));return member;}
+    public static Process StartIndependent(string encoded,string directory){
+        if(!Environment.Is64BitProcess || String.IsNullOrEmpty(encoded) || encoded.Length>24000 ||
+           !System.Text.RegularExpressions.Regex.IsMatch(encoded,@"\A[A-Za-z0-9+/]+={0,2}\z"))throw new ArgumentException("independent-native-command");
+        string exe=System.IO.Path.Combine(Environment.SystemDirectory,@"WindowsPowerShell\v1.0\powershell.exe");
+        if(!System.IO.Directory.Exists(directory))throw new ArgumentException("independent-working-directory");
+        SI si=new SI();si.cb=Marshal.SizeOf(typeof(SI));PI pi;
+        // The OS must explicitly allow job breakaway. Never alter ancestor limits.
+        Check(CreateProcessW(exe,new StringBuilder("\""+exe+"\" -NoLogo -NoProfile -NonInteractive -EncodedCommand "+encoded),
+              IntPtr.Zero,IntPtr.Zero,false,0x09000404,IntPtr.Zero,directory,ref si,out pi));
+        Process child=null;bool resumed=false;
+        try{
+            bool member;Check(IsProcessInJob(pi.process,IntPtr.Zero,out member));
+            if(member)throw new InvalidOperationException("independent-child-still-in-job");
+            child=Process.GetProcessById((int)pi.pid);IntPtr retained=child.Handle;
+            if(ResumeThread(pi.thread)==0xffffffff)throw new Win32Exception(Marshal.GetLastWin32Error());
+            resumed=true;return child;
+        }finally{
+            try{
+                if(!resumed){
+                    Check(TerminateProcess(pi.process,1));
+                    if(WaitForSingleObject(pi.process,10000)!=0)throw new InvalidOperationException("independent-unresumed-child-cleanup-unconfirmed");
+                }
+            }finally{
+                if(!resumed && child!=null)child.Dispose();
+                CloseHandle(pi.thread);CloseHandle(pi.process);
+            }
+        }
+    }
     public static bool GenerationAlive(uint pid,long created){
         IntPtr h=OpenProcess(0x101000,false,pid);
         if(h==IntPtr.Zero){int error=Marshal.GetLastWin32Error();if(error==87)return false;throw new Win32Exception(error);}

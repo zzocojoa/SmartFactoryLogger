@@ -1,4 +1,4 @@
-"""File handshake for one six-second health capture and an independent WPR owner.
+"""File handshake for a bounded health capture and an independent WPR owner.
 
 Local integration API only. The outer administrator coordinator is separate from
 the owned collector job; this consumer never launches WPR or controls the app.
@@ -21,6 +21,15 @@ from field_host_sampling import WindowsProcessReader
 
 PROFILE_SHA256 = '603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486'
 SCOPE = 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'
+OUTLIER_SCOPE = 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC'
+
+
+def capture_policy(outlier):
+    binding.require(type(outlier) is bool, 'trace-outlier-mode-type')
+    return dict(scope=OUTLIER_SCOPE if outlier else SCOPE,
+                contract_schema='sfl-health-outlier-contract-v1' if outlier else 'sfl-health-trace-contract-v1',
+                lease_schema='sfl-health-outlier-lease-v1' if outlier else 'sfl-health-trace-lease-v1',
+                duration=900 if outlier else 6, guard=960 if outlier else 30)
 
 
 def digest(value):
@@ -63,17 +72,21 @@ def generation_alive(pid, created):
 class TracedHealthCollectionSpec(collection.HealthCollectionSpec):
     trace_contract_path: str = ''
     trace_contract_sha256: str = ''
+    outlier_capture: bool = False
 
     def validate(self):
         super().validate()
         binding.plain_path(self.trace_contract_path)
         binding.require(digest(self.trace_contract_sha256), 'trace-contract-sha256')
+        capture_policy(self.outlier_capture)
 
 
 class HealthTraceHandshake:
     def __init__(self, spec, duration, evidence_directory):
         spec.validate()
-        binding.require(duration == 6 and type(duration) in (int, float), 'trace-capture-fixed-six-seconds')
+        self.policy = capture_policy(spec.outlier_capture)
+        binding.require(duration == self.policy['duration'] and type(duration) in (int, float),
+                        'trace-capture-fixed-duration')
         self.spec = spec
         self.path = binding.plain_path(spec.trace_contract_path)
         self.folder = self.path.parent
@@ -96,12 +109,14 @@ class HealthTraceHandshake:
             binding.require(set(c) == {'schema', 'scope', 'run_id', 'channel_path', 'package_sha256',
                 'backend_pid', 'backend_created_filetime', 'main_pid', 'duration_seconds', 'guard_seconds',
                 'release_gate', 'promotion_allowed'}, 'trace-contract-members')
-            binding.require(c['schema'] == 'sfl-health-trace-contract-v1' and c['scope'] == SCOPE, 'trace-contract-schema')
+            binding.require(c['schema'] == self.policy['contract_schema'] and c['scope'] == self.policy['scope'],
+                            'trace-contract-schema')
             binding.require(isinstance(c['run_id'], str) and re.fullmatch('[0-9a-f]{32}', c['run_id']), 'trace-run-id')
             binding.require(binding.plain_path(c['channel_path']) == self.folder and digest(c['package_sha256']),
                             'trace-contract-path-package')
-            binding.require(type(c['duration_seconds']) is int and c['duration_seconds'] == 6
-                            and type(c['guard_seconds']) is int and c['guard_seconds'] == 30, 'trace-contract-budget')
+            binding.require(type(c['duration_seconds']) is int and c['duration_seconds'] == self.policy['duration']
+                            and type(c['guard_seconds']) is int and c['guard_seconds'] == self.policy['guard'],
+                            'trace-contract-budget')
             binding.require(type(c['main_pid']) is int and c['main_pid'] == self.spec.main.pid
                             and type(c['backend_pid']) is int and c['backend_pid'] == self.spec.backend.pid
                             and type(c['backend_created_filetime']) is int
@@ -118,7 +133,7 @@ class HealthTraceHandshake:
 
     def common(self):
         return dict(run_id=self.contract['run_id'], contract_sha256=self.spec.trace_contract_sha256,
-                    scope=SCOPE, release_gate='HOLD', promotion_allowed=False)
+                    scope=self.policy['scope'], release_gate='HOLD', promotion_allowed=False)
 
     def wait(self, name, stop, seconds):
         deadline = time.perf_counter() + seconds
@@ -154,13 +169,14 @@ class HealthTraceHandshake:
         binding.require(re.fullmatch('T[0-9a-f]{12}', directory.name) and directory.parent.name == 'SmartFactory',
                         'trace-run-path')
         lease, lease_fact = read_locked(directory/'lease.json', go['lease_sha256'])
-        binding.require(lease['schema'] == 'sfl-health-trace-lease-v1' and lease['scope'] == SCOPE,
+        binding.require(lease['schema'] == self.policy['lease_schema'] and lease['scope'] == self.policy['scope'],
                         'trace-lease-schema')
         gates(lease)
         binding.require(lease['contract_sha256'] == self.spec.trace_contract_sha256
                         and lease['package_sha256'] == self.contract['package_sha256']
                         and lease['run_id'] == self.contract['run_id'] and lease['run_path'] == str(directory)
-                        and lease['guard_seconds'] == 30 and lease['capture_seconds'] == 6
+                        and lease['guard_seconds'] == self.policy['guard']
+                        and lease['capture_seconds'] == self.policy['duration']
                         and lease['stop_timeout_seconds'] == 60 and lease['profile_sha256'] == PROFILE_SHA256,
                         'trace-lease-contract')
         binding.require(all(type(lease[k]) is int for k in ('guard_seconds', 'capture_seconds', 'stop_timeout_seconds', 'parent_pid')),
@@ -223,7 +239,8 @@ def _worker_entry(spec, output, duration, stop, sender):
             try:
                 with HealthTraceHandshake(spec, duration, Path(output)/'evidence') as trace:
                     result = collection.collect(spec, output, duration, local_stop,
-                        lambda item: sender.send_bytes(json.dumps(item).encode()), _trace=trace)
+                        lambda item: sender.send_bytes(json.dumps(item).encode()), _trace=trace,
+                        _outlier=spec.outlier_capture)
             finally:
                 local_stop.close()
             fact = observation.write_json(Path(output)/'worker-result.json', result)
@@ -237,5 +254,6 @@ def _worker_entry(spec, output, duration, stop, sender):
 def supervise(spec, output, *, stop_event=None):
     binding.require(type(spec) is TracedHealthCollectionSpec, 'traced-diagnostic-spec-type')
     spec.validate()
-    return observation.supervise_observation(spec, output, duration_seconds=6,
+    return observation.supervise_observation(spec, output,
+        duration_seconds=capture_policy(spec.outlier_capture)['duration'],
         preparation_timeout=180, finalization_timeout=180, stop_event=stop_event, _worker_target=_worker_entry)

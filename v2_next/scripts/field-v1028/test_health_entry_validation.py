@@ -64,6 +64,15 @@ $changed=$document|ConvertTo-Json -Depth 5|ConvertFrom-Json;$changed.files|Add-M
 $rejected=$false;try{Assert-HealthEntryPackage $changed}catch{$rejected=$true};Check $rejected 'extra package member'
 @{status='PASS';accepted=1;rejected=8}|ConvertTo-Json
 ''')
+    run('request-budgets', r'''
+$short=Get-HealthEntryBudget @{schema='sfl-health-diagnostic-request-v1';duration_seconds=6}
+$long=Get-HealthEntryBudget @{schema='sfl-health-outlier-request-v1';duration_seconds=900}
+Check ($short.seconds -eq 600 -and $long.seconds -eq 1500 -and $long.scope -ceq 'OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE') 'request budgets'
+foreach($case in @(@('sfl-health-diagnostic-request-v1',900),@('sfl-health-outlier-request-v1',6),@('sfl-health-outlier-request-v1',901),@('sfl-health-outlier-request-v1',$true),@('other',900))){
+ $rejected=$false;try{[void](Get-HealthEntryBudget @{schema=$case[0];duration_seconds=$case[1]})}catch{$rejected=$true};Check $rejected 'mixed request accepted'
+}
+@{status='PASS';short_seconds=$short.seconds;long_seconds=$long.seconds;rejected=5}|ConvertTo-Json
+''')
     archive = root/'archive'
     archive.mkdir()
     run('archive-and-path', r'''
@@ -99,6 +108,13 @@ $result|ConvertTo-Json -Depth 10
         assert value['actual_exit_code'] == (0 if scenario == 'normal' else 1)
         if scenario != 'normal':
             assert value['errors'] == ['injected-callback-failure']
+    deadline_folder = root/'deadline'
+    deadline_folder.mkdir()
+    value = run('owned-deadline', r'''
+$result=Invoke-HealthEntryChild 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' @('-NoProfile','-NonInteractive','-Command','[Threading.Thread]::Sleep(5000)') DIRECTORY {} 1
+Check ($result.status -ceq 'FAIL' -and $result.termination_requested -and $result.job_after_cleanup[1] -eq 0 -and $result.errors -contains 'health-outer-deadline') 'bounded owned deadline'
+$result|ConvertTo-Json -Depth 10
+'''.replace('DIRECTORY', quote(deadline_folder)))
     for arch in ('System32', 'SysWOW64'):
         body = '& '+quote(source/'invoke-health-diagnostic.ps1')+" -PackageRoot 'unused' -ExpectedManifestSha256 '"+'a'*64
         body += "' -RequestPath 'unused' -ExpectedRequestSha256 '"+'b'*64+"' -OperatorSid 'S-1-5-21-1-2-3-1001'\nexit $LASTEXITCODE\n"
