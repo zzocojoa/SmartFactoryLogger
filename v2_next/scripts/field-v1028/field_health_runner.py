@@ -24,16 +24,18 @@ from field_resource_sampling import ProcessIdentity, error_record
 SCHEMA = 'sfl-health-diagnostic-request-v1'
 OUTLIER_SCHEMA = 'sfl-health-outlier-request-v1'
 CPU_OUTLIER_SCHEMA = 'sfl-health-cpu-outlier-request-v1'
+CPU_CONCURRENT_SCHEMA = 'sfl-health-cpu-concurrent-request-v1'
 
 
 def validate_request(value):
     binding.require(isinstance(value, dict) and set(value) == {
         'schema', 'candidate_commit', 'signature_policy', 'duration_seconds', 'spec'}, 'health-request-members')
     candidate = binding.candidate_from_commit(value['candidate_commit'])
-    binding.require(value['schema'] in (SCHEMA, OUTLIER_SCHEMA, CPU_OUTLIER_SCHEMA)
+    binding.require(value['schema'] in (SCHEMA, OUTLIER_SCHEMA, CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA)
                     and candidate in collection.HEALTH_CANDIDATES
                     and value['signature_policy'] == 'UNSIGNED_INTERNAL', 'health-request-identity-policy')
-    policy = trace.capture_policy(value['schema'] != SCHEMA, value['schema'] == CPU_OUTLIER_SCHEMA)
+    policy = trace.capture_policy(value['schema'] != SCHEMA,
+        value['schema'] in (CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA), value['schema'] == CPU_CONCURRENT_SCHEMA)
     binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] == policy['duration'],
                     'health-request-fixed-duration')
     data = value['spec']
@@ -96,12 +98,15 @@ def run(output_root, request_sha256, trace_package_sha256):
             request = hold('request.json', request_sha256, 65536)
             data = validate_request(request)
             outlier = request['schema'] != SCHEMA
-            cpu_samples = request['schema'] == CPU_OUTLIER_SCHEMA
-            policy = trace.capture_policy(outlier, cpu_samples)
+            cpu_samples = request['schema'] in (CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA)
+            concurrent_api = request['schema'] == CPU_CONCURRENT_SCHEMA
+            policy = trace.capture_policy(outlier, cpu_samples, concurrent_api)
             if outlier:
                 result.update(mode='health-outlier-trace', scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
             if cpu_samples:
                 result.update(mode='health-cpu-outlier-trace', scope='CPU_OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
+            if concurrent_api:
+                result.update(mode='health-cpu-concurrent-trace', scope='CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
             candidate = binding.candidate_from_commit(request['candidate_commit'])
             hold('candidate-payload.json', binding.candidate_reference_sha256(candidate), 1024**2)
             hold('configuration.json', data['configuration_reference_sha256'], 1024**2)
@@ -117,7 +122,7 @@ def run(output_root, request_sha256, trace_package_sha256):
             fact = observation.write_json(channel/'contract.json', contract)
             selected = trace.TracedHealthCollectionSpec(**{f.name: getattr(spec, f.name) for f in fields(spec)},
                 trace_contract_path=str(channel/'contract.json'), trace_contract_sha256=fact['sha256'],
-                outlier_capture=outlier, cpu_samples=cpu_samples)
+                outlier_capture=outlier, cpu_samples=cpu_samples, concurrent_api=concurrent_api)
             result['phase'] = trace.supervise(selected, session/'collection')
             binding.require(result['phase'].get('release_gate') == 'HOLD'
                             and result['phase'].get('promotion_allowed') is False, 'health-phase-gates')

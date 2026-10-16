@@ -24,11 +24,18 @@ CPU_PROFILE_SHA256 = '3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5
 SCOPE = 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'
 OUTLIER_SCOPE = 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC'
 CPU_OUTLIER_SCOPE = 'LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'
+CPU_CONCURRENT_SCOPE = 'LOCAL_HEALTH_CPU_CONCURRENT_TRACE_DIAGNOSTIC'
 
 
-def capture_policy(outlier, cpu_samples=False):
+def capture_policy(outlier, cpu_samples=False, concurrent_api=False):
     binding.require(type(outlier) is bool, 'trace-outlier-mode-type')
     binding.require(type(cpu_samples) is bool and (not cpu_samples or outlier), 'trace-cpu-outlier-mode')
+    binding.require(type(concurrent_api) is bool and (not concurrent_api or cpu_samples),
+                    'trace-concurrent-api-mode')
+    if concurrent_api:
+        return dict(scope=CPU_CONCURRENT_SCOPE, contract_schema='sfl-health-cpu-concurrent-contract-v1',
+                    lease_schema='sfl-health-cpu-concurrent-lease-v1', duration=900, guard=960,
+                    profile_sha256=CPU_PROFILE_SHA256)
     if cpu_samples:
         return dict(scope=CPU_OUTLIER_SCOPE, contract_schema='sfl-health-cpu-outlier-contract-v1',
                     lease_schema='sfl-health-cpu-outlier-lease-v1', duration=900, guard=960,
@@ -81,18 +88,19 @@ class TracedHealthCollectionSpec(collection.HealthCollectionSpec):
     trace_contract_sha256: str = ''
     outlier_capture: bool = False
     cpu_samples: bool = False
+    concurrent_api: bool = False
 
     def validate(self):
         super().validate()
         binding.plain_path(self.trace_contract_path)
         binding.require(digest(self.trace_contract_sha256), 'trace-contract-sha256')
-        capture_policy(self.outlier_capture, self.cpu_samples)
+        capture_policy(self.outlier_capture, self.cpu_samples, self.concurrent_api)
 
 
 class HealthTraceHandshake:
     def __init__(self, spec, duration, evidence_directory):
         spec.validate()
-        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples)
+        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api)
         binding.require(duration == self.policy['duration'] and type(duration) in (int, float),
                         'trace-capture-fixed-duration')
         self.spec = spec
@@ -249,7 +257,7 @@ def _worker_entry(spec, output, duration, stop, sender):
                 with HealthTraceHandshake(spec, duration, Path(output)/'evidence') as trace:
                     result = collection.collect(spec, output, duration, local_stop,
                         lambda item: sender.send_bytes(json.dumps(item).encode()), _trace=trace,
-                        _outlier=spec.outlier_capture)
+                        _outlier=spec.outlier_capture, _concurrent_api=spec.concurrent_api)
             finally:
                 local_stop.close()
             fact = observation.write_json(Path(output)/'worker-result.json', result)
@@ -264,5 +272,5 @@ def supervise(spec, output, *, stop_event=None):
     binding.require(type(spec) is TracedHealthCollectionSpec, 'traced-diagnostic-spec-type')
     spec.validate()
     return observation.supervise_observation(spec, output,
-        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples)['duration'],
+        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api)['duration'],
         preparation_timeout=180, finalization_timeout=180, stop_event=stop_event, _worker_target=_worker_entry)

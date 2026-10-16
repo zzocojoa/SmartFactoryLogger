@@ -13,6 +13,7 @@ import time
 from uuid import uuid4
 
 import field_configuration_binding as configuration
+from field_concurrent_api_load import ConcurrentApiLoad
 import field_generation_binding as generation
 import field_health_diagnostic as diagnostic
 import field_installation_binding as binding
@@ -41,7 +42,7 @@ def validate_duration(duration):
                     and 0 < duration <= 30, 'diagnostic-duration-budget')
 
 
-def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False):
+def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False, _concurrent_api=False):
     """Run only inside the owned worker; the supervisor bounds blocking calls."""
     spec.validate()
     if _outlier:
@@ -49,6 +50,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                         and _trace is not None, 'outlier-fixed-bounded-trace-required')
     else:
         validate_duration(duration)
+    binding.require(type(_concurrent_api) is bool and (not _concurrent_api or _outlier),
+                    'concurrent-api-requires-bounded-outlier-trace')
     folder = observation.http._prepare_output(Path(output) / 'evidence')
     files = {}
     result = dict(schema='sfl-health-collection-v1', collection_status='INCOMPLETE',
@@ -60,6 +63,18 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
     if _outlier:
         result.update(scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE', trigger_status='NOT_EVALUATED',
                       trigger_threshold_ms=200, trigger=None)
+    if _concurrent_api:
+        result.update(scope='CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE', concurrent_api=True)
+    companion = None
+    companion_finished = False
+
+    def finish_companion():
+        nonlocal companion_finished
+        # finish owns its bounded cleanup even if result publication raises.
+        companion_finished = True
+        receipt = companion.finish()
+        save('concurrent-api-closeout.json', receipt)
+        binding.require(receipt['load_status'] == 'CAPTURE_COMPLETE', 'concurrent-api-capture-incomplete')
 
     def save(name, value):
         files[name] = observation.write_json(folder / name, value)
@@ -92,7 +107,12 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
             require_running()
             if _trace is not None:
                 save('trace-binding.json', _trace.begin(dict(files), stop))
-            origin = time.perf_counter_ns() + 250_000_000
+            origin = time.perf_counter_ns() + (3_000_000_000 if _concurrent_api else 250_000_000)
+            if _concurrent_api:
+                companion = ConcurrentApiLoad(spec.port, Path(output)/'concurrent-api',
+                    duration_seconds=duration, origin_ns=origin)
+                save('concurrent-api-started.json', dict(origin_ns=origin,
+                    started=observation.file_fact(Path(output)/'concurrent-api/started.json')))
             expected_slots = math.ceil(duration / 2)
             result.update(origin_ns=origin, expected_slots=expected_slots, sessions=sessions)
             save('collection.json', dict(spec=asdict(spec), origin_ns=origin,
@@ -123,6 +143,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                             decision_ns=previous_finish))
                     break
             triggered = _outlier and result['trigger'] is not None
+            if companion is not None and triggered:
+                companion.request_stop()
             if not triggered and stop.wait(max(0, (origin + round(duration * 1e9) - time.perf_counter_ns()) / 1e9)):
                 raise InterruptedError('diagnostic-stop-requested')
             if _outlier:
@@ -135,6 +157,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
             notify(dict(phase='finalizing', origin_ns=origin))
             if _trace is not None:
                 save('trace-completion.json', _trace.finish(dict(files), stop))
+            if companion is not None:
+                finish_companion()
             final_control = generation.capture_generation(payload, spec.main, spec.backend, spec.port,
                 expected_identity=initial_control['identity'])
             save('control-final.json', final_control)
@@ -156,11 +180,21 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
         # Existing owned-worker IPC field: PASS means collector completion only.
         result['observation_status'] = 'PASS'
     except Exception as error:
+        if companion is not None and not companion_finished:
+            try:
+                companion.request_stop()
+            except Exception as stop_error:
+                result['errors'].append(dict(type=type(stop_error).__name__, reason='concurrent-api-stop-failed'))
         if _trace is not None:
             try:
                 _trace.abort(type(error).__name__)
             except Exception as publication_error:
                 result['errors'].append(dict(type=type(publication_error).__name__, reason='trace-abort-publication-failed'))
+        if companion is not None and not companion_finished:
+            try:
+                finish_companion()
+            except Exception as close_error:
+                result['errors'].append(dict(type=type(close_error).__name__, reason='concurrent-api-closeout-failed'))
         result['errors'].append(dict(type=type(error).__name__,
             reason=str(error) if type(error) in (ValueError, InterruptedError) else 'diagnostic-collection-failed'))
         stop.set()

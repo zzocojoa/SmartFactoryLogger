@@ -18,6 +18,9 @@ function Get-HealthTracePolicy([string]$Scope){
  if($Scope -ceq 'LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'){
   return @{contract_schema='sfl-health-cpu-outlier-contract-v1';lease_schema='sfl-health-cpu-outlier-lease-v1';duration=900;guard=960;profile_sha256='3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5c94fee'}
  }
+ if($Scope -ceq 'LOCAL_HEALTH_CPU_CONCURRENT_TRACE_DIAGNOSTIC'){
+  return @{contract_schema='sfl-health-cpu-concurrent-contract-v1';lease_schema='sfl-health-cpu-concurrent-lease-v1';duration=900;guard=960;profile_sha256='3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5c94fee'}
+ }
  Assert-Trace ($Scope -ceq 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC') 'health-trace-scope'
  return @{contract_schema='sfl-health-outlier-contract-v1';lease_schema='sfl-health-outlier-lease-v1';duration=900;guard=960;profile_sha256=$schedulingProfile}
 }

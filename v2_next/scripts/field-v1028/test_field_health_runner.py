@@ -65,7 +65,8 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(contract['duration_seconds'], 900 if outlier else 6)
             self.assertEqual(contract['guard_seconds'], 960 if outlier else 30)
             self.assertEqual(spec.outlier_capture, outlier)
-            self.assertEqual(spec.cpu_samples, self.request['schema'] == runner.CPU_OUTLIER_SCHEMA)
+            self.assertEqual(spec.cpu_samples, self.request['schema'] in (runner.CPU_OUTLIER_SCHEMA, runner.CPU_CONCURRENT_SCHEMA))
+            self.assertEqual(spec.concurrent_api, self.request['schema'] == runner.CPU_CONCURRENT_SCHEMA)
             self.assertEqual(hashlib.sha256(Path(spec.trace_contract_path).read_bytes()).hexdigest(), spec.trace_contract_sha256)
             with self.assertRaises(OSError):
                 (self.archive/'configuration.json').write_text('attempted replacement')
@@ -143,6 +144,25 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(result['status'], 'PASS')
                 self.assertEqual(seen[0].candidate, runner.binding.CANDIDATE_1029)
 
+    def test_concurrent_request_uses_distinct_contract_and_cannot_hide_in_spec(self):
+        self.request.update(schema=runner.CPU_CONCURRENT_SCHEMA, duration_seconds=900)
+        runner.validate_request(self.request)
+        for duration in (6, 899, 901, True, 900.0):
+            with self.assertRaises(ValueError):
+                runner.validate_request(dict(self.request, duration_seconds=duration))
+        changed = deepcopy(self.request)
+        changed['schema'] = runner.CPU_OUTLIER_SCHEMA
+        changed['spec']['concurrent_api'] = True
+        with self.assertRaisesRegex(ValueError, 'health-request-spec-members'):
+            runner.validate_request(changed)
+        result, saved, seen = self.invoke()
+        self.assertEqual(result['status'], 'PASS')
+        self.assertEqual(saved['mode'], 'health-cpu-concurrent-trace')
+        self.assertEqual(saved['scope'], 'CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
+        contract = json.loads(Path(seen[0].trace_contract_path).read_bytes())
+        self.assertEqual(contract['schema'], 'sfl-health-cpu-concurrent-contract-v1')
+        self.assertEqual(contract['scope'], runner.trace.CPU_CONCURRENT_SCOPE)
+
     def test_1030_requires_explicit_matching_spec_and_payload_pin(self):
         self.request['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
         self.request['spec']['reference_sha256'] = runner.binding.REFERENCE_SHA_1030
@@ -161,8 +181,8 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'health-request-spec-candidate'):
             runner.validate_request(changed)
 
-    def test_all_three_1030_trace_modes_keep_candidate_and_fixed_contract(self):
-        for schema in (runner.SCHEMA, runner.OUTLIER_SCHEMA, runner.CPU_OUTLIER_SCHEMA):
+    def test_all_four_1030_trace_modes_keep_candidate_and_fixed_contract(self):
+        for schema in (runner.SCHEMA, runner.OUTLIER_SCHEMA, runner.CPU_OUTLIER_SCHEMA, runner.CPU_CONCURRENT_SCHEMA):
             with self.subTest(schema=schema):
                 self.setUp()
                 self.request.update(schema=schema, duration_seconds=6 if schema == runner.SCHEMA else 900,

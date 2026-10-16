@@ -1,6 +1,8 @@
 """Collection failure propagation with synthetic component boundaries."""
 from contextlib import contextmanager, ExitStack
 from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import os
 from pathlib import Path
@@ -10,6 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from PIL import Image
 import field_health_collection as collection
 from field_resource_sampling import ProcessIdentity
 
@@ -34,7 +37,7 @@ class CollectionTests(unittest.TestCase):
             configuration_reference_sha256='a'*64, backend_created_filetime=1000)
 
     def run_collection(self, *, configuration=None, control=None, probes=None, native=None,
-                       closeout_error=False, stop=None, duration=.01, trace=None, outlier=False):
+                       closeout_error=False, stop=None, duration=.01, trace=None, outlier=False, concurrent=False):
         @contextmanager
         def reference(*args, **kwargs):
             self.assertEqual(kwargs['candidate'], self.spec.candidate)
@@ -60,7 +63,7 @@ class CollectionTests(unittest.TestCase):
             call = stack.enter_context(patch.object(collection.diagnostic, 'capture_health_probe',
                 side_effect=probes or [probe]))
             result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append,
-                                        _trace=trace, _outlier=outlier)
+                                        _trace=trace, _outlier=outlier, _concurrent_api=concurrent)
             if payload.called:
                 self.assertEqual(payload.call_args.kwargs['candidate'], self.spec.candidate)
         self.assertEqual(result['field_gate'], 'NOT_EVALUATED')
@@ -179,7 +182,7 @@ class CollectionTests(unittest.TestCase):
         for name in ('trace-binding.json', 'trace-completion.json'):
             self.assertTrue((self.folder/'evidence'/name).is_file())
 
-    def run_outlier(self, latencies, *, bound=True):
+    def run_outlier(self, latencies, *, bound=True, concurrent=False, fail_at=None):
         clock = {'ns': 1_000_000_000, 'stop': False}
         def wait(seconds):
             clock['ns'] += round(seconds * 1e9)
@@ -192,12 +195,140 @@ class CollectionTests(unittest.TestCase):
             return dict(status='REQUEST_AND_RUNTIME_BOUND' if bound else 'NOT_BOUND', probe_id=kwargs['probe_id'],
                         health_record=dict(client_request_and_body_ms=elapsed, response_finished_ns=clock['ns']))
         phases = []
-        trace = SimpleNamespace(begin=lambda *args: {}, finish=lambda *args: phases.append('finish') or {},
-                                abort=lambda *args: phases.append('abort'))
-        with patch.object(collection.time, 'perf_counter_ns', lambda: clock['ns']):
+        def trace_phase(name):
+            if concurrent or name != 'begin':
+                phases.append(name)
+            if fail_at == 'trace-'+name:
+                raise ValueError('injected-trace-'+name)
+            return {}
+        trace = SimpleNamespace(begin=lambda *args: trace_phase('begin'),
+                                finish=lambda *args: trace_phase('finish'), abort=lambda *args: trace_phase('abort'))
+        case = self
+        class Companion:
+            def __init__(self, port, folder, *, duration_seconds, origin_ns):
+                case.assertTrue(concurrent)
+                phases.append('load-start')
+                if fail_at == 'load-start':
+                    raise ValueError('injected-load-start')
+                case.assertEqual((port, duration_seconds, origin_ns), (8000, 900, clock['ns']+3_000_000_000))
+                folder.mkdir()
+                collection.observation.write_json(folder/'started.json', {'fixture': True})
+                self.stopped = False
+
+            def request_stop(self):
+                if not self.stopped:
+                    phases.append('load-stop')
+                    self.stopped = True
+
+            def finish(self):
+                phases.append('load-finish')
+                return dict(load_status='FAIL' if fail_at == 'load-finish' else 'CAPTURE_COMPLETE',
+                            release_gate='HOLD', promotion_allowed=False)
+
+        with patch.object(collection.time, 'perf_counter_ns', lambda: clock['ns']), \
+                patch.object(collection, 'ConcurrentApiLoad', Companion):
             result, events, count = self.run_collection(duration=900, stop=stop, trace=trace,
-                                                       outlier=True, probes=probe)
+                                                       outlier=True, probes=probe, concurrent=concurrent)
         return result, count, phases
+
+    def test_concurrent_trigger_stops_trace_before_waiting_for_companion(self):
+        result, count, phases = self.run_outlier([200, 200.01, 999], concurrent=True)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 2))
+        self.assertEqual(phases, ['begin', 'load-start', 'load-stop', 'finish', 'load-finish'])
+        self.assertEqual(result['scope'], 'CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
+        self.assertEqual(result['trigger']['sequence'], 1)
+        for name in ('concurrent-api-started.json', 'concurrent-api-closeout.json'):
+            self.assertTrue((self.folder/'evidence'/name).is_file())
+
+    def test_concurrent_no_trigger_preserves_full_health_schedule(self):
+        result, count, phases = self.run_outlier([10]*450, concurrent=True)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 450))
+        self.assertEqual(phases, ['begin', 'load-start', 'finish', 'load-finish'])
+        self.assertEqual(result['finished_ns'] - result['origin_ns'], 900_000_000_000)
+
+    def test_concurrent_unbound_probe_stops_and_drains_even_if_abort_publication_fails(self):
+        for failed in (None, 'trace-abort'):
+            self.setUp()
+            result, count, phases = self.run_outlier([250], bound=False, concurrent=True, fail_at=failed)
+            self.assertEqual((result['collection_status'], count), ('INCOMPLETE', 1))
+            self.assertEqual(phases, ['begin', 'load-start', 'load-stop', 'abort', 'load-finish'])
+            self.assertIsNone(result['trigger'])
+            if failed:
+                self.assertIn('trace-abort-publication-failed', json.dumps(result))
+
+    def test_concurrent_start_trace_finish_and_drain_failures_prevent_completion(self):
+        expected = {
+            'load-start': ['begin', 'load-start', 'abort'],
+            'trace-finish': ['begin', 'load-start', 'load-stop', 'finish', 'abort', 'load-finish'],
+            'load-finish': ['begin', 'load-start', 'load-stop', 'finish', 'load-finish', 'abort'],
+        }
+        for failed, phases in expected.items():
+            self.setUp()
+            result, _, actual = self.run_outlier([250], concurrent=True, fail_at=failed)
+            self.assertEqual(result['collection_status'], 'INCOMPLETE')
+            self.assertEqual(actual, phases)
+
+    def test_concurrent_mode_cannot_be_enabled_for_short_or_untraced_collection(self):
+        for value in (True, 1, None):
+            with self.assertRaisesRegex(ValueError, 'concurrent-api-requires-bounded-outlier-trace'):
+                self.run_collection(concurrent=value)
+
+    def test_concurrent_real_child_http_and_cleanup_with_synthetic_health_binding(self):
+        # Real loopback data/image, spawn, Job, files and exit; app/health/WPR
+        # boundaries remain explicit fixtures. This never contacts the server.
+        picture = io.BytesIO()
+        Image.new('RGB', (2, 2), 'red').save(picture, format='JPEG')
+        requests = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                body = picture.getvalue() if self.path.endswith('.jpg') else b'{"fixture":true}'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Content-Type', 'image/jpeg' if self.path.endswith('.jpg') else 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            for fail_trace in (False, True):
+                self.setUp()
+                self.spec = replace(self.spec, port=server.server_port)
+                phases = []
+                def slow_probe(*args, **kwargs):
+                    time.sleep(.35)
+                    return dict(status='REQUEST_AND_RUNTIME_BOUND', probe_id=kwargs['probe_id'],
+                        health_record=dict(client_request_and_body_ms=350, response_finished_ns=time.perf_counter_ns()))
+                def finish_trace(*args):
+                    self.assertFalse((self.folder/'evidence/concurrent-api-closeout.json').exists())
+                    phases.append(time.perf_counter_ns())
+                    if fail_trace:
+                        raise ValueError('injected-trace-save-failure')
+                    return {'fixture': True}
+                trace = SimpleNamespace(begin=lambda *args: {}, finish=finish_trace, abort=lambda *args: None)
+                result, _, count = self.run_collection(duration=900, trace=trace, outlier=True,
+                                                       concurrent=True, probes=slow_probe)
+                self.assertEqual(count, 1)
+                self.assertEqual(result['collection_status'], 'INCOMPLETE' if fail_trace else 'BOUND_WINDOW_CAPTURED')
+                closed = json.loads((self.folder/'evidence/concurrent-api-closeout.json').read_bytes())
+                self.assertEqual((closed['load_status'], closed['worker_exit_code']), ('CAPTURE_COMPLETE', 0))
+                self.assertEqual(closed['job_after_cleanup']['active_processes'], 0)
+                self.assertFalse(closed['forced_termination'])
+                self.assertLessEqual(closed['stop_requested_ns'], phases[0])
+                self.assertLess(phases[0], closed['finished_ns'])
+                self.assertEqual(closed['http_component_status'], 'FAIL')
+                self.assertGreater(closed['channels']['image']['cancelled_slots'], 0)
+            self.assertEqual(set(requests), {'/api/data', '/api/spot/live_image.jpg'})
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+            self.assertFalse(thread.is_alive())
 
     def test_outlier_uses_strict_threshold_and_finishes_after_first_bound_outlier(self):
         result, count, phases = self.run_outlier([200, 200.01, 999])

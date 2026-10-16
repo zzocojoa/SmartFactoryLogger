@@ -91,7 +91,7 @@ class TraceTests(unittest.TestCase):
     def coordinator_go(self, handshake):
         directory = self.root/'SmartFactory'/('T'+'d'*12)
         directory.mkdir(parents=True)
-        policy = trace.capture_policy(self.spec.outlier_capture, self.spec.cpu_samples)
+        policy = trace.capture_policy(self.spec.outlier_capture, self.spec.cpu_samples, self.spec.concurrent_api)
         lease = dict(schema=policy['lease_schema'], scope=policy['scope'], run_id=self.contract['run_id'],
             run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=policy['guard'], capture_seconds=policy['duration'],
             stop_timeout_seconds=60, profile_sha256=policy['profile_sha256'],
@@ -163,6 +163,27 @@ class TraceTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 with self.path.open('w'):
                     pass
+
+    def test_concurrent_contract_cannot_be_substituted_for_solo_cpu_contract(self):
+        policy = trace.capture_policy(True, True, True)
+        self.assertEqual((policy['duration'], policy['guard'], policy['profile_sha256']),
+                         (900, 960, trace.CPU_PROFILE_SHA256))
+        self.contract.update(schema=policy['contract_schema'], scope=policy['scope'],
+                             duration_seconds=900, guard_seconds=960)
+        self.path.write_text(json.dumps(self.contract))
+        self.spec = replace(self.spec, outlier_capture=True, cpu_samples=True, concurrent_api=True,
+                            trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(ValueError, 'trace-contract-schema'):
+            with trace.HealthTraceHandshake(replace(self.spec, concurrent_api=False), 900, self.evidence):
+                pass
+        with trace.HealthTraceHandshake(self.spec, 900, self.evidence) as handshake:
+            bound = self.bind(handshake)
+            self.assertEqual(bound['lease']['schema'], 'sfl-health-cpu-concurrent-lease-v1')
+            with patch.object(handshake, 'wait', side_effect=lambda *args: self.stopped(handshake)):
+                self.assertGreater(handshake.finish({}, self.stop)['etl']['bytes'], 0)
+        for flags in ((False, False, True), (True, False, True), (True, True, 1), (True, True, None)):
+            with self.assertRaises(ValueError):
+                trace.capture_policy(*flags)
 
     def test_begin_rejects_changed_ready_worker_or_lease(self):
         for key, value in [('collector_ready_sha256', '0'*64), ('worker', {'pid': 1}),

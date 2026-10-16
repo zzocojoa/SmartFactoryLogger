@@ -100,6 +100,21 @@ $changed=$lease|ConvertTo-Json|ConvertFrom-Json;$changed.schema='sfl-health-outl
 $rejected=$false;try{Assert-HealthTraceLease $changed $lease.run_path $c.package_sha256}catch{$rejected=$true};Check $rejected 'cpu profile accepted in scheduling contract'
 @{status='PASS';accepted=2;rejected=7;actual_etw_started=$false}|ConvertTo-Json
 ''')
+    run('cpu-concurrent-contracts', r'''
+$c=[pscustomobject]@{schema='sfl-health-cpu-concurrent-contract-v1';scope='LOCAL_HEALTH_CPU_CONCURRENT_TRACE_DIAGNOSTIC';run_id=('a'*32);channel_path='C:\fixture\trace-channel';package_sha256=('b'*64);backend_pid=100;backend_created_filetime=[long]134365056356121274;main_pid=101;duration_seconds=900;guard_seconds=960;release_gate='HOLD';promotion_allowed=$false}
+Assert-HealthTraceContract $c $c.channel_path $c.package_sha256
+$lease=[pscustomobject]@{schema='sfl-health-cpu-concurrent-lease-v1';scope=$c.scope;run_id=$c.run_id;instance=('SFLTrace_'+('d'*32));run_path='C:\fixture\T111111111111';parent_pid=500;parent_created_filetime='134365056356121274';guard_seconds=960;capture_seconds=900;stop_timeout_seconds=60;contract_sha256=('e'*64);package_sha256=$c.package_sha256;profile_sha256='3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5c94fee';release_gate='HOLD';promotion_allowed=$false}
+Assert-HealthTraceLease $lease $lease.run_path $c.package_sha256
+foreach($row in @(@('schema','sfl-health-cpu-outlier-contract-v1'),@('scope','LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'),@('duration_seconds',901),@('guard_seconds',961))){
+ $changed=$c|ConvertTo-Json|ConvertFrom-Json;$changed.($row[0])=$row[1]
+ $rejected=$false;try{Assert-HealthTraceContract $changed $c.channel_path $c.package_sha256}catch{$rejected=$true};Check $rejected ('concurrent-contract:'+ $row[0])
+}
+foreach($row in @(@('schema','sfl-health-cpu-outlier-lease-v1'),@('scope','LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'),@('profile_sha256','603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486'),@('guard_seconds',961))){
+ $changed=$lease|ConvertTo-Json|ConvertFrom-Json;$changed.($row[0])=$row[1]
+ $rejected=$false;try{Assert-HealthTraceLease $changed $lease.run_path $c.package_sha256}catch{$rejected=$true};Check $rejected ('concurrent-lease:'+ $row[0])
+}
+@{status='PASS';accepted=2;rejected=8;actual_etw_started=$false}|ConvertTo-Json
+''')
     run('independent-native-bootstrap', r'''
 Initialize-TraceHandles
 foreach($encoded in @('', 'bad-command', ('a'*24001))){

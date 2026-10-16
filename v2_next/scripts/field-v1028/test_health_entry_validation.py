@@ -81,12 +81,14 @@ $rejected=$false;try{Assert-HealthEntryPackage $changed}catch{$rejected=$true};C
 $short=Get-HealthEntryBudget @{schema='sfl-health-diagnostic-request-v1';duration_seconds=6}
 $long=Get-HealthEntryBudget @{schema='sfl-health-outlier-request-v1';duration_seconds=900}
 $cpu=Get-HealthEntryBudget @{schema='sfl-health-cpu-outlier-request-v1';duration_seconds=900}
+$concurrent=Get-HealthEntryBudget @{schema='sfl-health-cpu-concurrent-request-v1';duration_seconds=900}
+Check ($concurrent.seconds -eq 1500 -and $concurrent.scope -ceq 'CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE') 'concurrent request budget'
 Check ($cpu.seconds -eq 1500 -and $cpu.scope -ceq 'CPU_OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE') 'cpu request budget'
 Check ($short.seconds -eq 600 -and $long.seconds -eq 1500 -and $long.scope -ceq 'OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE') 'request budgets'
-foreach($case in @(@('sfl-health-diagnostic-request-v1',900),@('sfl-health-outlier-request-v1',6),@('sfl-health-outlier-request-v1',901),@('sfl-health-outlier-request-v1',$true),@('sfl-health-cpu-outlier-request-v1',6),@('sfl-health-cpu-outlier-request-v1',901),@('sfl-health-cpu-outlier-request-v1',$true),@('other',900))){
+foreach($case in @(@('sfl-health-diagnostic-request-v1',900),@('sfl-health-outlier-request-v1',6),@('sfl-health-outlier-request-v1',901),@('sfl-health-outlier-request-v1',$true),@('sfl-health-cpu-outlier-request-v1',6),@('sfl-health-cpu-outlier-request-v1',901),@('sfl-health-cpu-outlier-request-v1',$true),@('sfl-health-cpu-concurrent-request-v1',6),@('sfl-health-cpu-concurrent-request-v1',901),@('sfl-health-cpu-concurrent-request-v1',$true),@('SFL-HEALTH-CPU-CONCURRENT-REQUEST-V1',900),@('other',900))){
  $rejected=$false;try{[void](Get-HealthEntryBudget @{schema=$case[0];duration_seconds=$case[1]})}catch{$rejected=$true};Check $rejected 'mixed request accepted'
 }
-@{status='PASS';short_seconds=$short.seconds;long_seconds=$long.seconds;cpu_seconds=$cpu.seconds;rejected=8}|ConvertTo-Json
+@{status='PASS';short_seconds=$short.seconds;long_seconds=$long.seconds;cpu_seconds=$cpu.seconds;concurrent_seconds=$concurrent.seconds;rejected=12}|ConvertTo-Json
 ''')
     archive = root/'archive'
     archive.mkdir()
