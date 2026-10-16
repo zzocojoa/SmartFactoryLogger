@@ -186,8 +186,13 @@ runtime-close 도우미를 그대로 실행하지 않았다. 새 실제 정상 �
 2026-10-16 17:51 KST 실제 정상 종료 뒤 native5개 종료0와 현재 CSV278,630행의
 18,573→297,202 연속성을 확인했다. 별도 종료 로그 검토에서10개 작업 종료, 이미지57,746건
 저장·queue/inflight/unfinished/failure/drop0을 확인했다. 전체 원본 `O4ff65a11`의 캡처와
-재검산이 진행 중이므로 manifest 결합 행은 계속 미완료다. 증거는
-`P30_20261016_e934c7a2/native-close-review.json` 및 `preliminary-worker-close-review.json`이다.
+재검산은18:41 KST 실제 종료0으로 완료됐다.290,682파일/245폴더/680ADS/14,887,746,451bytes의
+결과·manifest·제어 결과를 콘솔 해시와 대조하여 회수했고,9개 종료 자료를 동일 원본 목록에
+결합했다. `P30_20261016_e934c7a2/field-close-review.json`의
+`NORMAL_SHUTDOWN_AND_ORIGINAL_MANIFEST_BINDING_CONFIRMED`와 exit0이 근거다.
+이에 따라5.26의 실제 서버 종료·manifest 결합 행도 확인되어5/5이며, 전체 PDCA 달성률은 아니다.
+18:47 시작한 서버 설치 절차는18:48 현재 설치 전 원본 대조 중이다. 실제 설치 종료·설치 후
+보존·새 실행·현장 QA는 아직 미완료이며 출시 HOLD를 유지한다.
 
 ## 5.27 1.0.30 실행 확인 연결
 
