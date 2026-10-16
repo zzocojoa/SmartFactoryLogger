@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 import time
 import unittest
@@ -65,7 +66,7 @@ class CompanionTests(unittest.TestCase):
         self.assertFalse(result['promotion_allowed'])
 
     def test_complete_window_has_only_data_and_image_at_existing_periods(self):
-        worker = self.start()
+        worker = self.start(6.2)
         result = worker.finish()
         self.verify_closed(result)
         self.assertEqual(result['load_status'], 'CAPTURE_COMPLETE')
@@ -75,8 +76,77 @@ class CompanionTests(unittest.TestCase):
         self.assertTrue(all(when >= worker.origin_ns for _, when in self.requests))
         origin = json.loads((self.folder/'requests/origin.json').read_bytes())
         self.assertEqual(origin['period_ns'], {'data': 6_000_000_000, 'image': 250_000_000})
-        self.assertEqual(origin['expected_slots'], {'data': 1, 'image': 3})
+        self.assertEqual(origin['expected_slots'], {'data': 2, 'image': 25})
+        summary = json.loads((self.folder/'requests/summary.json').read_bytes())
+        self.assertGreaterEqual(summary['finished_ns'], origin['origin_ns'] + origin['duration_ns'])
+        for path in (self.folder/'requests').glob('*.json'):
+            record = json.loads(path.read_bytes())
+            if record.get('kind') == 'request':
+                self.assertGreaterEqual(record['started_ns'], record['scheduled_ns'], path.name)
+                self.assertGreaterEqual(record['start_lateness_ms'], 0, path.name)
         self.assertIs(worker.finish(), result)
+
+    def exercise_worker_wait(self, *, collector_fails):
+        class EarlyEvent:
+            def __init__(self):
+                self.flag = threading.Event()
+
+            def is_set(self):
+                return self.flag.is_set()
+
+            def set(self):
+                self.flag.set()
+
+            def wait(self, seconds):
+                # Model a timeout return before its requested deadline.
+                return self.flag.is_set()
+
+        gate, ready, external = threading.Event(), threading.Event(), EarlyEvent()
+        gate.set()
+        self.folder.mkdir()
+        observed, bridges = [], []
+        original_stop = load.observation.ObservationStop
+
+        def make_stop(event):
+            bridge = original_stop(event)
+            bridges.append(bridge)
+            return bridge
+
+        def collect(_port, _output, **kwargs):
+            local = kwargs['stop_event']
+            before = time.perf_counter_ns()
+            self.assertFalse(local.wait(.03))
+            observed.append(time.perf_counter_ns() - before)
+            if collector_fails:
+                raise OSError('injected-collector-failure')
+            return dict(persistence={name: 0 for name in ('pending_bytes', 'pending_records',
+                        'discarded_records', 'submitted_records', 'persisted_records')},
+                        worker_errors=[], persistence_errors=[])
+
+        stdout, stderr = sys.stdout, sys.stderr
+        try:
+            with patch.object(load.observation, 'ObservationStop', side_effect=make_stop), \
+                    patch.object(load.http, 'collect_http_window', side_effect=collect), \
+                    patch.object(load.observation, 'verify_component_manifest', return_value={}):
+                with self.assertRaises(SystemExit) as ended:
+                    load._worker(gate, ready, external, self.server.server_port,
+                                 self.folder, .1, time.perf_counter_ns()+1_000_000_000)
+        finally:
+            sys.stdout, sys.stderr = stdout, stderr
+        self.assertEqual(ended.exception.code, 1 if collector_fails else 0)
+        self.assertEqual(len(observed), 1)
+        self.assertGreaterEqual(observed[0], 30_000_000)
+        self.assertEqual(len(bridges), 1)
+        self.assertFalse(bridges[0].bridge.is_alive())
+        if collector_fails:
+            result = json.loads((self.folder/'worker-result.json').read_bytes())
+            self.assertIn('injected-collector-failure', json.dumps(result['errors']))
+
+    def test_early_wait_return_cannot_advance_worker_request_deadline(self):
+        self.exercise_worker_wait(collector_fails=False)
+
+    def test_collector_failure_closes_cancellation_bridge(self):
+        self.exercise_worker_wait(collector_fails=True)
 
     def test_early_stop_preserves_cancelled_slots_without_a_performance_pass(self):
         worker = self.start(6)

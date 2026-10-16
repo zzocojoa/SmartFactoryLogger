@@ -32,10 +32,14 @@ def _worker(gate, ready, stop, port, output, duration, origin):
             (output/'worker.stderr.log').open('x', encoding='utf-8') as stderr:
         sys.stdout, sys.stderr = stdout, stderr
         try:
-            ready.set()
-            summary = http.collect_http_window(port, output/'requests', duration_seconds=duration,
-                endpoints=ENDPOINTS, timeout_seconds=5, stop_event=stop, origin_ns=origin,
-                body_byte_budget=BODY_BUDGET)
+            local_stop = observation.ObservationStop(stop)
+            try:
+                ready.set()
+                summary = http.collect_http_window(port, output/'requests', duration_seconds=duration,
+                    endpoints=ENDPOINTS, timeout_seconds=5, stop_event=local_stop, origin_ns=origin,
+                    body_byte_budget=BODY_BUDGET)
+            finally:
+                local_stop.close()
             result['http_summary'] = summary
             result['manifest'] = observation.verify_component_manifest(output/'requests', FILE_BUDGET)
             persistence = summary['persistence']
