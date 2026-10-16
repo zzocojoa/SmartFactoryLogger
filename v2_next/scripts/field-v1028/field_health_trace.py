@@ -20,16 +20,23 @@ from field_host_sampling import WindowsProcessReader
 
 
 PROFILE_SHA256 = '603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486'
+CPU_PROFILE_SHA256 = '3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5c94fee'
 SCOPE = 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'
 OUTLIER_SCOPE = 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC'
+CPU_OUTLIER_SCOPE = 'LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'
 
 
-def capture_policy(outlier):
+def capture_policy(outlier, cpu_samples=False):
     binding.require(type(outlier) is bool, 'trace-outlier-mode-type')
+    binding.require(type(cpu_samples) is bool and (not cpu_samples or outlier), 'trace-cpu-outlier-mode')
+    if cpu_samples:
+        return dict(scope=CPU_OUTLIER_SCOPE, contract_schema='sfl-health-cpu-outlier-contract-v1',
+                    lease_schema='sfl-health-cpu-outlier-lease-v1', duration=900, guard=960,
+                    profile_sha256=CPU_PROFILE_SHA256)
     return dict(scope=OUTLIER_SCOPE if outlier else SCOPE,
                 contract_schema='sfl-health-outlier-contract-v1' if outlier else 'sfl-health-trace-contract-v1',
                 lease_schema='sfl-health-outlier-lease-v1' if outlier else 'sfl-health-trace-lease-v1',
-                duration=900 if outlier else 6, guard=960 if outlier else 30)
+                duration=900 if outlier else 6, guard=960 if outlier else 30, profile_sha256=PROFILE_SHA256)
 
 
 def digest(value):
@@ -73,18 +80,19 @@ class TracedHealthCollectionSpec(collection.HealthCollectionSpec):
     trace_contract_path: str = ''
     trace_contract_sha256: str = ''
     outlier_capture: bool = False
+    cpu_samples: bool = False
 
     def validate(self):
         super().validate()
         binding.plain_path(self.trace_contract_path)
         binding.require(digest(self.trace_contract_sha256), 'trace-contract-sha256')
-        capture_policy(self.outlier_capture)
+        capture_policy(self.outlier_capture, self.cpu_samples)
 
 
 class HealthTraceHandshake:
     def __init__(self, spec, duration, evidence_directory):
         spec.validate()
-        self.policy = capture_policy(spec.outlier_capture)
+        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples)
         binding.require(duration == self.policy['duration'] and type(duration) in (int, float),
                         'trace-capture-fixed-duration')
         self.spec = spec
@@ -177,7 +185,8 @@ class HealthTraceHandshake:
                         and lease['run_id'] == self.contract['run_id'] and lease['run_path'] == str(directory)
                         and lease['guard_seconds'] == self.policy['guard']
                         and lease['capture_seconds'] == self.policy['duration']
-                        and lease['stop_timeout_seconds'] == 60 and lease['profile_sha256'] == PROFILE_SHA256,
+                        and lease['stop_timeout_seconds'] == 60
+                        and lease['profile_sha256'] == self.policy['profile_sha256'],
                         'trace-lease-contract')
         binding.require(all(type(lease[k]) is int for k in ('guard_seconds', 'capture_seconds', 'stop_timeout_seconds', 'parent_pid')),
                         'trace-lease-number-types')
@@ -255,5 +264,5 @@ def supervise(spec, output, *, stop_event=None):
     binding.require(type(spec) is TracedHealthCollectionSpec, 'traced-diagnostic-spec-type')
     spec.validate()
     return observation.supervise_observation(spec, output,
-        duration_seconds=capture_policy(spec.outlier_capture)['duration'],
+        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples)['duration'],
         preparation_timeout=180, finalization_timeout=180, stop_event=stop_event, _worker_target=_worker_entry)

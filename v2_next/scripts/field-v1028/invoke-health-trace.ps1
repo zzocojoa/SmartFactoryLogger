@@ -11,11 +11,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 
 function Get-HealthTracePolicy([string]$Scope){
+ $schedulingProfile='603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486'
  if($Scope -ceq 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'){
-  return @{contract_schema='sfl-health-trace-contract-v1';lease_schema='sfl-health-trace-lease-v1';duration=6;guard=30}
+  return @{contract_schema='sfl-health-trace-contract-v1';lease_schema='sfl-health-trace-lease-v1';duration=6;guard=30;profile_sha256=$schedulingProfile}
+ }
+ if($Scope -ceq 'LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'){
+  return @{contract_schema='sfl-health-cpu-outlier-contract-v1';lease_schema='sfl-health-cpu-outlier-lease-v1';duration=900;guard=960;profile_sha256='3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5c94fee'}
  }
  Assert-Trace ($Scope -ceq 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC') 'health-trace-scope'
- return @{contract_schema='sfl-health-outlier-contract-v1';lease_schema='sfl-health-outlier-lease-v1';duration=900;guard=960}
+ return @{contract_schema='sfl-health-outlier-contract-v1';lease_schema='sfl-health-outlier-lease-v1';duration=900;guard=960;profile_sha256=$schedulingProfile}
 }
 function Assert-HealthTraceContract($Contract,[string]$Channel,[string]$PackageSha){
  $policy=Get-HealthTracePolicy $Contract.scope
@@ -35,7 +39,7 @@ function Assert-HealthTraceLease($Lease,[string]$Directory,[string]$PackageSha){
  Assert-Trace ($Lease.run_path -ieq $Directory -and $Lease.parent_pid -is [int] -and $Lease.parent_pid -gt 0 -and $Lease.parent_created_filetime -cmatch '^[0-9]{17,20}$') 'health-trace-parent'
  Assert-Trace ($Lease.guard_seconds -is [int] -and $Lease.guard_seconds -eq $policy.guard -and $Lease.capture_seconds -is [int] -and $Lease.capture_seconds -eq $policy.duration -and $Lease.stop_timeout_seconds -is [int] -and $Lease.stop_timeout_seconds -eq 60) 'health-trace-lease-budget'
  Assert-Trace ($Lease.contract_sha256 -cmatch '^[0-9a-f]{64}$' -and $Lease.package_sha256 -ceq $PackageSha) 'health-trace-lease-pins'
- Assert-Trace ($Lease.profile_sha256 -ceq '603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486') 'health-trace-profile-pin'
+ Assert-Trace ($Lease.profile_sha256 -ceq $policy.profile_sha256) 'health-trace-profile-pin'
  Assert-Trace ($Lease.release_gate -ceq 'HOLD' -and $Lease.promotion_allowed -is [bool] -and -not $Lease.promotion_allowed) 'health-trace-lease-gates'
 }
 function Write-HealthTraceMessage([string]$Channel,[string]$Name,$Value){

@@ -91,10 +91,10 @@ class TraceTests(unittest.TestCase):
     def coordinator_go(self, handshake):
         directory = self.root/'SmartFactory'/('T'+'d'*12)
         directory.mkdir(parents=True)
-        policy = trace.capture_policy(self.spec.outlier_capture)
+        policy = trace.capture_policy(self.spec.outlier_capture, self.spec.cpu_samples)
         lease = dict(schema=policy['lease_schema'], scope=policy['scope'], run_id=self.contract['run_id'],
             run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=policy['guard'], capture_seconds=policy['duration'],
-            stop_timeout_seconds=60, profile_sha256=trace.PROFILE_SHA256,
+            stop_timeout_seconds=60, profile_sha256=policy['profile_sha256'],
             contract_sha256=self.spec.trace_contract_sha256, package_sha256=self.contract['package_sha256'],
             parent_pid=200, parent_created_filetime='2000', release_gate='HOLD', promotion_allowed=False)
         lease_fact = trace.observation.write_json(directory/'lease.json', lease)
@@ -122,6 +122,37 @@ class TraceTests(unittest.TestCase):
             value = handshake.begin({}, self.stop)
         self.assertEqual(alive.call_count, 2)
         return value
+
+    def test_cpu_contract_and_profile_cannot_be_mixed_with_scheduling_contract(self):
+        for cpu in (False, True):
+            for wrong_profile in (False, True):
+                self.setUp()
+                policy = trace.capture_policy(True, cpu)
+                self.contract.update(schema=policy['contract_schema'], scope=policy['scope'],
+                                     duration_seconds=900, guard_seconds=960)
+                self.path.write_text(json.dumps(self.contract))
+                self.spec = replace(self.spec, outlier_capture=True, cpu_samples=cpu,
+                                    trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+
+                def mutate_profile(go):
+                    path = Path(go['trace_run_path'])/'lease.json'
+                    lease = json.loads(path.read_bytes())
+                    lease['profile_sha256'] = trace.PROFILE_SHA256 if cpu else trace.CPU_PROFILE_SHA256
+                    path.write_text(json.dumps(lease))
+                    go['lease_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+                with self.subTest(cpu=cpu, wrong_profile=wrong_profile), \
+                        trace.HealthTraceHandshake(self.spec, 900, self.evidence) as h:
+                    if wrong_profile:
+                        with self.assertRaisesRegex(ValueError, 'trace-lease-contract'):
+                            self.bind(h, mutate_profile)
+                    else:
+                        self.assertEqual(self.bind(h)['lease']['profile_sha256'], policy['profile_sha256'])
+                        with patch.object(h, 'wait', side_effect=lambda *args: self.stopped(h)):
+                            self.assertGreater(h.finish({}, self.stop)['etl']['bytes'], 0)
+        for flags in ((False, True), (True, 1), (True, None)):
+            with self.assertRaises(ValueError):
+                trace.capture_policy(*flags)
 
     def test_begin_binds_guard_lease_ready_and_native_generation(self):
         with self.handshake as h:

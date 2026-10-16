@@ -60,10 +60,11 @@ class RunnerTests(unittest.TestCase):
             contract = json.loads(Path(spec.trace_contract_path).read_bytes())
             self.assertEqual(contract['package_sha256'], self.trace_sha)
             self.assertEqual(contract['backend_created_filetime'], self.request['spec']['backend_created_filetime'])
-            outlier = self.request['schema'] == runner.OUTLIER_SCHEMA
+            outlier = self.request['schema'] != runner.SCHEMA
             self.assertEqual(contract['duration_seconds'], 900 if outlier else 6)
             self.assertEqual(contract['guard_seconds'], 960 if outlier else 30)
             self.assertEqual(spec.outlier_capture, outlier)
+            self.assertEqual(spec.cpu_samples, self.request['schema'] == runner.CPU_OUTLIER_SCHEMA)
             self.assertEqual(hashlib.sha256(Path(spec.trace_contract_path).read_bytes()).hexdigest(), spec.trace_contract_sha256)
             with self.assertRaises(OSError):
                 (self.archive/'configuration.json').write_text('attempted replacement')
@@ -110,6 +111,21 @@ class RunnerTests(unittest.TestCase):
                 changed['spec'][key] = value
                 with self.assertRaises(ValueError):
                     runner.validate_request(changed)
+
+    def test_cpu_request_is_explicit_and_preserves_fixed_outlier_budget(self):
+        self.request.update(schema=runner.CPU_OUTLIER_SCHEMA, duration_seconds=900)
+        runner.validate_request(self.request)
+        for value in (6, 30, 899, 901, 900.0, True):
+            with self.assertRaises(ValueError):
+                runner.validate_request(dict(self.request, duration_seconds=value))
+        result, saved, seen = self.invoke()
+        self.assertEqual(result['status'], 'PASS')
+        self.assertEqual(saved['scope'], 'CPU_OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
+        self.assertEqual(saved['mode'], 'health-cpu-outlier-trace')
+        contract = json.loads(Path(seen[0].trace_contract_path).read_bytes())
+        self.assertEqual(contract['schema'], 'sfl-health-cpu-outlier-contract-v1')
+        self.assertEqual(contract['scope'], runner.trace.CPU_OUTLIER_SCOPE)
+        self.assertFalse(saved['promotion_allowed'])
 
     def test_explicit_candidate_and_legacy_request_both_bind_1029(self):
         for explicit in (False, True):
