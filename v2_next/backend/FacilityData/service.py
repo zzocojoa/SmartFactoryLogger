@@ -1,9 +1,10 @@
 from collections import deque
+from io import BytesIO
 import json
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, NamedTuple
 import threading
 import time
 import uuid
@@ -22,6 +23,30 @@ from backend.Observability.service import observability_service
 
 OPERATOR_METADATA_RUNTIME_STATE_VERSION = "1.0.0"
 OPERATOR_METADATA_RUNTIME_STATE_WRITE_INTERVAL_SEC = 60.0
+
+
+class _StoredHistorySample(NamedTuple):
+    """Keep the public snapshot immutable without retaining its model graph."""
+
+    timestamp_ms: int
+    sequence: int
+    recorded_monotonic: float
+    data_json: str
+
+    def to_sample(self) -> FactoryDataHistorySample:
+        # These bytes came from our published model, never an external input.
+        # Revalidation could normalize a historical value a second time.
+        data = FactoryData.model_construct(**json.loads(self.data_json))
+        sample = FactoryDataHistorySample(
+            timestamp_ms=self.timestamp_ms, sequence=self.sequence, data=data,
+        )
+        sample._recorded_monotonic = self.recorded_monotonic
+        return sample
+
+
+class _HistoryPage(NamedTuple):
+    samples: list[_StoredHistorySample]
+    metadata: dict[str, Any]
 
 
 class PLCService:
@@ -57,7 +82,7 @@ class PLCService:
         self.driver_state_lock = threading.Lock()
         self.interval_lock = threading.Lock()
         self.history_lock = threading.Lock()
-        self.history: deque[FactoryDataHistorySample] = deque(maxlen=self.HISTORY_MAX_SAMPLES)
+        self.history: deque[_StoredHistorySample] = deque(maxlen=self.HISTORY_MAX_SAMPLES)
         self.history_instance_id = uuid.uuid4().hex
         self._history_sequence = 0
         self.last_update: Optional[float] = None
@@ -353,7 +378,7 @@ class PLCService:
 
     def _prune_history_locked(self, now_monotonic: float) -> None:
         max_age_sec = self.HISTORY_MAX_AGE_MS / 1000
-        while self.history and self.history[0]._recorded_monotonic + max_age_sec < now_monotonic:
+        while self.history and self.history[0].recorded_monotonic + max_age_sec < now_monotonic:
             self.history.popleft()
 
     def _record_history_sample(self, data: FactoryData, captured_at_sec: float) -> FactoryData:
@@ -367,15 +392,39 @@ class PLCService:
                 "history_instance_id": self.history_instance_id,
                 "history_sequence": self._history_sequence,
             })
-            sample = FactoryDataHistorySample(
+            sample = _StoredHistorySample(
                 timestamp_ms=timestamp_ms, sequence=self._history_sequence,
-                data=published.model_copy(deep=True),
+                recorded_monotonic=now, data_json=published.model_dump_json(),
             )
-            sample._recorded_monotonic = now
             self.history.append(sample)
             return published
 
     def get_data_history(self, since_ms: int, limit: int, cursor: Optional[str] = None) -> FactoryDataHistoryResponse:
+        page = self._select_history_page(since_ms, limit, cursor)
+        return FactoryDataHistoryResponse(
+            samples=[sample.to_sample() for sample in page.samples], **page.metadata,
+        )
+
+    def get_data_history_json(self, since_ms: int, limit: int, cursor: Optional[str] = None) -> bytes:
+        page = self._select_history_page(since_ms, limit, cursor)
+        # The model serializer produced data_json when the observation was stored.
+        # Reuse that immutable JSON instead of rebuilding thousands of models.
+        metadata = json.dumps(page.metadata, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+        with BytesIO() as output:
+            output.write(b'{"samples":[')
+            for index, sample in enumerate(page.samples):
+                if index:
+                    output.write(b',')
+                output.write(
+                    f'{{"timestamp_ms":{sample.timestamp_ms},"sequence":{sample.sequence},"data":'.encode('ascii')
+                )
+                output.write(sample.data_json.encode('utf-8'))
+                output.write(b'}')
+            output.write(b'],')
+            output.write(metadata[1:].encode('utf-8'))
+            return output.getvalue()
+
+    def _select_history_page(self, since_ms: int, limit: int, cursor: Optional[str]) -> _HistoryPage:
         if not 1 <= limit <= self.HISTORY_MAX_SAMPLES or since_ms < 0:
             raise ValueError("Invalid history range")
         cursor_instance, after_sequence = None, 0
@@ -410,16 +459,17 @@ class PLCService:
                 truncated = ((since_ms > 0 if oldest_timestamp_ms is None else since_ms < oldest_timestamp_ms)
                              or len(eligible) > limit)
             next_sequence = samples[-1].sequence if samples else self._history_sequence
-            return FactoryDataHistoryResponse(
-                samples=samples,
-                oldest_timestamp_ms=oldest_timestamp_ms,
-                newest_timestamp_ms=newest_timestamp_ms,
-                history_instance_id=self.history_instance_id,
-                truncated=truncated,
-                next_cursor=f"{self.history_instance_id}:{next_sequence}",
-                has_more=has_more,
-                reset_required=reset_required,
-            )
+            history_instance_id = self.history_instance_id
+        # The immutable records remain valid even if the producer clears history.
+        return _HistoryPage(samples, {
+            "oldest_timestamp_ms": oldest_timestamp_ms,
+            "newest_timestamp_ms": newest_timestamp_ms,
+            "history_instance_id": history_instance_id,
+            "truncated": truncated,
+            "next_cursor": f"{history_instance_id}:{next_sequence}",
+            "has_more": has_more,
+            "reset_required": reset_required,
+        })
 
     def get_history_memory_summary(self, sample_size: int = 128) -> dict[str, Any]:
         bounded_sample_size = max(1, int(sample_size))

@@ -1,7 +1,9 @@
 """P2: production history/API paths with independent clocks and temporary state."""
+import asyncio
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,9 +12,10 @@ import threading
 import unittest
 
 from fastapi.testclient import TestClient
+import httpx
 from backend import app as api
 from backend.FacilityData import service as module
-from backend.FacilityData.schemas import FactoryData
+from backend.FacilityData.schemas import FactoryData, FactoryDataHistorySample
 from backend.tests import test_temperature_clock_service as clock_suite
 
 
@@ -149,6 +152,88 @@ class HistoryCursorTests(unittest.TestCase):
         self.assertEqual(self.query()['samples'][0]['data']['Count'], 1)
         self.assertNotIn('_recorded_monotonic', self.query()['samples'][0])
 
+    def test_nested_snapshot_preserves_public_values_and_isolates_each_reader(self):
+        original = FactoryData(
+            Time='source-time', Count=1, Spot=500,
+            operator_metadata_missing_fields=['Mold_No_operator'],
+            diagnostics_missing_fields=['signalpc'],
+            diagnostics_field_status={'signalpc': 'unknown'},
+            Computed={'pressure': {'codes': ['first'], 'value': 162.5}},
+            plc_source_completed_monotonic=90.0, plc_clock_domain_id='private-clock',
+        )
+        # Published observations may have updates after their initial validation.
+        original.Speed = -1.0
+        published = self.service._record_history_sample(original, self.wall)
+        expected = json.loads(FactoryDataHistorySample(
+            timestamp_ms=int(self.wall * 1000), sequence=1, data=published,
+        ).model_dump_json())
+        original.Computed['pressure']['codes'].append('original-mutation')
+        published.diagnostics_missing_fields.append('published-mutation')
+        published.diagnostics_field_status['signalpc'] = 'changed'
+        self.assertEqual(self.query()['samples'], [expected])
+        self.assertEqual(published.plc_source_completed_monotonic, 90.0)
+        self.assertEqual(published.plc_clock_domain_id, 'private-clock')
+        self.assertNotIn('plc_source_completed_monotonic', expected['data'])
+        self.assertNotIn('plc_clock_domain_id', expected['data'])
+        response = self.service.get_data_history(0, 10)
+        response.samples[0].data.Computed['pressure']['codes'].append('reader-mutation')
+        response.samples[0].data.operator_metadata_missing_fields.clear()
+        self.assertEqual(self.query()['samples'], [expected])
+
+    def test_decode_does_not_block_recording_and_keeps_response_generation_consistent(self):
+        self.record(1)
+        old_instance = self.service.history_instance_id
+        entered, release = threading.Event(), threading.Event()
+        decode = module._StoredHistorySample.to_sample
+
+        def delayed_decode(row):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError('test decoder not released')
+            return decode(row)
+
+        def replace_history():
+            self.service.clear_data_history()
+            self.record(2)
+
+        with patch.object(module._StoredHistorySample, 'to_sample', delayed_decode):
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                future = workers.submit(self.service.get_data_history, 0, 10)
+                try:
+                    self.assertTrue(entered.wait(5))
+                    workers.submit(replace_history).result(timeout=2)
+                finally:
+                    release.set()
+                response = future.result(timeout=5)
+        self.assertEqual(response.history_instance_id, old_instance)
+        self.assertEqual(response.next_cursor, f'{old_instance}:1')
+        self.assertEqual([s.data.Count for s in response.samples], [1])
+        self.assertEqual(response.samples[0].data.history_instance_id, old_instance)
+        current = self.query()
+        self.assertNotEqual(current['history_instance_id'], old_instance)
+        self.assertEqual([s['data']['Count'] for s in current['samples']], [2])
+
+    def test_http_json_matches_model_bytes_for_pages_and_escaped_nested_values(self):
+        self.service._record_history_sample(FactoryData(
+            Time='한글 "line"\n\\', Count=1,
+            Computed={'message': '한글\n"quoted"\\', 'nested': [None, True, {'x': '<>&'}]},
+        ), self.wall)
+        self.record(2, self.wall - 10)
+        for since, limit, cursor in (
+            (0, 36000, None), (0, 1, None), (int(self.wall * 1000) + 100000, 5, None),
+            (0, 1, f'{self.service.history_instance_id}:0'),
+            (0, 5, f'{self.service.history_instance_id}:999'),
+        ):
+            with self.subTest(since=since, limit=limit, cursor=cursor):
+                expected = self.service.get_data_history(since, limit, cursor).model_dump_json().encode('utf-8')
+                params = {'since_ms': since, 'limit': limit}
+                if cursor is not None:
+                    params['cursor'] = cursor
+                response = self.client.get('/api/data/history', params=params)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers['content-type'], 'application/json')
+                self.assertEqual(response.content, expected)
+
     def test_concurrent_recorders_assign_unique_ordered_sequences(self):
         release = threading.Event()
         def write(count):
@@ -194,3 +279,36 @@ class HistoryCursorTests(unittest.TestCase):
         rows = [harness.logger.queue.get_nowait() for _ in range(harness.logger.queue.qsize())]
         self.assertEqual([r.Count for r in rows], [1, 2, 3, 4])
         self.assertTrue(all(r.history_sequence is None for r in rows))
+
+
+class HistoryEndpointConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_waiting_history_worker_does_not_block_same_loop_health(self):
+        entered, release = threading.Event(), threading.Event()
+        loop_tid = threading.get_native_id()
+        worker_tids = []
+        body = b'{"samples":[]}'
+
+        def delayed_history(*args):
+            worker_tids.append(threading.get_native_id())
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError('history worker not released')
+            return body
+
+        with patch.object(api.plc_service, 'get_data_history_json', side_effect=delayed_history), \
+                patch.object(api, 'build_health_payload', return_value={'running': True}):
+            transport = httpx.ASGITransport(app=api.app)
+            async with httpx.AsyncClient(transport=transport, base_url='http://localhost') as client:
+                history = asyncio.create_task(client.get('/api/data/history?since_ms=0'))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+                    health = await asyncio.wait_for(client.get('/health'), timeout=2)
+                    self.assertEqual(health.status_code, 200)
+                    self.assertTrue(health.json()['running'])
+                    self.assertFalse(history.done())
+                    self.assertNotEqual(worker_tids, [loop_tid])
+                finally:
+                    release.set()
+                    result = await asyncio.wait_for(history, timeout=5)
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.content, body)

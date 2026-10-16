@@ -113,10 +113,20 @@ executor 대기/worker 처리/event loop 복귀를 새 진단 응답에서 구�
 | `scripts/validate_csv_v2_shadow.py` 및 전수 검증 도우미 | 스키마별 CSV 검증, 이미지 실물·해시·전체 디코딩·양방향 연결 검사 |
 | SPOT 이미지 큐·저장·종료·보존 기간 처리 및 관련 회귀시험 | 과거 15건 원인 추적과 확인된 원인의 재발 방지 |
 | 기존 미서명 빌드/NSIS 패키징 경로(`scripts/deploy.ps1`, `npm run dist`)·패키지 검사 도구 | 최종 clean commit·payload·provenance·installer SHA256 및 실제 `NotSigned` 상태 검증 |
-| root/frontend/backend 버전 정보 및 출시 기록 | 후보별 버전 일치와 태그 충돌 검사. 현재 새 패키지 후보는 `1.0.29`이며 설치된 `1.0.28`과 구분 |
+| root/frontend/backend 버전 정보 및 출시 기록 | 후보별 버전 일치와 태그 충돌 검사. 2026-10-16 GC 이력 보완의 새 패키지 후보는 `1.0.30`이며 설치된 `1.0.29`와 구분 |
 | 후보 검증·실제 적용 후 보고서, 운영본·롤백 기준 문서 | 실행별 판정과 증거 연결, 최종 승격 후 기준 갱신 |
 
 위 파일명이 상대경로인 항목은 `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next` 기준이다. 보존한 서명 workflow는 상위 Git 저장소의 `.github/workflows`에 있으며 이번 내부 운영의 실행 경로에서 제외한다. 원인 분석 결과가 계획 범위를 벗어나는 변경을 요구하면 실행 전에 계획 변경 절차를 따른다.
+
+2026-10-16 R2의 같은 요청 CPU·스택 대조에서 자동 GC 관여를 확인했다.
+[GC 진단 기록](../../04-report/production-release-risk-validation-cpu-outlier-20261016.report.md)의
+격리 재현에서 장기 이력의 Pydantic 객체가 GC 검사 비용을 키웠다. 기존 R2의 확인된 병목
+보완 범위로 `backend/FacilityData/service.py`의 메모리 이력 표현과 `backend/app.py`의
+이력 응답 준비, 관련 history 회귀를 수정한다. 설계 5.23의 1시간·36,000개 보관,
+sequence/UTC/monotonic, 공개 JSON·중첩값
+격리 계약을 유지한다. GC 설정·서버 이력·CSV·장비 설정은 변경하지 않는다.
+개발 PC에서 실제 구현의 보관 비용·기록/조회 비용과 전체 회귀를 검증한 뒤 새 후보의
+패키지·설치·현장 성능 검증으로 진행한다. 합성 결과만으로 R2 완료나 서버 개선을 선언하지 않는다.
 
 ## 4. 미결 항목별 책임·조치·통과 기준 요약
 

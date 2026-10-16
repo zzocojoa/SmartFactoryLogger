@@ -636,3 +636,61 @@ commit 문자열만 허용하거나 payload/설정/metadata에서 후보를 자�
 사용자가 32비트 PowerShell에서 시작해도 launcher는 `Sysnative`를 통해 64비트
 Windows PowerShell 5.1을 선택한다. 64비트 시작 창에서는 `System32`를 사용한다.
 패키지 시험에서 두 시작 창의 실제 실행·종료 코드와 잘못된 hash 거부를 확인한다.
+
+### 5.23 GC 검사 비용을 줄이는 화면 이력 보관
+
+같은 요청의 독립 CPU 스택 검산과 격리 재현 근거는
+[2026-10-16 GC 진단](../../04-report/production-release-risk-validation-cpu-outlier-20261016.report.md)에 있다.
+이는 자동 GC가 관찰된 요청에 크게 관여한 근거이며, 서버의 특정 객체나 모든 과거 지연의
+원인을 확정하지 않는다. 실제 구현과 패키지·현장 검증을 거쳐 개선 효과를 판단한다.
+
+`PLCService.history`는 각 항목의 timestamp_ms, sequence, recorded_monotonic과
+공개 `FactoryData` JSON 문자열만 담는 내부 불변 record를 보관한다. 데이터 전체의
+Pydantic 인스턴스·필드 set·중첩 가변 dict/list를 장기간 유지하지 않는다. JSON은 이미
+생성된 published 모델의 기존 serializer에서 만든다. 바깥 record는 읽기 쉬운 NamedTuple로
+구현하며 일반 tuple 시제품과 GC 추적 특성이 다르므로 최종 구현으로 비용을 재측정한다.
+
+기록 시 published 모델은 지금처럼 timestamp/history identity를 붙여 반환한다. 원래 입력,
+실시간 published 값과 CSV에 전달하는 모델·private freshness anchor는 변경하지 않는다.
+보관 대상은 화면 history API가 공개하는 JSON 투영이다. 기존 Field(exclude=True) 내부
+freshness 값과 PrivateAttr는 공개 응답에 넣지 않는다. CSV·원본 데이터 포맷 이관은 없다.
+
+조회는 기존 lock 안에서 동일한 순서·조건으로 retention/UTC/cursor/limit과 응답 metadata를
+결정하고 선택한 불변 record의 참조만 가져온다. lock을 해제한 뒤 JSON을 새 dict/list로
+복원한다. 저장 시점에 이미 직렬화한 내부 값만 `FactoryData.model_construct`로 복원하여,
+측정 값을 다시 정규화하는 validator를 재실행하지 않는다. 외부 파일·사용자 입력을 이
+경로로 읽지 않는다. 각 조회는 독립된 객체를 반환하여 응답 객체 수정이 저장 이력을
+바꾸지 않게 한다. 응답 모델·필드·API 경로·최대 limit는 그대로다.
+
+1시간의 monotonic 만료와 정확한 경계, 36,000개 FIFO 한도, 같은 UTC의 별도 sequence,
+UTC 역전, legacy latest-tail, cursor 페이지·gap/reset·retry, clear/restart identity를 유지한다.
+메모리 collector는 같은 bounded sample을 고른 뒤 lock 밖에서 새 표현을 추정한다.
+GC enable/threshold/freeze/주기 설정, health 200ms 한도와 온도 안전 기준은 바꾸지 않는다.
+
+확인 예: 중첩 Computed/list/dict를 가진 값을 기록한 뒤 원본·published·첫 조회 응답을
+수정해도 다음 조회 JSON은 기록 당시와 같아야 한다. 조회 복원 중 recorder를 실행해
+lock 때문에 막히지 않는지, 동시에 clear해도 해당 응답의 metadata와 samples가 일관된지
+검사한다. 기존 history/API/clock/CSV 회귀와 최종 전체 health 검사를 수행한다.
+동일 소스·입력의 수정 전후 격리 프로세스에서 15,800개와 36,000개 보관, full GC,
+기록 비용, 500/1,000개 및 최대 페이지 조회·직렬화 비용을 비교한다.
+로컬 시험만으로 설치본이나 현장 15분/120분을 PASS로 표시하지 않는다.
+
+첫 실제 구현 비교에서는 1,000개 조회·재직렬화가 약 11~16ms에서 66~81ms로 늘었다.
+이 결과를 수용하고 끝내지 않는다. 페이지 선택은 단일 내부 함수로 유지하고, Python
+호출자의 모델 반환 경로와 HTTP의 이미 직렬화된 JSON 결합 경로를 나눈다.
+HTTP 경로는 각 record의 내부 serializer 출력과 정수 timestamp/sequence를 결합하고,
+metadata는 표준 JSON encoder로 직렬화한다. 기존 응답 바이트·Content-Type·OpenAPI
+응답 모델을 유지한다. 외부 JSON 문자열을 이 내부 저장소에 넣는 경로는 만들지 않는다.
+`backend/app.py`의 이력 endpoint는 `asyncio.to_thread`로 페이지 선택·JSON 결합·UTF-8
+인코딩을 수행하고 bytes Response를 반환한다. event loop 안에서 전체 이력을 모델로
+재구성하거나 인코딩하지 않는다. 이 변경도 R2 병목 보완 범위이며 새 endpoint를 추가하지 않는다.
+
+회귀 검사에는 HTTP/모델 경로의 전체 JSON 바이트 일치(한글·따옴표·줄바꿈·중첩값),
+다른 스레드에서 실제 응답을 만드는지, worker가 대기 중일 때 동일 event loop의 health
+요청이 완료되는지를 포함한다. 큰 페이지의 조회·인코딩 비용과 최대 메모리를 별도 기록한다.
+
+최대 36,000개 응답을 큰 문자열로 결합한 첫 HTTP 구현은 격리 프로세스의 peak working
+set을 약 496MiB에서 546MiB로 늘렸다. 전체 문자열의 중간 사본을 줄이도록 `BytesIO`에
+각 record를 UTF-8로 순차 기록하고 최종 bytes를 반환한다. 이는 HTTP streaming 전환이
+아니며 기존 한 응답의 Content-Length와 bytes 응답 계약을 유지한다. 같은 최대 페이지의
+해시, 조회 시간, peak working set/commit을 새 프로세스에서 수정 전후 재비교한다.

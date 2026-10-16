@@ -2284,7 +2284,8 @@ async def get_data_history(
     cursor: Annotated[str | None, Query(max_length=49)] = None,
 ):
     try:
-        return plc_service.get_data_history(since_ms, limit, cursor)
+        body = await asyncio.to_thread(plc_service.get_data_history_json, since_ms, limit, cursor)
+        return Response(content=body, media_type="application/json")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
