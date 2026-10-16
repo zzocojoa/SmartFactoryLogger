@@ -98,9 +98,33 @@ unit 명령은 `scripts/field-v1028`에서 실행하며 각 `SFL_*_TEST_ROOT`를
 제품 코드·의존성이 변경되지 않아 전체 `npm run health`는 반복하지 않았다.
 변경된 도우미와 그 경계·프로세스 정리 검사를 실행했다.
 
+## 실행 파일 빌드와 검사
+
+helper commit `cd2b7d22fb2830cadacebdc26aa2e090609fe682`의 Git 바이트만 별도 source 폴더로
+추출해 실행 파일을 빌드했다. 해당 helper 트리는 변경 없음으로 확인했다. 다른 작업에서
+수정 중인 `AGENTS.md`와 병렬 운영 문서는 이 commit에 포함하거나 되돌리지 않았다.
+빌드 전후 의존성 목록·추출 소스 해시가 같으며 PyInstaller exit 0이다.
+
+- 폴더: 위 기록 위치의 `package-r1`
+- EXE: `health_diagnostic_runner.exe`, 16,090,713 bytes
+- EXE SHA256: `01f2d6009cd4255d6ac5acfb0c603f37c77191ecddc0401252d90927615873a5`
+- package manifest SHA256: `c3c7ffa14d1b1709439025675f03b9af66c24e33f0e0148cd239767ccad20ffb`
+- trace manifest SHA256: `d36ce79b1f56d20fbf0a3698ec655e4fae5fc411685e6cbce687672f950994ee`
+
+이 EXE로 `--describe` exit 0, 틀린 요청 pin·섞인 6초 요청·중복 JSON key·빈 설치 폴더는
+각각 기대한 exit 1을 확인했다. 유효한 900초 요청은 outlier contract와 owned worker까지
+진입하고 빈 설치 폴더의 `exact-installed-file-set`에서 실패했다. 샘플 0개,
+`collector-ready.json` 없음, worker 종료, active job 0, 강제 종료 없음이었다.
+따라서 frozen CLI와 실패 시 중단 경로의 검사이며 실제 WPR/설치 앱 통합 PASS가 아니다.
+검사 후 package의 모든 파일을 다시 검산했다.
+
+`frozen-verification.json` SHA256:
+`60f935a770f60250ec8d82eda83c47ac6e56a775ab61834f4a7bcb215c7b753b`.
+`verify_frozen.py` exit 0. 이 단계에서는 서버 전달·서버 독립 실행·새 추적을 시작하지 않았다.
+
 ## 이어갈 단계
 
-1. 고정 helper commit의 실행 파일을 빌드하고 그 실행 파일의 요청 거부·원본 잠금·종료를 검증한다.
+1. 위 고정 실행 파일과 승인 기준 자료로 새 서버 전달 묶음을 만든다.
 2. 새 묶음을 Z 전송 후 CRD 탐색기로 서버 로컬까지 복사하고 파일별 해시를 확인한다.
 3. 짧고 읽기 전용인 자식으로 서버의 실제 독립 실행과 종료를 먼저 확인한다.
 4. 새 runtime/config 관찰에 결합한 요청으로 조건부 추적을 한 번 수행한다.
