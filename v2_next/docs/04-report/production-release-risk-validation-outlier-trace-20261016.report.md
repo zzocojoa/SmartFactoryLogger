@@ -1,7 +1,9 @@
-# Health 지연 조건부 Windows 추적 준비
+# Health 지연 조건부 Windows 추적과 현장 분석
 
 작성일: 2026-10-16. 제품 설치본은 1.0.29 / `acaf77d95101a050f4d3ecd76125d3502036f5a7`이다.
-현재 단계는 도우미 검증이며 현장 추적 실행·지연 원인 확정·운영 승격은 완료되지 않았다.
+현장 추적에서 203.3337ms 응답을 포착하고 같은 요청의 스레드 실행 구간을 검산했다.
+PLC 조회 내부 186.6288ms 중 CSwitch 기준 CPU 배정 시간은 181.1570ms였다.
+함수별 실행·DPC/ISR 기여는 아직 측정하지 않아 지연 원인 확정·운영 승격은 미완료다.
 기존 15분 FAIL, 물리 경계 NOT_TESTED, 출시 HOLD를 유지한다.
 
 ## 변경 목적과 판정 조건
@@ -122,12 +124,85 @@ helper commit `cd2b7d22fb2830cadacebdc26aa2e090609fe682`의 Git 바이트만 별
 `60f935a770f60250ec8d82eda83c47ac6e56a775ab61834f4a7bcb215c7b753b`.
 `verify_frozen.py` exit 0. 이 단계에서는 서버 전달·서버 독립 실행·새 추적을 시작하지 않았다.
 
-## 이어갈 단계
+## 현장 전달과 독립 실행 확인
 
-1. 위 고정 실행 파일과 승인 기준 자료로 새 서버 전달 묶음을 만든다.
-2. 새 묶음을 Z 전송 후 CRD 탐색기로 서버 로컬까지 복사하고 파일별 해시를 확인한다.
-3. 짧고 읽기 전용인 자식으로 서버의 실제 독립 실행과 종료를 먼저 확인한다.
-4. 새 runtime/config 관찰에 결합한 요청으로 조건부 추적을 한 번 수행한다.
-5. 결과를 회수해 trigger와 ETL 시계·생성 세대·이벤트 범위를 대조한다.
-   지연 원인을 확정하기 전 제품 수정·120분 시험·승격을 하지 않는다.
-6. 작업 후 Smart Factory 창과 현재 작업 정보를 전면에서 확인한다.
+이하 결과는 위 준비 단계 이후에 수행한 별도 증거다. 기록 위치는
+`C:\Users\user\Desktop\SmartFactory\PDCA_OUTLIER_FIELD_20261016_27ab2088`이다.
+준비 단계의 원본 기록과 고정 해시는 다시 쓰지 않았다.
+
+`OT29_20261016_27ab2088`의 16개 파일을 `Z:\SmartFactory\20261016\send`를 거쳐
+CRD 탐색기로 서버 바탕화면 `SmartFactory` 아래까지 복사하고 모든 해시를 검산했다.
+짧은 독립 실행 시험은 실제 서버에서 모든 job 밖의 자식 생성, SSH 부모 종료 이후
+자식의 결과 저장, 자식 종료를 확인했다. `independent-probe-verification.json`의 판정은
+`OUTLIVED_SSH_PARENT_AND_CHILD_EXITED`다. 첫 시도는 PowerShell 실행 정책에 의해
+스크립트 실행 전에 중단됐다. 두 번째는 검산한 스크립트에 프로세스 범위의
+`-ExecutionPolicy Bypass`를 적용했으며 시스템 정책과 상위 job 제한은 변경하지 않았다.
+
+새 요청·감시 스크립트도 `OC29_20261016_27ab2088`로 서버 로컬 전달 후 검산했다.
+인증된 SSH에서 독립 감시자를 실행했고 사용자의 수동 명령 실행은 필요하지 않았다.
+감시자·실행기 종료 코드 0, 결과 저장, 수집기·제어기 종료, 남은 worker 0,
+해당 고유 WPR instance 정리를 확인했다. 앱 재시작·설치·전체 백업은 하지 않았다.
+
+| 증거 | 값 |
+| --- | --- |
+| 서버 제어 폴더 | `C:\Users\user\Desktop\SmartFactory\Da517479f3ab8` |
+| 서버 결과 폴더 | `C:\Users\user\Desktop\SmartFactory\H5e26d951a11a` |
+| 요청 SHA256 | `8a0f6d369e66810198ecc7c1362153e9278f79c121be324e004532c418f611ce` |
+| 인증된 SSH에서 확인한 launcher SHA256 | `bdc7de63fbaa9713c1cb80d77e69633f5c312506b1f9d7989f134c1d32e7af81` |
+| ETL | 17,563,648 bytes / `1d46748a835323608205281ccb8d9788527f960b652c77ee2773a0a5bf9c0fde` |
+| 로컬 회수 | `recovered-H5e26d951a11a`, 132개 파일 / 36,554,319 bytes |
+
+`field-capture-review.json`은 파일별 해시, 실행 전후 설정, 앱의 native 생성 시각,
+서비스 세대, 53개 요청과 원본의 연결을 확인했다. 회수 파일의 자체 해시만 비교한 것이
+아니라 SSH에서 확보한 launcher SHA256과 대조했다. 최종 운영 화면은
+`smart-factory-after-capture.png`에 보존했다. 앱은 Running, 현장 작업 정보는 60313 / 2였다.
+
+## 같은 요청의 추적 분석
+
+첫 200ms 초과는 sequence 52, probe `979d3d14dabb472691884088ab5d32e1`이었다.
+요청·본문 수신까지 203.3337ms였고 응답 후 trigger 판단까지 19.9551ms였다.
+53건에서 조기 종료했으므로 450건 정식 QA 결과가 아니다.
+
+원본 ETL을 선택 이벤트 디코더와 Windows `tracerpt`로 각각 읽었다. 선택 디코더는
+exit 0이었다. `tracerpt` 자체도 exit 0이지만 XML이 390,928,523 bytes여서 기존
+내보내기 래퍼의 256MiB 제한에서 exit 1로 끝났다. 이 실패를 보존하고, 이미 생성된
+정확한 크기·해시의 XML만 별도 512MiB 읽기 상한으로 검산했다. 서버 수집 상한이나
+저장소의 내보내기 기준은 완화하지 않았다. 따라서 전체 내보내기 PASS로 보고하지 않는다.
+
+`crosscheck_outlier.py` exit 0: 두 경로의 419,947개 이벤트가 값·개수 모두 일치했다.
+CSwitch 266,903, ReadyThread 150,057, 시작 190, 종료 192, rundown 2,605개이며
+중복 0개였다. ETL header EventsLost/BuffersLost는 0이다. 이 값만으로 모든 종류의
+추적 품질을 통과 처리하지 않는다.
+
+`join_outlier.py` exit 0: trigger 요청의 loop·worker·collector native 수명과 QPC 구간을
+결합하고, 선택 디코더 및 raw XML에서 따로 계산한 CPU별 구간이 일치함을 확인했다.
+대상 3개 구간 모두 수명·CPU 연결 검사를 통과했고 거부된 결합은 0개였다.
+
+| 대상 구간 | 벽시계 시간(ms) | CSwitch 기준 CPU 배정(ms) | 그 밖의 시간(ms) |
+| --- | ---: | ---: | ---: |
+| backend worker 전체 | 199.6363 | 185.8249 | 13.8114 |
+| PLC 조회 내부 | 186.6288 | 181.1570 | 5.4718 |
+| runtime 정보 내부 | 2.5814 | 0.4397 | 2.1417 |
+| frontend 상태 내부 | 10.1708 | 4.1532 | 6.0176 |
+| backend loop | 199.9651 | 3.3900 | 196.5751 |
+| 요청 수집기 | 203.3395 | 0.8662 | 202.4733 |
+
+내부 구간은 checkpoint 시각의 불확실성을 제외한 보수적인 범위다.
+`analyze_phases.py` exit 0의 상세 결과는 `outlier-phase-analysis.json`에 있다.
+PLC 조회 지연 전부를 CPU 배정 없이 기다린 시간으로 설명할 수는 없다.
+다만 CSwitch 구간에는 미측정 인터럽트 실행이 포함될 수 있으며, Python 함수·GC·정확한
+CPU 시간을 식별하지 못한다. 원인 판정은 `UNDETERMINED`다.
+Microsoft도 CSwitch 기반 구간, 샘플링된 함수·스택, DPC/ISR을 별도 분석 대상으로 설명한다.
+[CPU Analysis](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/cpu-analysis).
+
+## 검증 범위와 다음 단계
+
+`recover_and_review.py`, `crosscheck_outlier.py`, `join_outlier.py`, `analyze_phases.py`는
+각각 exit 0이었다. 현장 설치 commit과 분석에 사용한 관련 backend 7파일의
+`git diff --exit-code`도 exit 0이다. 이번 단계는 별도 계측·분석이며 제품 코드를 바꾸지 않아
+제품 전체 테스트와 재빌드는 반복하지 않았다. 기존 15분 FAIL과 물리 경계 NOT_TESTED,
+출시 HOLD를 유지한다. 이번 health 단독 추적을 이전 동시 부하 시험의 통과로 대체하지 않는다.
+
+다음은 PLC 조회 경로의 함수별 비용과 DPC/ISR 기여를 구분할 계측을 검토하고,
+확인된 원인만 보완하는 것이다. 근거 없는 캐시·임계값 변경, 같은 설치본의 반복 설치,
+120분 시험·승격을 먼저 하지 않는다. 서버 작업 후 Smart Factory를 전면에 표시한다.
