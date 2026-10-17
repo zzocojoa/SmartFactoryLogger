@@ -4618,7 +4618,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 retention_days=1,
                 last_cleanup_at=0.0,
             )
-            writer._cleanup_retention(now)
+            with patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+                writer._cleanup_retention(now)
 
             self.assertFalse(stale_managed.exists())
             self.assertTrue(stale_general.exists())

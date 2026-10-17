@@ -641,64 +641,80 @@ def _spot_image_capture_worker() -> None:
     global _spot_image_capture_failure_count, _spot_image_capture_last_fact
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_write_at, _spot_image_capture_written_count
-    while not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty():
-        try:
-            event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
-        except queue.Empty:
-            continue
-        fact: Optional[Dict[str, str]] = None
-        capture_error: Optional[Exception] = None
-        failure_stage = "writer_initialization"
-        failure_at = 0.0
-        failure_count = 0
-        try:
-            writer = _get_spot_image_capture_writer()
-            failure_stage = "write_capture"
-            fact = writer.write_capture(
-                image_bytes=event.image_bytes,
-                captured_at=event.captured_at,
-                source_url=event.source_url,
-                source=event.source,
-                image_age_ms=event.image_age_ms,
-                link_checked_at=event.link_checked_at,
-                observation_snapshot=event.observation_snapshot,
-            )
-        except Exception as exc:  # pragma: no cover - exercised through integration-style tests
-            capture_error = exc
-        finally:
-            if capture_error is None and fact is None:
-                capture_error = RuntimeError("capture writer returned no fact")
-            # Outcome accounting and Queue.task_done() are one atomic state
-            # transition. Shutdown can therefore never observe a recorded
-            # failure while the same capture still appears unfinished.
-            with _spot_image_capture_lock:
-                if capture_error is None and fact is not None:
-                    _spot_image_capture_written_count += 1
-                    _spot_image_capture_last_write_at = time.time()
-                    _spot_image_capture_last_fact = dict(fact)
-                    _spot_image_capture_last_error_code = None
-                    _spot_image_capture_last_error_message = None
-                else:
-                    assert capture_error is not None
-                    _spot_image_capture_failure_count += 1
-                    _spot_image_capture_last_error_at = time.time()
-                    failure_at = _spot_image_capture_last_error_at
-                    failure_count = _spot_image_capture_failure_count
-                    _spot_image_capture_last_error_code = capture_error.__class__.__name__
-                    _spot_image_capture_last_error_message = "capture writer failed"
-                _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
-        if capture_error is not None:
-            # Default stderr formatting drops LogRecord.extra. Keep the safe
-            # capture identity in the message even after later writes recover.
-            _logger.warning(
-                "SPOT image capture writer failed %s",
-                json.dumps(_spot_image_capture_failure_evidence(
-                    event, capture_error, stage=failure_stage, error_at=failure_at, failure_count=failure_count,
-                ), ensure_ascii=True, allow_nan=False, separators=(",", ":")),
-                extra={
-                    "error_type": capture_error.__class__.__name__,
-                },
-            )
+    writer: Optional[SpotImageCaptureWriter] = None
+    try:
+        while not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty():
+            try:
+                event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
+            except queue.Empty:
+                if writer is not None and not _SPOT_IMAGE_CAPTURE_STOP.is_set():
+                    if (writer is not _spot_image_capture_writer
+                            or _spot_image_capture_writer_signature != _spot_image_capture_config_signature()):
+                        writer.close_retention_scan()
+                        writer = None
+                    else:
+                        writer._cleanup_retention(time.time(), allow_start=False)
+                continue
+            fact: Optional[Dict[str, str]] = None
+            capture_error: Optional[Exception] = None
+            failure_stage = "writer_initialization"
+            failure_at = 0.0
+            failure_count = 0
+            try:
+                current_writer = _get_spot_image_capture_writer()
+                if writer is not None and writer is not current_writer:
+                    writer.close_retention_scan()
+                writer = current_writer
+                failure_stage = "write_capture"
+                fact = writer.write_capture(
+                    image_bytes=event.image_bytes,
+                    captured_at=event.captured_at,
+                    source_url=event.source_url,
+                    source=event.source,
+                    image_age_ms=event.image_age_ms,
+                    link_checked_at=event.link_checked_at,
+                    observation_snapshot=event.observation_snapshot,
+                )
+            except Exception as exc:  # pragma: no cover - exercised through integration-style tests
+                capture_error = exc
+            finally:
+                if capture_error is None and fact is None:
+                    capture_error = RuntimeError("capture writer returned no fact")
+                # Outcome accounting and Queue.task_done() are one atomic state
+                # transition. Shutdown can therefore never observe a recorded
+                # failure while the same capture still appears unfinished.
+                with _spot_image_capture_lock:
+                    if capture_error is None and fact is not None:
+                        _spot_image_capture_written_count += 1
+                        _spot_image_capture_last_write_at = time.time()
+                        _spot_image_capture_last_fact = dict(fact)
+                        _spot_image_capture_last_error_code = None
+                        _spot_image_capture_last_error_message = None
+                    else:
+                        assert capture_error is not None
+                        _spot_image_capture_failure_count += 1
+                        _spot_image_capture_last_error_at = time.time()
+                        failure_at = _spot_image_capture_last_error_at
+                        failure_count = _spot_image_capture_failure_count
+                        _spot_image_capture_last_error_code = capture_error.__class__.__name__
+                        _spot_image_capture_last_error_message = "capture writer failed"
+                    _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
+            if capture_error is not None:
+                # Default stderr formatting drops LogRecord.extra. Keep the safe
+                # capture identity in the message even after later writes recover.
+                _logger.warning(
+                    "SPOT image capture writer failed %s",
+                    json.dumps(_spot_image_capture_failure_evidence(
+                        event, capture_error, stage=failure_stage, error_at=failure_at, failure_count=failure_count,
+                    ), ensure_ascii=True, allow_nan=False, separators=(",", ":")),
+                    extra={
+                        "error_type": capture_error.__class__.__name__,
+                    },
+                )
+
+    finally:
+        if writer is not None:
+            writer.close_retention_scan()
 
 
 def flush_spot_image_capture_queue(timeout_sec: float = 2.0) -> bool:

@@ -4,12 +4,13 @@ import csv
 import hashlib
 import io
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Generator, Mapping, Optional
 
 from backend.FacilityData.spot_observation_fact import build_spot_observation_key
 
@@ -75,6 +76,7 @@ class SpotImageCaptureWriter:
     _manifest_tracked_size: int = field(default=0, init=False, repr=False)
     _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
     _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
+    _retention_scan: Optional[Generator[None, None, None]] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         try:
@@ -384,34 +386,64 @@ class SpotImageCaptureWriter:
         ):
             self._manifest_state_ready = False
 
-    def _cleanup_retention(self, now: float) -> None:
-        if self.retention_days <= 0 or now - self.last_cleanup_at < 3600.0:
+    def _cleanup_retention(self, now: float, *, allow_start: bool = True) -> None:
+        if self.retention_days <= 0:
+            self.close_retention_scan()
             return
-        self.last_cleanup_at = now
-        cutoff = now - (self.retention_days * 86400.0)
+        if self._retention_scan is None:
+            if not allow_start or now - self.last_cleanup_at < 3600.0:
+                return
+            self.last_cleanup_at = now
+            self._retention_scan = self._retention_steps(now - self.retention_days * 86400.0)
+        # Bound work between captures, including directory enumeration. An OS
+        # call itself cannot be preempted; this is a cooperative time budget.
+        deadline = time.monotonic() + 0.010
         try:
-            for day_dir in self._iter_managed_day_dirs():
-                for path in day_dir.glob("spotimg_*"):
-                    if self._is_managed_capture_file(path) and path.stat().st_mtime < cutoff:
-                        path.unlink(missing_ok=True)
-            self._cleanup_empty_managed_dirs()
-        except OSError:
-            return
+            for _ in range(256):
+                if time.monotonic() >= deadline:
+                    return
+                next(self._retention_scan)
+        except (StopIteration, OSError):
+            self.close_retention_scan()
 
-    def _iter_managed_day_dirs(self) -> tuple[Path, ...]:
-        if not self.capture_root.exists() or not self.capture_root.is_dir():
-            return ()
-        day_dirs: list[Path] = []
-        for year_dir in self.capture_root.iterdir():
-            if not year_dir.is_dir() or not _is_date_component(year_dir.name, 4):
-                continue
-            for month_dir in year_dir.iterdir():
-                if not month_dir.is_dir() or not _is_date_component(month_dir.name, 2, 1, 12):
-                    continue
-                for day_dir in month_dir.iterdir():
-                    if day_dir.is_dir() and _is_date_component(day_dir.name, 2, 1, 31):
-                        day_dirs.append(day_dir)
-        return tuple(day_dirs)
+    def close_retention_scan(self) -> None:
+        """Release the scan on its owning capture worker, including on shutdown."""
+        scan, self._retention_scan = self._retention_scan, None
+        if scan is not None:
+            scan.close()
+
+    def _retention_steps(self, cutoff: float) -> Generator[None, None, None]:
+        def walk(directory: Path, depth: int) -> Generator[None, None, bool]:
+            removed_child = False
+            # Path.iterdir/glob can materialize an entire directory. Keep only
+            # the current entries and at most four scandir handles instead.
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    yield
+                    if entry.is_symlink() or getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400:
+                        continue
+                    path = Path(entry.path)
+                    if depth < 3:
+                        component = (4, None, None) if depth == 0 else (2, 1, 12 if depth == 1 else 31)
+                        if _is_date_component(entry.name, *component) and entry.is_dir(follow_symlinks=False):
+                            child_removed = yield from walk(path, depth + 1)
+                            removed_child = removed_child or child_removed
+                    elif entry.name.startswith("spotimg_"):
+                        if self._is_managed_capture_file(path) and path.stat().st_mtime < cutoff:
+                            path.unlink(missing_ok=True)
+            removed = False
+            # As before, remove month/year only after removing a managed day
+            # beneath them. Unrelated empty year/month folders are preserved.
+            if depth == 3 or (depth > 0 and removed_child):
+                try:
+                    directory.rmdir()
+                    removed = True
+                except OSError:
+                    pass
+                yield
+            return removed
+
+        yield from walk(self.capture_root, 0)
 
     def _is_managed_capture_file(self, path: Path) -> bool:
         if not path.is_file() or not _is_managed_capture_stem(path.stem):
@@ -429,20 +461,6 @@ class SpotImageCaptureWriter:
             and _is_date_component(parts[1], 2, 1, 12)
             and _is_date_component(parts[2], 2, 1, 31)
         )
-
-    def _cleanup_empty_managed_dirs(self) -> None:
-        for day_dir in sorted(self._iter_managed_day_dirs(), reverse=True):
-            try:
-                day_dir.rmdir()
-            except OSError:
-                continue
-            month_dir = day_dir.parent
-            year_dir = month_dir.parent
-            for path in (month_dir, year_dir):
-                try:
-                    path.rmdir()
-                except OSError:
-                    break
 
 
 def build_spot_image_fact(

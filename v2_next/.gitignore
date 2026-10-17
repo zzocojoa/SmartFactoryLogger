@@ -105,3 +105,4 @@ config.pending.json
 !backend/tests/test_spot_tcp_reuse.py
 !backend/tests/test_temperature_terminal_integration.py
 !backend/tests/test_health_timing.py
+!backend/tests/test_spot_image_retention.py
