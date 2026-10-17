@@ -83,7 +83,9 @@ class SpotImageRetentionTests(unittest.TestCase):
                 clock[0] += 0.006
                 return original(path)
 
-            with patch.object(spot_image_fact.time, "monotonic", side_effect=lambda: clock[0]), \
+            # A coarse clock can remain unchanged while the fine clock exceeds 10ms.
+            with patch.object(spot_image_fact.time, "monotonic", return_value=0.0), \
+                    patch.object(spot_image_fact.time, "perf_counter", side_effect=lambda: clock[0]), \
                     patch.object(writer, "_is_managed_capture_file", side_effect=inspect):
                 writer._cleanup_retention(time.time())
             self.assertEqual(len(visited), 2)
@@ -106,7 +108,7 @@ class SpotImageRetentionTests(unittest.TestCase):
             # Read back the representable timestamp to test a strict boundary.
             os.utime(boundary, (now - 86400, now - 86400))
             now = boundary.stat().st_mtime + 86400
-            with patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+            with patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 writer._cleanup_retention(now)
                 self.assertTrue(any(path.exists() for path in expired))
                 self.complete(writer, now)
@@ -138,7 +140,7 @@ class SpotImageRetentionTests(unittest.TestCase):
             for number in range(600):
                 (writer.capture_root / f"manual-{number}").mkdir(parents=True)
             with patch.object(spot_image_fact, "_is_date_component", wraps=spot_image_fact._is_date_component) as component, \
-                    patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+                    patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 writer._cleanup_retention(time.time())
                 self.assertGreater(component.call_count, 0)
                 self.assertLessEqual(component.call_count, 256)
@@ -194,7 +196,7 @@ class SpotImageRetentionTests(unittest.TestCase):
                         active.remove(path)
 
             with patch.object(spot_image_fact.os, "scandir", side_effect=tracked), \
-                    patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+                    patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 writer._cleanup_retention(time.time())
                 self.assertTrue(active)
                 writer.retention_days = 0
@@ -260,7 +262,7 @@ class SpotImageRetentionTests(unittest.TestCase):
                 raise queue.Empty
 
             with patch.object(pending, "get", side_effect=next_event), \
-                    patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+                    patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 api._spot_image_capture_worker()
             self.assertTrue(all(not path.exists() for path in expired))
             self.assertEqual(pending.unfinished_tasks, 0)
@@ -275,7 +277,7 @@ class SpotImageRetentionTests(unittest.TestCase):
             expired = self.make_files(writer.capture_root, 600, modified=time.time() - 864000)
             self.enqueue(api, pending)
             stop.set()
-            with patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+            with patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 api._spot_image_capture_worker()
             self.assertTrue(any(path.exists() for path in expired))
             self.assertIsNone(writer._retention_scan)
@@ -294,7 +296,7 @@ class SpotImageRetentionTests(unittest.TestCase):
             api._get_spot_image_capture_writer.side_effect = [first_writer, second_writer]
             with patch.object(first_writer, "close_retention_scan", wraps=first_writer.close_retention_scan) as first_close, \
                     patch.object(second_writer, "close_retention_scan", wraps=second_writer.close_retention_scan) as second_close, \
-                    patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+                    patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 api._spot_image_capture_worker()
                 first_close.assert_called_once()
                 second_close.assert_called_once()
@@ -321,7 +323,7 @@ class SpotImageRetentionTests(unittest.TestCase):
                 raise queue.Empty
 
             with patch.object(pending, "get", side_effect=next_event), \
-                    patch.object(spot_image_fact.time, "monotonic", return_value=0.0):
+                    patch.object(spot_image_fact.time, "perf_counter", return_value=0.0):
                 api._spot_image_capture_worker()
             self.assertGreater(remaining[0], 0)
             self.assertEqual(sum(path.exists() for path in expired), remaining[0])

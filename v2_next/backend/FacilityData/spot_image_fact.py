@@ -397,10 +397,10 @@ class SpotImageCaptureWriter:
             self._retention_scan = self._retention_steps(now - self.retention_days * 86400.0)
         # Bound work between captures, including directory enumeration. An OS
         # call itself cannot be preempted; this is a cooperative time budget.
-        deadline = time.monotonic() + 0.010
+        deadline = time.perf_counter() + 0.010
         try:
             for _ in range(256):
-                if time.monotonic() >= deadline:
+                if time.perf_counter() >= deadline:
                     return
                 next(self._retention_scan)
         except (StopIteration, OSError):
