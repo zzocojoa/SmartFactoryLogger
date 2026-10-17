@@ -21,17 +21,26 @@ from field_host_sampling import WindowsProcessReader
 
 PROFILE_SHA256 = '603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486'
 CPU_PROFILE_SHA256 = '3ad310b110ead5c2867b9632ff96ec71e0381a030bac7f7ec91bddf5f5c94fee'
+READY_PROFILE_SHA256 = '03220768bee3245513b2ec4d9eeac2affd7ddffcd2c786f6a658146bdd8e2478'
 SCOPE = 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'
 OUTLIER_SCOPE = 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC'
 CPU_OUTLIER_SCOPE = 'LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'
 CPU_CONCURRENT_SCOPE = 'LOCAL_HEALTH_CPU_CONCURRENT_TRACE_DIAGNOSTIC'
+READY_CONCURRENT_SCOPE = 'LOCAL_HEALTH_READY_CONCURRENT_TRACE_DIAGNOSTIC'
 
 
-def capture_policy(outlier, cpu_samples=False, concurrent_api=False):
+def capture_policy(outlier, cpu_samples=False, concurrent_api=False, ready_stacks=False):
     binding.require(type(outlier) is bool, 'trace-outlier-mode-type')
     binding.require(type(cpu_samples) is bool and (not cpu_samples or outlier), 'trace-cpu-outlier-mode')
-    binding.require(type(concurrent_api) is bool and (not concurrent_api or cpu_samples),
+    binding.require(type(ready_stacks) is bool
+                    and (not ready_stacks or (outlier and concurrent_api and not cpu_samples)),
+                    'trace-ready-concurrent-mode')
+    binding.require(type(concurrent_api) is bool and (not concurrent_api or cpu_samples or ready_stacks),
                     'trace-concurrent-api-mode')
+    if ready_stacks:
+        return dict(scope=READY_CONCURRENT_SCOPE, contract_schema='sfl-health-ready-concurrent-contract-v1',
+                    lease_schema='sfl-health-ready-concurrent-lease-v1', duration=900, guard=960,
+                    profile_sha256=READY_PROFILE_SHA256)
     if concurrent_api:
         return dict(scope=CPU_CONCURRENT_SCOPE, contract_schema='sfl-health-cpu-concurrent-contract-v1',
                     lease_schema='sfl-health-cpu-concurrent-lease-v1', duration=900, guard=960,
@@ -89,18 +98,19 @@ class TracedHealthCollectionSpec(collection.HealthCollectionSpec):
     outlier_capture: bool = False
     cpu_samples: bool = False
     concurrent_api: bool = False
+    ready_stacks: bool = False
 
     def validate(self):
         super().validate()
         binding.plain_path(self.trace_contract_path)
         binding.require(digest(self.trace_contract_sha256), 'trace-contract-sha256')
-        capture_policy(self.outlier_capture, self.cpu_samples, self.concurrent_api)
+        capture_policy(self.outlier_capture, self.cpu_samples, self.concurrent_api, self.ready_stacks)
 
 
 class HealthTraceHandshake:
     def __init__(self, spec, duration, evidence_directory):
         spec.validate()
-        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api)
+        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api, spec.ready_stacks)
         binding.require(duration == self.policy['duration'] and type(duration) in (int, float),
                         'trace-capture-fixed-duration')
         self.spec = spec
@@ -257,7 +267,8 @@ def _worker_entry(spec, output, duration, stop, sender):
                 with HealthTraceHandshake(spec, duration, Path(output)/'evidence') as trace:
                     result = collection.collect(spec, output, duration, local_stop,
                         lambda item: sender.send_bytes(json.dumps(item).encode()), _trace=trace,
-                        _outlier=spec.outlier_capture, _concurrent_api=spec.concurrent_api)
+                        _outlier=spec.outlier_capture, _concurrent_api=spec.concurrent_api,
+                        _ready_stacks=spec.ready_stacks)
             finally:
                 local_stop.close()
             fact = observation.write_json(Path(output)/'worker-result.json', result)
@@ -272,5 +283,5 @@ def supervise(spec, output, *, stop_event=None):
     binding.require(type(spec) is TracedHealthCollectionSpec, 'traced-diagnostic-spec-type')
     spec.validate()
     return observation.supervise_observation(spec, output,
-        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api)['duration'],
+        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api, spec.ready_stacks)['duration'],
         preparation_timeout=180, finalization_timeout=180, stop_event=stop_event, _worker_target=_worker_entry)

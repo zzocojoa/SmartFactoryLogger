@@ -91,7 +91,8 @@ class TraceTests(unittest.TestCase):
     def coordinator_go(self, handshake):
         directory = self.root/'SmartFactory'/('T'+'d'*12)
         directory.mkdir(parents=True)
-        policy = trace.capture_policy(self.spec.outlier_capture, self.spec.cpu_samples, self.spec.concurrent_api)
+        policy = trace.capture_policy(self.spec.outlier_capture, self.spec.cpu_samples, self.spec.concurrent_api,
+                                      self.spec.ready_stacks)
         lease = dict(schema=policy['lease_schema'], scope=policy['scope'], run_id=self.contract['run_id'],
             run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=policy['guard'], capture_seconds=policy['duration'],
             stop_timeout_seconds=60, profile_sha256=policy['profile_sha256'],
@@ -184,6 +185,32 @@ class TraceTests(unittest.TestCase):
         for flags in ((False, False, True), (True, False, True), (True, True, 1), (True, True, None)):
             with self.assertRaises(ValueError):
                 trace.capture_policy(*flags)
+
+    def test_ready_contract_rejects_cpu_substitution_and_binds_terminal_trace(self):
+        policy = trace.capture_policy(True, False, True, True)
+        self.assertEqual((policy['duration'], policy['guard'], policy['profile_sha256']),
+                         (900, 960, trace.READY_PROFILE_SHA256))
+        self.contract.update(schema=policy['contract_schema'], scope=policy['scope'],
+                             duration_seconds=900, guard_seconds=960)
+        self.path.write_text(json.dumps(self.contract))
+        self.spec = replace(self.spec, outlier_capture=True, concurrent_api=True, ready_stacks=True,
+                            trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(ValueError, 'trace-contract-schema'):
+            with trace.HealthTraceHandshake(replace(self.spec, ready_stacks=False, cpu_samples=True), 900, self.evidence):
+                pass
+        with trace.HealthTraceHandshake(self.spec, 900, self.evidence) as h:
+            bound = self.bind(h)
+            self.assertEqual(bound['lease']['profile_sha256'], trace.READY_PROFILE_SHA256)
+            with patch.object(h, 'wait', side_effect=lambda *args: self.stopped(h)):
+                self.assertGreater(h.finish({}, self.stop)['etl']['bytes'], 0)
+        for flags in ((True, True, True, True), (False, False, True, True),
+                      (True, False, False, True), (True, False, True, 1), (True, False, True, None)):
+            with self.assertRaises(ValueError):
+                trace.capture_policy(*flags)
+
+    def test_ready_profile_matches_previously_validated_bytes(self):
+        profile = Path(__file__).with_name('profiles')/'SFLReadyThread.wprp'
+        self.assertEqual(hashlib.sha256(profile.read_bytes()).hexdigest(), trace.READY_PROFILE_SHA256)
 
     def test_begin_rejects_changed_ready_worker_or_lease(self):
         for key, value in [('collector_ready_sha256', '0'*64), ('worker', {'pid': 1}),

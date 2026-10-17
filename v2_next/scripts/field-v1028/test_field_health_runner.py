@@ -66,7 +66,8 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(contract['guard_seconds'], 960 if outlier else 30)
             self.assertEqual(spec.outlier_capture, outlier)
             self.assertEqual(spec.cpu_samples, self.request['schema'] in (runner.CPU_OUTLIER_SCHEMA, runner.CPU_CONCURRENT_SCHEMA))
-            self.assertEqual(spec.concurrent_api, self.request['schema'] == runner.CPU_CONCURRENT_SCHEMA)
+            self.assertEqual(spec.concurrent_api, self.request['schema'] in (runner.CPU_CONCURRENT_SCHEMA, runner.READY_CONCURRENT_SCHEMA))
+            self.assertEqual(spec.ready_stacks, self.request['schema'] == runner.READY_CONCURRENT_SCHEMA)
             self.assertEqual(hashlib.sha256(Path(spec.trace_contract_path).read_bytes()).hexdigest(), spec.trace_contract_sha256)
             with self.assertRaises(OSError):
                 (self.archive/'configuration.json').write_text('attempted replacement')
@@ -181,8 +182,9 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'health-request-spec-candidate'):
             runner.validate_request(changed)
 
-    def test_all_four_1030_trace_modes_keep_candidate_and_fixed_contract(self):
-        for schema in (runner.SCHEMA, runner.OUTLIER_SCHEMA, runner.CPU_OUTLIER_SCHEMA, runner.CPU_CONCURRENT_SCHEMA):
+    def test_all_1030_trace_modes_keep_candidate_and_fixed_contract(self):
+        for schema in (runner.SCHEMA, runner.OUTLIER_SCHEMA, runner.CPU_OUTLIER_SCHEMA, runner.CPU_CONCURRENT_SCHEMA,
+                       runner.READY_CONCURRENT_SCHEMA):
             with self.subTest(schema=schema):
                 self.setUp()
                 self.request.update(schema=schema, duration_seconds=6 if schema == runner.SCHEMA else 900,
@@ -193,6 +195,26 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(seen[0].candidate, runner.binding.CANDIDATE_1030)
                 self.assertEqual(saved['field_gate'], 'NOT_EVALUATED')
                 self.assertFalse(saved['promotion_allowed'])
+
+    def test_ready_request_is_distinct_and_keeps_fixed_limits(self):
+        self.request.update(schema=runner.READY_CONCURRENT_SCHEMA, duration_seconds=900)
+        for duration in (6, 899, 901, True, 900.0):
+            with self.assertRaises(ValueError):
+                runner.validate_request(dict(self.request, duration_seconds=duration))
+        changed = deepcopy(self.request)
+        changed['schema'] = runner.CPU_CONCURRENT_SCHEMA
+        changed['spec']['ready_stacks'] = True
+        with self.assertRaisesRegex(ValueError, 'health-request-spec-members'):
+            runner.validate_request(changed)
+        result, saved, seen = self.invoke()
+        self.assertEqual(result['status'], 'PASS', saved)
+        self.assertEqual(saved['mode'], 'health-ready-concurrent-trace')
+        self.assertEqual(saved['scope'], 'READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
+        self.assertTrue(seen[0].ready_stacks)
+        self.assertFalse(seen[0].cpu_samples)
+        contract = json.loads(Path(seen[0].trace_contract_path).read_bytes())
+        self.assertEqual(contract['scope'], runner.trace.READY_CONCURRENT_SCOPE)
+        self.assertEqual(contract['schema'], 'sfl-health-ready-concurrent-contract-v1')
 
     def test_1030_tampered_archived_payload_prevents_collection(self):
         self.request['candidate_commit'] = runner.binding.CANDIDATE_1030.commit

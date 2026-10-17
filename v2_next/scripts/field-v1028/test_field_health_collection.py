@@ -37,7 +37,8 @@ class CollectionTests(unittest.TestCase):
             configuration_reference_sha256='a'*64, backend_created_filetime=1000)
 
     def run_collection(self, *, configuration=None, control=None, probes=None, native=None,
-                       closeout_error=False, stop=None, duration=.01, trace=None, outlier=False, concurrent=False):
+                       closeout_error=False, stop=None, duration=.01, trace=None, outlier=False, concurrent=False,
+                       event_query=None, ready_stacks=False):
         @contextmanager
         def reference(*args, **kwargs):
             self.assertEqual(kwargs['candidate'], self.spec.candidate)
@@ -62,14 +63,53 @@ class CollectionTests(unittest.TestCase):
                 side_effect=configuration or [{'configuration_status': 'PASS'}]*2))
             call = stack.enter_context(patch.object(collection.diagnostic, 'capture_health_probe',
                 side_effect=probes or [probe]))
+            stack.enter_context(patch.object(collection.system_events, 'capture',
+                side_effect=event_query or (lambda *args: dict(query_status='COMPLETE',
+                    events=[], matched_record_count=0, errors=[]))))
             result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append,
-                                        _trace=trace, _outlier=outlier, _concurrent_api=concurrent)
+                                        _trace=trace, _outlier=outlier, _concurrent_api=concurrent,
+                                        _ready_stacks=ready_stacks)
             if payload.called:
                 self.assertEqual(payload.call_args.kwargs['candidate'], self.spec.candidate)
         self.assertEqual(result['field_gate'], 'NOT_EVALUATED')
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
         return result, events, call.call_count
+
+    def test_event_query_runs_after_trace_and_final_binding_and_is_manifest_bound(self):
+        phases = []
+        trace = SimpleNamespace(begin=lambda *args: {},
+            finish=lambda *args: phases.append('trace-finished') or {}, abort=phases.append)
+        def capture(start, end, stop):
+            self.assertEqual(phases, ['trace-finished'])
+            self.assertTrue((self.folder/'evidence/payload-closeout.json').exists())
+            self.assertGreaterEqual((end-start).total_seconds(), 120)
+            phases.append('events')
+            return dict(query_status='COMPLETE', events=[], matched_record_count=0, errors=[])
+        result, _, _ = self.run_collection(trace=trace, event_query=capture)
+        self.assertEqual(result['collection_status'], 'BOUND_WINDOW_CAPTURED')
+        self.assertEqual(result['system_event_query_status'], 'COMPLETE')
+        self.assertEqual(phases, ['trace-finished', 'events'])
+        manifest = json.loads((self.folder/'evidence/manifest.json').read_bytes())
+        self.assertIn('system-events.json', manifest['files'])
+        (self.folder/'evidence/system-events.json').write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'component-file-hash'):
+            collection.observation.verify_component_manifest(self.folder/'evidence', 32)
+
+    def test_incomplete_query_is_saved_and_prevents_collection_completion(self):
+        partial = dict(query_status='INCOMPLETE', events=[{'record_id': 5}],
+                       matched_record_count=None, errors=[{'stage': 'next', 'winerror': 5}])
+        result, _, count = self.run_collection(event_query=lambda *args: partial)
+        self.assertEqual((result['collection_status'], count), ('INCOMPLETE', 1))
+        self.assertEqual(result['system_event_query_status'], 'INCOMPLETE')
+        self.assertIn('system-event-query-incomplete', json.dumps(result))
+        self.assertEqual(json.loads((self.folder/'evidence/system-events.json').read_bytes()), partial)
+
+    def test_failed_binding_never_claims_an_event_query(self):
+        def forbidden(*args):
+            self.fail('event query after failed binding')
+        result, _, _ = self.run_collection(native=[{'status': 'UNAVAILABLE'}], event_query=forbidden)
+        self.assertEqual(result['system_event_query_status'], 'NOT_ATTEMPTED')
 
     def test_slow_bound_response_is_preserved_without_performance_pass(self):
         result, events, count = self.run_collection()
@@ -183,7 +223,7 @@ class CollectionTests(unittest.TestCase):
             self.assertTrue((self.folder/'evidence'/name).is_file())
 
     def run_outlier(self, latencies, *, bound=True, concurrent=False, fail_at=None,
-                    notice_at=None, late_notice=False):
+                    notice_at=None, late_notice=False, ready_stacks=False):
         clock = {'ns': 1_000_000_000, 'stop': False}
         def wait(seconds):
             clock['ns'] += round(seconds * 1e9)
@@ -241,7 +281,8 @@ class CollectionTests(unittest.TestCase):
         with patch.object(collection.time, 'perf_counter_ns', lambda: clock['ns']), \
                 patch.object(collection, 'ConcurrentApiLoad', Companion):
             result, events, count = self.run_collection(duration=900, stop=stop, trace=trace,
-                                                       outlier=True, probes=probe, concurrent=concurrent)
+                                                       outlier=True, probes=probe, concurrent=concurrent,
+                                                       ready_stacks=ready_stacks)
         return result, count, phases
 
     def test_concurrent_trigger_stops_trace_before_waiting_for_companion(self):
@@ -252,6 +293,13 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(result['trigger']['sequence'], 1)
         for name in ('concurrent-api-started.json', 'concurrent-api-closeout.json'):
             self.assertTrue((self.folder/'evidence'/name).is_file())
+
+    def test_ready_trace_preserves_trigger_cleanup_and_scope(self):
+        result, count, phases = self.run_outlier([200, 200.01, 999], concurrent=True, ready_stacks=True)
+        self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 2))
+        self.assertEqual(result['scope'], 'READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
+        self.assertLess(phases.index('finish'), phases.index('load-finish'))
+        self.assertFalse(result['promotion_allowed'])
 
     def test_concurrent_no_trigger_preserves_full_health_schedule(self):
         result, count, phases = self.run_outlier([10]*450, concurrent=True)

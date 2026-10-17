@@ -12,6 +12,9 @@ $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 
 function Get-HealthTracePolicy([string]$Scope){
  $schedulingProfile='603c872d5bb638661eb6e133f2b23b4f778e8bab5f440dbda3017c09ea0ff486'
+ if($Scope -ceq 'LOCAL_HEALTH_READY_CONCURRENT_TRACE_DIAGNOSTIC'){
+  return @{contract_schema='sfl-health-ready-concurrent-contract-v1';lease_schema='sfl-health-ready-concurrent-lease-v1';duration=900;guard=960;profile_sha256='03220768bee3245513b2ec4d9eeac2affd7ddffcd2c786f6a658146bdd8e2478'}
+ }
  if($Scope -ceq 'LOCAL_INSTALLED_HEALTH_TRACE_DIAGNOSTIC'){
   return @{contract_schema='sfl-health-trace-contract-v1';lease_schema='sfl-health-trace-lease-v1';duration=6;guard=30;profile_sha256=$schedulingProfile}
  }

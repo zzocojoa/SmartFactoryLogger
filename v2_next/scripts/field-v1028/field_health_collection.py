@@ -5,6 +5,7 @@ nor its worker controls the application or WPR. A protected outer launcher and
 same-run ETW handshake/coverage review are still required for field use.
 """
 from dataclasses import asdict, dataclass
+from datetime import timedelta
 import json
 import math
 from pathlib import Path
@@ -18,6 +19,7 @@ import field_generation_binding as generation
 import field_health_diagnostic as diagnostic
 import field_installation_binding as binding
 import field_observation as observation
+import field_system_events as system_events
 from field_host_sampling import WindowsProcessReader
 
 
@@ -42,7 +44,8 @@ def validate_duration(duration):
                     and 0 < duration <= 30, 'diagnostic-duration-budget')
 
 
-def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False, _concurrent_api=False):
+def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False, _concurrent_api=False,
+            _ready_stacks=False):
     """Run only inside the owned worker; the supervisor bounds blocking calls."""
     spec.validate()
     if _outlier:
@@ -52,10 +55,13 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
         validate_duration(duration)
     binding.require(type(_concurrent_api) is bool and (not _concurrent_api or _outlier),
                     'concurrent-api-requires-bounded-outlier-trace')
+    binding.require(type(_ready_stacks) is bool and (not _ready_stacks or _concurrent_api),
+                    'ready-stack-requires-concurrent-trace')
     folder = observation.http._prepare_output(Path(output) / 'evidence')
     files = {}
     result = dict(schema='sfl-health-collection-v1', collection_status='INCOMPLETE',
                   observation_status='FAIL', errors=[], samples=[],
+                  system_event_query_status='NOT_ATTEMPTED',
                   field_gate='NOT_EVALUATED', etw_coverage='NOT_EVALUATED',
                   release_gate='HOLD', promotion_allowed=False,
                   started_ns=time.perf_counter_ns(), duration_seconds=duration,
@@ -66,6 +72,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
     if _concurrent_api:
         result.update(scope='CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE', concurrent_api=True,
                       concurrent_trigger=None)
+    if _ready_stacks:
+        result.update(scope='READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
     companion = None
     companion_finished = False
 
@@ -130,6 +138,7 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
             save('configuration-initial.json', initial_configuration)
             binding.require(initial_configuration['configuration_status'] == 'PASS', 'initial-configuration-binding')
             require_running()
+            event_start = system_events.utc_now() - timedelta(minutes=2)
             if _trace is not None:
                 save('trace-binding.json', _trace.begin(dict(files), stop))
             origin = time.perf_counter_ns() + (3_000_000_000 if _concurrent_api else 250_000_000)
@@ -189,6 +198,7 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                     concurrent_trigger=result.get('concurrent_trigger'),
                     origin_ns=origin, finished_ns=time.perf_counter_ns(),
                     release_gate='HOLD', promotion_allowed=False))
+            event_end = system_events.utc_now()
             notify(dict(phase='finalizing', origin_ns=origin))
             if _trace is not None:
                 save('trace-completion.json', _trace.finish(dict(files), stop))
@@ -211,6 +221,11 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
             diagnostic.require_native(native, spec.backend, spec.backend_created_filetime)
             save('payload-closeout.json', payload.recheck())
         require_running()  # Includes successful reference/context closeout above.
+        event_result = system_events.capture(event_start, event_end, stop)
+        save('system-events.json', event_result)
+        result['system_event_query_status'] = event_result['query_status']
+        binding.require(event_result['query_status'] == 'COMPLETE', 'system-event-query-incomplete')
+        require_running()
         result['collection_status'] = 'BOUND_WINDOW_CAPTURED'
         # Existing owned-worker IPC field: PASS means collector completion only.
         result['observation_status'] = 'PASS'

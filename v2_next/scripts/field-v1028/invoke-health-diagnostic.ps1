@@ -76,6 +76,10 @@ function Assert-HealthEntryPackage($Document){
 }
 function Get-HealthEntryBudget($Request){
  Assert-HealthEntry ($Request.duration_seconds -is [int]) 'health-request-duration-type'
+ if($Request.schema -ceq 'sfl-health-ready-concurrent-request-v1'){
+  Assert-HealthEntry ($Request.duration_seconds -eq 900) 'health-request-identity-budget'
+  return @{seconds=1500;scope='READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE'}
+ }
  if($Request.schema -ceq 'sfl-health-diagnostic-request-v1'){
   Assert-HealthEntry ($Request.duration_seconds -eq 6) 'health-request-identity-budget'
   return @{seconds=600;scope='SIX_SECOND_CAPTURE_NOT_FIELD_PERFORMANCE'}

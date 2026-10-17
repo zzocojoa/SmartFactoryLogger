@@ -90,6 +90,14 @@ foreach($case in @(@('sfl-health-diagnostic-request-v1',900),@('sfl-health-outli
 }
 @{status='PASS';short_seconds=$short.seconds;long_seconds=$long.seconds;cpu_seconds=$cpu.seconds;concurrent_seconds=$concurrent.seconds;rejected=12}|ConvertTo-Json
 ''')
+    run('ready-request-budgets', r'''
+$ready=Get-HealthEntryBudget @{schema='sfl-health-ready-concurrent-request-v1';duration_seconds=900}
+Check ($ready.seconds -eq 1500 -and $ready.scope -ceq 'READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE') 'ready request budget'
+foreach($duration in @(6,899,901,$true,900.0)){
+ $rejected=$false;try{[void](Get-HealthEntryBudget @{schema='sfl-health-ready-concurrent-request-v1';duration_seconds=$duration})}catch{$rejected=$true};Check $rejected 'ready invalid duration accepted'
+}
+@{status='PASS';accepted=1;rejected=5;actual_etw_started=$false}|ConvertTo-Json
+''')
     archive = root/'archive'
     archive.mkdir()
     run('archive-and-path', r'''
