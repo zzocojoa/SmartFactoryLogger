@@ -112,12 +112,21 @@ class ReviewTests(unittest.TestCase):
         self.assertFalse(result['promotion_allowed'])
 
     def test_history_candidate_exact_version_build_and_schema(self):
+        self.check_candidate_contract(reviewer.binding.CANDIDATE_1030, 'sfl-health-runtime-close-request-v3')
+
+    def test_renderer_fix_candidate_same_version_other_build_rejected(self):
+        self.check_candidate_contract(reviewer.binding.CANDIDATE_1030_RENDERER_FIX, 'sfl-health-runtime-close-request-v5')
+
+
+    def test_final_candidate_same_version_other_build_rejected(self):
+        self.check_candidate_contract(reviewer.binding.CANDIDATE_1030_FINAL, 'sfl-health-runtime-close-request-v4')
+
+    def check_candidate_contract(self, candidate, schema):
         files = rollover_fixture()
-        candidate = reviewer.binding.CANDIDATE_1030
         for name in ('request.json', 'health-before.json', META):
             value = json.loads(files[name])
             if name == 'request.json':
-                value.update(schema='sfl-health-runtime-close-request-v3', candidate_commit=candidate.commit)
+                value.update(schema=schema, candidate_commit=candidate.commit)
             elif name == 'health-before.json':
                 value['app_version'] = candidate.version
                 value['spot_temperature']['build_git_commit'] = candidate.commit
@@ -130,12 +139,17 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result['csv_first_sample_seq'], 18573)
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
+        other_build = (reviewer.binding.CANDIDATE_1030.commit if candidate == reviewer.binding.CANDIDATE_1030_FINAL
+                       else reviewer.binding.CANDIDATE_1030_FINAL.commit)
         for name, keys, wrong, message in (
             ('request.json', ('schema',), 'sfl-health-runtime-close-request-v2', 'request-build-schema'),
             ('request.json', ('candidate_commit',), reviewer.BUILD, 'request-build-schema'),
             ('health-before.json', ('app_version',), '1.0.29', 'health-runtime'),
             ('health-before.json', ('spot_temperature', 'build_git_commit'), reviewer.BUILD, 'health-generation'),
             (META, ('schema_metadata', 'git_commit'), reviewer.BUILD, 'metadata-generation'),
+            ('request.json', ('candidate_commit',), other_build, 'request-build-schema'),
+            ('health-before.json', ('spot_temperature', 'build_git_commit'), other_build, 'health-generation'),
+            (META, ('schema_metadata', 'git_commit'), other_build, 'metadata-generation'),
         ):
             with self.subTest(name=name, keys=keys):
                 changed = deepcopy(files)

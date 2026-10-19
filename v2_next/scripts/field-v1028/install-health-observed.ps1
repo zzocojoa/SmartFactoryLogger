@@ -90,6 +90,30 @@ function Get-HealthInstallPins([string]$CandidateCommit='acaf77d95101a050f4d3ecd
         candidate_reference='658b096408ddb82022c53f9802c1300e6da7ca7cfbd077a60db4efc07935fe69'
         candidate_installer='3394a23de82f0d40749f020af320592a33cd9630113ba02b1e40f63f41549de7'
     }}
+    if($CandidateCommit -ceq '685dde946e8ce2e34c65c6dde05be16e342f068e') { return $common+@{
+        request_schema='sfl-final-observed-install-request-v1'
+        backup_policy='OMITTED_FOR_1030_FINAL_VERIFIED_TRANSITION'
+        previous_version='1.0.30';candidate_version='1.0.30';candidate_installer_bytes=164149766
+        previous_commit='0732c8e810be3c46096b397812f53a9767354229'
+        candidate_commit='685dde946e8ce2e34c65c6dde05be16e342f068e'
+        previous_reference='4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
+        candidate_reference='bb8d9e36be3f158e0555f48a6c013fbaa98d8d5208cc19e4b35c6e4b354faa30'
+        candidate_installer='2965d4c0cb98bdedb4357c308f9c23d4b5f319cf259b8639201669650b0e9303'
+        previous_installer='e72c042dd4554d5c31e27b8a2edfa6ecdcbdd08c58ed43769e7a84d782b370c1'
+        previous_installer_bytes=164941077
+    }}
+    if($CandidateCommit -ceq '8de064317d6de42d321afb8395f7a30a1f31cd55') { return $common+@{
+        request_schema='sfl-renderer-fix-observed-install-request-v1'
+        backup_policy='OMITTED_FOR_1030_RENDERER_LOSS_FIX'
+        previous_version='1.0.30';candidate_version='1.0.30';candidate_installer_bytes=164150064
+        previous_commit='0732c8e810be3c46096b397812f53a9767354229'
+        candidate_commit='8de064317d6de42d321afb8395f7a30a1f31cd55'
+        previous_reference='4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
+        candidate_reference='bfc8d8283d0196c5dfaed9bfdfad4459e5a07a9a1e42758b71dba2ce325498e3'
+        candidate_installer='f1b6d4d843504e09410cd90dcd309a0e485e9fd7a59a524b64941c61719f5a32'
+        previous_installer='e72c042dd4554d5c31e27b8a2edfa6ecdcbdd08c58ed43769e7a84d782b370c1'
+        previous_installer_bytes=164941077
+    }}
     Require ($CandidateCommit -ceq '0732c8e810be3c46096b397812f53a9767354229') 'unsupported-install-candidate'
     return $common+@{
         request_schema='sfl-history-observed-install-request-v1'
@@ -174,16 +198,24 @@ function Assert-HealthConfiguration([byte[]]$Bytes) {
     $checked=DisableComparator $content
     Require ([Convert]::ToBase64String($checked) -ceq [Convert]::ToBase64String($content)) 'comparator-must-already-be-false'
 }
-function Get-HealthPayloadFacts([string]$Root,$Reference,[string]$Version) {
-    $known=@{
-        '1.0.28'=@{commit='4cc7393e1bafbf90a329726aed9470fe0daacb21';count=1814;size=234260;sha='0b2ddc44640a139ab3b5c5a4febdf75e7039a37fadc6871866d7b0d78a46bc6b'}
-        '1.0.29'=@{commit='acaf77d95101a050f4d3ecd76125d3502036f5a7';count=1867;size=234261;sha='37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921'}
-        '1.0.30'=@{commit='0732c8e810be3c46096b397812f53a9767354229';count=1899;size=234260;sha='a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'}
+function Get-HealthPayloadFacts([string]$Root,$Reference,[string]$Version,[string]$ExpectedCommit='') {
+    # Old callers retain their exact build; a same-version replacement must opt in by commit.
+    $legacy=@{'1.0.28'='4cc7393e1bafbf90a329726aed9470fe0daacb21';'1.0.29'='acaf77d95101a050f4d3ecd76125d3502036f5a7';'1.0.30'='0732c8e810be3c46096b397812f53a9767354229'}
+    if($ExpectedCommit -ceq ''){
+        Require ($legacy.ContainsKey($Version)) 'health-install-payload-contract'
+        $ExpectedCommit=$legacy[$Version]
     }
-    Require ($known.ContainsKey($Version)) 'health-install-payload-contract'
-    $pin=$known[$Version];$count=$pin.count
-    Require ($Reference.version -ceq $Version -and
-        $Reference.candidate_commit -ceq $pin.commit -and $Reference.payload_file_count -eq $count -and
+    $known=@{
+        '4cc7393e1bafbf90a329726aed9470fe0daacb21'=@{version='1.0.28';count=1814;size=234260;sha='0b2ddc44640a139ab3b5c5a4febdf75e7039a37fadc6871866d7b0d78a46bc6b'}
+        'acaf77d95101a050f4d3ecd76125d3502036f5a7'=@{version='1.0.29';count=1867;size=234261;sha='37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921'}
+        '0732c8e810be3c46096b397812f53a9767354229'=@{version='1.0.30';count=1899;size=234260;sha='a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'}
+        '685dde946e8ce2e34c65c6dde05be16e342f068e'=@{version='1.0.30';count=1866;size=234260;sha='a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'}
+        '8de064317d6de42d321afb8395f7a30a1f31cd55'=@{version='1.0.30';count=1866;size=234260;sha='a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'}
+    }
+    Require ($known.ContainsKey($ExpectedCommit)) 'health-install-payload-contract'
+    $pin=$known[$ExpectedCommit];$count=$pin.count
+    Require ($Reference.version -ceq $Version -and $Version -ceq $pin.version -and
+        $Reference.candidate_commit -ceq $ExpectedCommit -and $Reference.payload_file_count -eq $count -and
         @($Reference.payload_files.PSObject.Properties).Count -eq $count) 'health-install-payload-contract'
     $facts=PayloadFacts $Root $Reference.payload_files
     $extra=$facts['Uninstall smart-factory.exe']
@@ -257,7 +289,7 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     $oldReference=ReadLockedJson $oldStream;Save-HealthInput 'preceding-payload.json' $oldStream
     $newStream=LockFile $Request.payload_reference $pins.candidate_reference
     $newReference=ReadLockedJson $newStream;Save-HealthInput 'candidate-payload.json' $newStream
-    SaveJson 'preceding-installed-files' (Get-HealthPayloadFacts $InstallRoot $oldReference $pins.previous_version)
+    SaveJson 'preceding-installed-files' (Get-HealthPayloadFacts $InstallRoot $oldReference $pins.previous_version $pins.previous_commit)
     $candidate=Plain $Request.candidate_installer
     $null=LockFile $candidate $pins.candidate_installer $pins.candidate_installer_bytes
     $null=LockFile $Request.rollback_installer $pins.rollback_installer 163826264
@@ -301,7 +333,7 @@ function Invoke-HealthInstallTransaction([IO.Stream]$RequestStream,[string]$Requ
     Assert-HealthReverificationFreshness $reverification
     $script:phase='installer';Invoke-HealthInstaller $candidate
     $script:phase='installed-payload';AssertCold (ColdSnapshot)
-    SaveJson 'installed-files' (Get-HealthPayloadFacts $InstallRoot $newReference $pins.candidate_version)
+    SaveJson 'installed-files' (Get-HealthPayloadFacts $InstallRoot $newReference $pins.candidate_version $pins.candidate_commit)
     $registrations=@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'|Where-Object{$_.PSObject.Properties['DisplayName'] -and $_.DisplayName -like '*smart-factory*'})
     Require ($registrations.Count -eq 1 -and $registrations[0].DisplayVersion -ceq $pins.candidate_version -and
         $registrations[0].UninstallString -like ('*'+$InstallRoot+'\Uninstall smart-factory.exe*')) 'installed-registration'

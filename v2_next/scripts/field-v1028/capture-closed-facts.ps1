@@ -7,7 +7,7 @@ $library=[IO.File]::Open((Join-Path $PSScriptRoot 'observe-health-runtime-close.
 try{
     $hasher=[Security.Cryptography.SHA256]::Create()
     try{$pin=[BitConverter]::ToString($hasher.ComputeHash($library)).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()}
-    if($pin -cne '3cdbd3af118d6a284cfcc3c45dd976a80db9db4bb01c28a6c9e2ebf16ae82c26'){throw 'runtime-library-pin'}
+    if($pin -cne 'bee27ed50771fe231b4f197ab4f1de9eb6a1d94c1daab688767669a3653f7b3d'){throw 'runtime-library-pin'}
     $library.Position=0;$reader=[IO.StreamReader]::new($library,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
     try{$source=$reader.ReadToEnd()}finally{$reader.Dispose()}
     $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
@@ -29,7 +29,9 @@ function Read-CaptureJson([IO.Stream]$Stream){
     try{return ($reader.ReadToEnd()|ConvertFrom-Json)}finally{$reader.Dispose()}
 }
 function Assert-CaptureRequest($Request){
-    Require-Runtime ($Request.schema -ceq 'sfl-closed-fact-capture-request-v1' -and $Request.candidate_commit -ceq '0732c8e810be3c46096b397812f53a9767354229') 'capture-request-contract'
+    Require-Runtime (($Request.schema -ceq 'sfl-closed-fact-capture-request-v1' -and $Request.candidate_commit -ceq '0732c8e810be3c46096b397812f53a9767354229') -or
+        ($Request.schema -ceq 'sfl-closed-fact-capture-request-v2' -and $Request.candidate_commit -ceq '685dde946e8ce2e34c65c6dde05be16e342f068e') -or
+        ($Request.schema -ceq 'sfl-closed-fact-capture-request-v3' -and $Request.candidate_commit -ceq '8de064317d6de42d321afb8395f7a30a1f31cd55')) 'capture-request-contract'
     Require-Runtime ($Request.csv_name -cmatch '^Factory_Integrated_Log_v2_[0-9]{8}_[0-9]{6}\.csv$' -and $Request.logger_service_instance_id -cmatch '^[a-f0-9-]{36}$') 'capture-request-generation'
     Require-Runtime (($Request.minimum_sample_seq -is [int] -or $Request.minimum_sample_seq -is [long]) -and $Request.minimum_sample_seq -gt 0) 'capture-minimum-sequence'
     foreach($name in @('config_sha256','close_result_sha256')){Require-Runtime ($Request.$name -cmatch '^[a-f0-9]{64}$') 'capture-request-pin'}

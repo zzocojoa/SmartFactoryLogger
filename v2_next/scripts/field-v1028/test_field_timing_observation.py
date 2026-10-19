@@ -75,6 +75,29 @@ class TimingObservationTests(unittest.TestCase):
             bad=deepcopy(request);bad['spec'][key]=value
             with self.subTest(key=key),self.assertRaises(ValueError):runner.validate_request(bad)
 
+    def test_renderer_fix_1030_timing_rejects_same_version_old_reference(self):
+        request = self.request(binding.CANDIDATE_1030_RENDERER_FIX)
+        self.assertEqual(runner.validate_request(request), 'timing-observe')
+        for key, value in (('reference_sha256', binding.REFERENCE_SHA_1030),
+                           ('candidate_commit', binding.CANDIDATE_1030.commit),
+                           ('backend_created_filetime', True)):
+            bad = deepcopy(request)
+            bad['spec'][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                runner.validate_request(bad)
+
+
+    def test_final_1030_timing_rejects_same_version_old_reference(self):
+        request = self.request(binding.CANDIDATE_1030_FINAL)
+        self.assertEqual(runner.validate_request(request), 'timing-observe')
+        for key, value in (('reference_sha256', binding.REFERENCE_SHA_1030),
+                           ('candidate_commit', binding.CANDIDATE_1030.commit),
+                           ('backend_created_filetime', True)):
+            bad = deepcopy(request)
+            bad['spec'][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                runner.validate_request(bad)
+
     def test_explicit_mode_candidate_native_generation_and_budget(self):
         request=self.request()
         self.assertEqual(runner.validate_request(request),'timing-observe')
@@ -154,6 +177,34 @@ class TimingObservationTests(unittest.TestCase):
         timings=worker['review']['diagnostic_timings']
         self.assertEqual(len(timings),2)
         self.assertTrue(all(row['validation']['status']=='REQUEST_AND_NATIVE_CLOCK_BOUND' for row in timings))
+
+    def test_renderer_fix_1030_collectors_bind_native_timing(self):
+        result, worker, _ = self.run_isolated(candidate=binding.CANDIDATE_1030_RENDERER_FIX)
+        self.assertEqual(result['supervisor_status'], 'PASS', worker)
+        timings = worker['review']['diagnostic_timings']
+        self.assertEqual(len(timings), 2)
+        self.assertTrue(all(row['validation']['status'] == 'REQUEST_AND_NATIVE_CLOCK_BOUND' for row in timings))
+
+
+    def test_final_1030_collectors_bind_native_timing(self):
+        result, worker, _ = self.run_isolated(candidate=binding.CANDIDATE_1030_FINAL)
+        self.assertEqual(result['supervisor_status'], 'PASS', worker)
+        timings = worker['review']['diagnostic_timings']
+        self.assertEqual(len(timings), 2)
+        self.assertTrue(all(row['validation']['status'] == 'REQUEST_AND_NATIVE_CLOCK_BOUND' for row in timings))
+
+    def test_renderer_fix_1030_slow_diagnostic_remains_failure(self):
+        result, worker, _ = self.run_isolated(candidate=binding.CANDIDATE_1030_RENDERER_FIX, mode='timing-slow')
+        self.assertEqual(result['supervisor_status'], 'FAIL')
+        self.assertIn('all-health-including-boundaries-failed', worker['review']['issues'])
+        self.assertTrue(all(row['request_ms'] > 200 for row in worker['review']['diagnostic_timings']))
+
+
+    def test_final_1030_slow_diagnostic_remains_failure(self):
+        result, worker, _ = self.run_isolated(candidate=binding.CANDIDATE_1030_FINAL, mode='timing-slow')
+        self.assertEqual(result['supervisor_status'], 'FAIL')
+        self.assertIn('all-health-including-boundaries-failed', worker['review']['issues'])
+        self.assertTrue(all(row['request_ms'] > 200 for row in worker['review']['diagnostic_timings']))
 
     def test_1030_slow_diagnostic_remains_failure(self):
         result,worker,_=self.run_isolated(candidate=binding.CANDIDATE_1030,mode='timing-slow')

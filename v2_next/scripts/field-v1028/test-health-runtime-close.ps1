@@ -143,6 +143,34 @@ Check 'history-v3-exact-build-and-legacy-isolation' {
         $r.csv_first_sample_seq=$bad;Reject {Assert-RuntimeRequest $r} 'request-first-sequence'
     }
 }
+Check 'final-v4-exact-build-and-same-version-isolation' {
+    $r=[pscustomobject]@{schema='sfl-health-runtime-close-request-v4';candidate_commit='685dde946e8ce2e34c65c6dde05be16e342f068e';logger_service_instance_id='c7bad677-3827-4da6-b4a0-920f9e5629e6';csv_name='Factory_Integrated_Log_v2_20261019_120000.csv';config_sha256=('a'*64);csv_first_sample_seq=18573}
+    Assert-RuntimeRequest $r
+    Require-Runtime ((Get-RuntimeRequestVersion $r) -ceq '1.0.30') 'final-version'
+    $r.candidate_commit='0732c8e810be3c46096b397812f53a9767354229';Reject {Assert-RuntimeRequest $r} 'request-contract'
+    $r.candidate_commit='685dde946e8ce2e34c65c6dde05be16e342f068e'
+    foreach($schema in @('sfl-health-runtime-close-request-v1','sfl-health-runtime-close-request-v2','sfl-health-runtime-close-request-v3')){
+        $r.schema=$schema;Reject {Assert-RuntimeRequest $r} 'request-contract'
+    }
+    $r.schema='sfl-health-runtime-close-request-v4'
+    foreach($bad in @($null,$true,0,-1,1.5,'18573')){
+        $r.csv_first_sample_seq=$bad;Reject {Assert-RuntimeRequest $r} 'request-first-sequence'
+    }
+}
+Check 'renderer-fix-v5-exact-build-and-same-version-isolation' {
+    $r=[pscustomobject]@{schema='sfl-health-runtime-close-request-v5';candidate_commit='8de064317d6de42d321afb8395f7a30a1f31cd55';logger_service_instance_id='c7bad677-3827-4da6-b4a0-920f9e5629e6';csv_name='Factory_Integrated_Log_v2_20261019_120000.csv';config_sha256=('a'*64);csv_first_sample_seq=18573}
+    Assert-RuntimeRequest $r
+    Require-Runtime ((Get-RuntimeRequestVersion $r) -ceq '1.0.30') 'renderer-fix-version'
+    $r.candidate_commit='0732c8e810be3c46096b397812f53a9767354229';Reject {Assert-RuntimeRequest $r} 'request-contract'
+    $r.candidate_commit='8de064317d6de42d321afb8395f7a30a1f31cd55'
+    foreach($schema in @('sfl-health-runtime-close-request-v1','sfl-health-runtime-close-request-v2','sfl-health-runtime-close-request-v3','sfl-health-runtime-close-request-v4')){
+        $r.schema=$schema;Reject {Assert-RuntimeRequest $r} 'request-contract'
+    }
+    $r.schema='sfl-health-runtime-close-request-v5'
+    foreach($bad in @($null,$true,0,-1,1.5,'18573')){
+        $r.csv_first_sample_seq=$bad;Reject {Assert-RuntimeRequest $r} 'request-first-sequence'
+    }
+}
 Check 'identity-only-result-preserves-running-and-unverified-exit-scope' {
     $identityRoot=Join-Path $root 'identity-only';$null=New-Item -ItemType Directory -Path $identityRoot
     $files=[ordered]@{'config.ini'=@{bytes=7;sha256=('c'*64)}}

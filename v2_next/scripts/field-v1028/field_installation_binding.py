@@ -41,7 +41,7 @@ class CandidateIdentity:
     installer_bytes: int
 
     def validate(self):
-        require(type(self) is CandidateIdentity and self in (CANDIDATE_1028, CANDIDATE_1029, CANDIDATE_1030),
+        require(type(self) is CandidateIdentity and self in CANDIDATES,
                 'unsupported-candidate-identity')
 
 
@@ -54,10 +54,20 @@ CANDIDATE_1030 = CandidateIdentity(
     '0732c8e810be3c46096b397812f53a9767354229', '1.0.30',
     'e72c042dd4554d5c31e27b8a2edfa6ecdcbdd08c58ed43769e7a84d782b370c1', 164941077)
 REFERENCE_SHA_1030 = '4e3e95be87d8ea51a509ba62c8eb29236eefe402f5f353bb78c9a342d7825a97'
+CANDIDATE_1030_FINAL = CandidateIdentity(
+    '685dde946e8ce2e34c65c6dde05be16e342f068e', '1.0.30',
+    '2965d4c0cb98bdedb4357c308f9c23d4b5f319cf259b8639201669650b0e9303', 164149766)
+REFERENCE_SHA_1030_FINAL = 'bb8d9e36be3f158e0555f48a6c013fbaa98d8d5208cc19e4b35c6e4b354faa30'
+CANDIDATE_1030_RENDERER_FIX = CandidateIdentity(
+    '8de064317d6de42d321afb8395f7a30a1f31cd55', '1.0.30',
+    'f1b6d4d843504e09410cd90dcd309a0e485e9fd7a59a524b64941c61719f5a32', 164150064)
+REFERENCE_SHA_1030_RENDERER_FIX = 'bfc8d8283d0196c5dfaed9bfdfad4459e5a07a9a1e42758b71dba2ce325498e3'
+CANDIDATES = (CANDIDATE_1028, CANDIDATE_1029, CANDIDATE_1030, CANDIDATE_1030_FINAL,
+              CANDIDATE_1030_RENDERER_FIX)
 
 
 def candidate_from_commit(commit):
-    for candidate in (CANDIDATE_1028, CANDIDATE_1029, CANDIDATE_1030):
+    for candidate in CANDIDATES:
         if type(commit) is str and commit == candidate.commit:
             return candidate
     raise ValueError('unsupported-candidate-commit')
@@ -68,7 +78,9 @@ def candidate_reference_sha256(candidate):
     candidate.validate()
     return {CANDIDATE_1028: REFERENCE_SHA,
             CANDIDATE_1029: REFERENCE_SHA_1029,
-            CANDIDATE_1030: REFERENCE_SHA_1030}[candidate]
+            CANDIDATE_1030: REFERENCE_SHA_1030,
+            CANDIDATE_1030_FINAL: REFERENCE_SHA_1030_FINAL,
+            CANDIDATE_1030_RENDERER_FIX: REFERENCE_SHA_1030_RENDERER_FIX}[candidate]
 
 
 def require(condition, reason):

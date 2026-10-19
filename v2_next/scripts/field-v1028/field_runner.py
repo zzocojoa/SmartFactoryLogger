@@ -47,7 +47,8 @@ def validate_request(value):
         binding.require(data.get('candidate_commit', binding.BUILD) == candidate.commit,
                         'observation-candidate-mismatch')
         if mode == 'timing-observe':
-            binding.require(candidate in (binding.CANDIDATE_1029, binding.CANDIDATE_1030),
+            binding.require(candidate in (binding.CANDIDATE_1029, binding.CANDIDATE_1030,
+                                          binding.CANDIDATE_1030_FINAL, binding.CANDIDATE_1030_RENDERER_FIX),
                             'timing-observation-candidate')
             native = data['backend_created_filetime']
             binding.require(type(native) is int and 0 < native < 2**64, 'timing-observation-native-generation')
@@ -153,8 +154,7 @@ def main(argv=None):
         if args.describe:
             binding.require(not any(supplied), 'describe-with-run-arguments')
             print(json.dumps(dict(schema=SCHEMA, modes=list(MODE_FIELDS), candidate_commit=binding.BUILD,
-                supported_candidate_commits=[binding.CANDIDATE_1028.commit, binding.CANDIDATE_1029.commit,
-                                             binding.CANDIDATE_1030.commit],
+                supported_candidate_commits=[candidate.commit for candidate in binding.CANDIDATES],
                 frozen=bool(getattr(sys, 'frozen', False)), signature_policy='UNSIGNED_INTERNAL',
                 release_gate='HOLD', promotion_allowed=False)))
             return 0

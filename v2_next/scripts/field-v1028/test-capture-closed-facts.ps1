@@ -24,6 +24,28 @@ Check 'request-generation-and-source-boundary' {
         $copy=Clone $request;$copy.($change[0])=$change[1];Reject {Assert-CaptureRequest $copy} $change[2]
     }
 }
+Check 'final-build-request-and-metadata-remain-bound' {
+    $r=Clone $request;$r.schema='sfl-closed-fact-capture-request-v2';$r.candidate_commit='685dde946e8ce2e34c65c6dde05be16e342f068e'
+    Assert-CaptureRequest $r
+    Reject {Get-CaptureSelection $metadata $r $root} 'capture-metadata-generation'
+    $m=Clone $metadata;$m.schema_metadata.git_commit=$r.candidate_commit
+    $selection=Get-CaptureSelection $m $r $root
+    Require-Runtime ($selection.specs.Count -eq 5) 'final-capture-selection'
+    $r.schema='sfl-closed-fact-capture-request-v1';Reject {Assert-CaptureRequest $r} 'capture-request-contract'
+    $r.schema='sfl-closed-fact-capture-request-v2';$r.candidate_commit=$request.candidate_commit
+    Reject {Assert-CaptureRequest $r} 'capture-request-contract'
+}
+Check 'renderer-fix-build-request-and-metadata-remain-bound' {
+    $r=Clone $request;$r.schema='sfl-closed-fact-capture-request-v3';$r.candidate_commit='8de064317d6de42d321afb8395f7a30a1f31cd55'
+    Assert-CaptureRequest $r
+    Reject {Get-CaptureSelection $metadata $r $root} 'capture-metadata-generation'
+    $m=Clone $metadata;$m.schema_metadata.git_commit=$r.candidate_commit
+    $selection=Get-CaptureSelection $m $r $root
+    Require-Runtime ($selection.specs.Count -eq 5) 'renderer-fix-capture-selection'
+    $r.schema='sfl-closed-fact-capture-request-v1';Reject {Assert-CaptureRequest $r} 'capture-request-contract'
+    $r.schema='sfl-closed-fact-capture-request-v3';$r.candidate_commit=$request.candidate_commit
+    Reject {Assert-CaptureRequest $r} 'capture-request-contract'
+}
 Check 'selection-preserves-current-full-ledgers-and-role-budgets' {
     $s=Get-CaptureSelection $metadata $request $root
     Require-Runtime ($s.specs.Count -eq 5 -and $s.absent.Count -eq 1 -and $s.absent[0] -ceq 'changeover.csv') 'capture-selection-count'

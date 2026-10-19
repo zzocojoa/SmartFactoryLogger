@@ -59,6 +59,43 @@ $historyRequest.preceding_installer='C:\installed\previous.exe';Reject {Assert-H
 $historyRequest.preceding_installer='relative.exe';Reject {Assert-HealthInstallRequest $historyRequest} 'absolute-local-path' 'reject-relative-previous-installer';$historyRequest.preceding_installer='C:\inputs\previous.exe'
 $request|Add-Member preceding_installer 'C:\inputs\previous.exe';Reject {Assert-HealthInstallRequest $request} 'request-members' 'old-contract-does-not-silently-expand';$request.PSObject.Properties.Remove('preceding_installer')
 
+$finalPins=Get-HealthInstallPins '685dde946e8ce2e34c65c6dde05be16e342f068e'
+Pass ($finalPins.previous_version -ceq '1.0.30' -and $finalPins.candidate_version -ceq '1.0.30' -and
+    $finalPins.previous_commit -ceq $historyPins.candidate_commit -and
+    $finalPins.previous_reference -ceq $historyPins.candidate_reference -and
+    $finalPins.previous_installer -ceq $historyPins.candidate_installer -and
+    $finalPins.previous_installer_bytes -eq 164941077 -and $finalPins.candidate_installer_bytes -eq 164149766 -and
+    $finalPins.candidate_installer -ceq '2965d4c0cb98bdedb4357c308f9c23d4b5f319cf259b8639201669650b0e9303' -and
+    $finalPins.candidate_reference -ceq 'bb8d9e36be3f158e0555f48a6c013fbaa98d8d5208cc19e4b35c6e4b354faa30') 'same-version-final-transition-exact-pins'
+$finalRequest=$historyRequest|ConvertTo-Json -Depth 5|ConvertFrom-Json
+$finalRequest.candidate_commit=$finalPins.candidate_commit;$finalRequest.preceding_commit=$finalPins.previous_commit
+$finalRequest.schema=$finalPins.request_schema;$finalRequest.new_full_backup_policy=$finalPins.backup_policy
+Assert-HealthInstallRequest $finalRequest;Pass $true 'explicit-final-transition-accepted'
+$finalRequest.preceding_commit=$historyPins.previous_commit;Reject {Assert-HealthInstallRequest $finalRequest} 'request-identity' 'final-rejects-other-previous-build';$finalRequest.preceding_commit=$finalPins.previous_commit
+$finalRequest.new_full_backup_policy=$historyPins.backup_policy;Reject {Assert-HealthInstallRequest $finalRequest} 'request-identity' 'final-rejects-old-backup-policy';$finalRequest.new_full_backup_policy=$finalPins.backup_policy
+$finalRequest.schema=$historyPins.request_schema;Reject {Assert-HealthInstallRequest $finalRequest} 'request-identity' 'final-rejects-old-schema';$finalRequest.schema=$finalPins.request_schema
+Assert-HealthInstallPaths $finalRequest 'C:\factory' 'C:\installed' @('C:\data-a','C:\data-b');Pass $true 'final-all-input-paths-disjoint'
+
+$rendererPins=Get-HealthInstallPins '8de064317d6de42d321afb8395f7a30a1f31cd55'
+Pass ($rendererPins.previous_version -ceq '1.0.30' -and $rendererPins.candidate_version -ceq '1.0.30' -and
+    $rendererPins.previous_commit -ceq $historyPins.candidate_commit -and
+    $rendererPins.previous_reference -ceq $historyPins.candidate_reference -and
+    $rendererPins.previous_installer -ceq $historyPins.candidate_installer -and
+    $rendererPins.previous_installer_bytes -eq 164941077 -and $rendererPins.candidate_installer_bytes -eq 164150064 -and
+    $rendererPins.candidate_installer -ceq 'f1b6d4d843504e09410cd90dcd309a0e485e9fd7a59a524b64941c61719f5a32' -and
+    $rendererPins.candidate_reference -ceq 'bfc8d8283d0196c5dfaed9bfdfad4459e5a07a9a1e42758b71dba2ce325498e3') 'same-version-renderer-fix-transition-exact-pins'
+$rendererRequest=$historyRequest|ConvertTo-Json -Depth 5|ConvertFrom-Json
+$rendererRequest.candidate_commit=$rendererPins.candidate_commit;$rendererRequest.preceding_commit=$rendererPins.previous_commit
+$rendererRequest.schema=$rendererPins.request_schema;$rendererRequest.new_full_backup_policy=$rendererPins.backup_policy
+Assert-HealthInstallRequest $rendererRequest;Pass $true 'explicit-renderer-fix-transition-accepted'
+$rendererRequest.preceding_commit=$historyPins.previous_commit;Reject {Assert-HealthInstallRequest $rendererRequest} 'request-identity' 'renderer-fix-rejects-other-previous-build';$rendererRequest.preceding_commit=$rendererPins.previous_commit
+$rendererRequest.new_full_backup_policy=$historyPins.backup_policy;Reject {Assert-HealthInstallRequest $rendererRequest} 'request-identity' 'renderer-fix-rejects-old-backup-policy';$rendererRequest.new_full_backup_policy=$rendererPins.backup_policy
+$rendererRequest.schema=$historyPins.request_schema;Reject {Assert-HealthInstallRequest $rendererRequest} 'request-identity' 'renderer-fix-rejects-old-schema';$rendererRequest.schema=$rendererPins.request_schema
+Assert-HealthInstallPaths $rendererRequest 'C:\factory' 'C:\installed' @('C:\data-a','C:\data-b');Pass $true 'renderer-fix-all-input-paths-disjoint'
+
+$rendererRequest.schema=$finalPins.request_schema;Reject {Assert-HealthInstallRequest $rendererRequest} 'request-identity' 'renderer-rejects-685-schema';$rendererRequest.schema=$rendererPins.request_schema
+$rendererRequest.new_full_backup_policy=$finalPins.backup_policy;Reject {Assert-HealthInstallRequest $rendererRequest} 'request-identity' 'renderer-rejects-685-policy';$rendererRequest.new_full_backup_policy=$rendererPins.backup_policy
+
 $identity=[pscustomobject]@{main_pid=123;main_created_at_utc='2026-10-15T01:02:03Z';backend_pid=456;backend_created_at_utc='2026-10-15T01:02:04Z'}
 $backup=[pscustomobject]@{preceding_operating_identity=$identity}
 $review=[pscustomobject]@{preceding_commit=$pins.previous_commit;main_pid=123;main_created_at_utc='2026-10-15T01:02:03Z';backend_pid=456;backend_created_at_utc='2026-10-15T01:02:04Z'}
@@ -158,17 +195,23 @@ try{
     foreach($row in @(
         @('1.0.28','4cc7393e1bafbf90a329726aed9470fe0daacb21',1814,234260,'0b2ddc44640a139ab3b5c5a4febdf75e7039a37fadc6871866d7b0d78a46bc6b'),
         @('1.0.29','acaf77d95101a050f4d3ecd76125d3502036f5a7',1867,234261,'37ebae1149f7b1ce587ea040c9e0575c16794242eadc147e4d8df58c54a28921'),
-        @('1.0.30','0732c8e810be3c46096b397812f53a9767354229',1899,234260,'a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'))){
+        @('1.0.30','0732c8e810be3c46096b397812f53a9767354229',1899,234260,'a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'),
+        @('1.0.30','685dde946e8ce2e34c65c6dde05be16e342f068e',1866,234260,'a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'),
+        @('1.0.30','8de064317d6de42d321afb8395f7a30a1f31cd55',1866,234260,'a9f2f1785d7e1c41ba5b6db75253b91da716eaf565017ed213091bff29091910'))){
         $members=[ordered]@{};$script:payloadFixture=@{}
         for($i=0;$i -lt $row[2];$i++){$members['file'+$i]=@{bytes=1;sha256=('a'*64)};$script:payloadFixture['file'+$i]=@{bytes=1;sha256=('a'*64)}}
         $script:payloadFixture['Uninstall smart-factory.exe']=@{bytes=$row[3];sha256=$row[4]}
         $reference=[pscustomobject]@{version=$row[0];candidate_commit=$row[1];payload_file_count=$row[2];payload_files=[pscustomobject]$members}
-        $null=Get-HealthPayloadFacts 'C:\unused' $reference $row[0];Pass $true ('payload-contract:'+ $row[0])
-        $reference.candidate_commit=('f'*40);Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'payload-contract' ('mixed-payload-build:'+ $row[0]);$reference.candidate_commit=$row[1]
+        $null=Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $row[1];Pass $true ('payload-contract:'+ $row[1])
+        if($row[1] -ceq $finalPins.candidate_commit){
+            Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'payload-contract' 'final-requires-explicit-build'
+            Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $historyPins.candidate_commit} 'payload-contract' 'same-version-old-contract-rejects-final-payload'
+        }else{$null=Get-HealthPayloadFacts 'C:\unused' $reference $row[0];Pass $true ('legacy-default-preserved:'+ $row[1])}
+        $reference.candidate_commit=('f'*40);Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $row[1]} 'payload-contract' ('mixed-payload-build:'+ $row[1]);$reference.candidate_commit=$row[1]
         $script:payloadFixture['Uninstall smart-factory.exe'].bytes++
-        Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'uninstaller-pin' ('wrong-uninstaller-size:'+ $row[0]);$script:payloadFixture['Uninstall smart-factory.exe'].bytes=$row[3]
+        Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $row[1]} 'uninstaller-pin' ('wrong-uninstaller-size:'+ $row[1]);$script:payloadFixture['Uninstall smart-factory.exe'].bytes=$row[3]
         $script:payloadFixture['Uninstall smart-factory.exe'].sha256=('b'*64)
-        Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'uninstaller-pin' ('wrong-uninstaller-hash:'+ $row[0])
+        Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $row[1]} 'uninstaller-pin' ('wrong-uninstaller-hash:'+ $row[1])
     }
 }finally{Set-Item Function:PayloadFacts $savedPayloadFunction}
 $result=[ordered]@{status='PASS';checks=$checks.Count;names=$checks.ToArray();source_sha256=(Fact $source).sha256;library_sha256=(Fact $library).sha256;server_accessed=$false;production_installation_performed=$false;forced_termination=$false}

@@ -150,6 +150,8 @@ class RunnerTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()) as out:
             self.assertEqual(runner.main(['--describe']),0)
         self.assertEqual(json.loads(out.getvalue())['signature_policy'],'UNSIGNED_INTERNAL')
+        self.assertEqual(json.loads(out.getvalue())['supported_candidate_commits'],
+                         [candidate.commit for candidate in runner.binding.CANDIDATES])
         with redirect_stdout(io.StringIO()):
             self.assertEqual(runner.main([]),1)
             self.assertEqual(runner.main(['--describe','--request','anything']),1)
@@ -174,6 +176,13 @@ class RunnerTests(unittest.TestCase):
 
     def test_candidate_1030_closed_copy_and_mixed_metadata_rejection(self):
         self.check_candidate_closed_copy(runner.binding.CANDIDATE_1030)
+
+    def test_renderer_fix_1030_closed_copy_rejects_same_version_previous_build(self):
+        self.check_candidate_closed_copy(runner.binding.CANDIDATE_1030_RENDERER_FIX)
+
+
+    def test_final_1030_closed_copy_rejects_same_version_previous_build(self):
+        self.check_candidate_closed_copy(runner.binding.CANDIDATE_1030_FINAL)
 
     def check_candidate_closed_copy(self, candidate):
         request,path,output,package=self.prepare(True, disabled_low_signal=True)
@@ -201,7 +210,8 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(receipt['formal_qa_gate'],'HOLD')
         self.assertFalse(receipt['promotion_allowed'])
         mixed=self.folder/'mixed';mixed.mkdir()
-        request['shutdown_expectation']['build_git_commit']=(runner.binding.CANDIDATE_1029.commit
+        request['shutdown_expectation']['build_git_commit']=(runner.binding.CANDIDATE_1030.commit
+            if candidate in (runner.binding.CANDIDATE_1030_FINAL, runner.binding.CANDIDATE_1030_RENDERER_FIX) else runner.binding.CANDIDATE_1029.commit
             if candidate==runner.binding.CANDIDATE_1030 else runner.binding.BUILD)
         fixtures.save(path,request)
         code,receipt=self.invoke(path,mixed,package)

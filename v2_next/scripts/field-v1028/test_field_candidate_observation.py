@@ -34,7 +34,7 @@ class CandidateObservationTests(unittest.TestCase):
             signature_policy='UNSIGNED_INTERNAL',duration_seconds=900,spec=data)
 
     def test_request_accepts_exact_candidates_and_legacy_1028_only(self):
-        for candidate in (binding.CANDIDATE_1028,binding.CANDIDATE_1029,binding.CANDIDATE_1030):
+        for candidate in binding.CANDIDATES:
             request=self.request(candidate)
             for seconds in (900,7200):
                 request['duration_seconds']=seconds
@@ -64,6 +64,32 @@ class CandidateObservationTests(unittest.TestCase):
 
     def test_candidate_1030_actual_collectors_and_shutdown_expectation(self):
         self.check_actual_collectors(binding.CANDIDATE_1030)
+
+    def test_renderer_fix_1030_actual_collectors(self):
+        self.check_actual_collectors(binding.CANDIDATE_1030_RENDERER_FIX)
+
+
+    def test_final_1030_actual_collectors(self):
+        self.check_actual_collectors(binding.CANDIDATE_1030_FINAL)
+
+    def test_renderer_fix_1030_rejects_previous_build_before_http(self):
+        with fixture_app(self.folder, candidate=binding.CANDIDATE_1030_RENDERER_FIX) as spec:
+            result = observation.supervise_observation(
+                replace(spec, candidate_commit=binding.CANDIDATE_1030.commit),
+                self.folder/'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            self.assertFalse((self.folder/'out/http').exists())
+            self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
+
+
+    def test_final_1030_rejects_previous_build_before_http(self):
+        with fixture_app(self.folder, candidate=binding.CANDIDATE_1030_FINAL) as spec:
+            result = observation.supervise_observation(
+                replace(spec, candidate_commit=binding.CANDIDATE_1030.commit),
+                self.folder/'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            self.assertFalse((self.folder/'out/http').exists())
+            self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
 
     def check_actual_collectors(self, candidate):
         with fixture_app(self.folder,disabled_low_signal=True,candidate=candidate) as spec:

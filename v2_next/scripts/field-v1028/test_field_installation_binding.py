@@ -99,6 +99,29 @@ class InstallationBindingTests(unittest.TestCase):
     def test_explicit_1030_identity_rejects_mixed_payload_provenance_and_runtime(self):
         self.check_explicit_candidate(binding.CANDIDATE_1030)
 
+    def test_renderer_fix_1030_identity_is_distinct_from_same_version_previous_build(self):
+        candidate = binding.candidate_from_commit('8de064317d6de42d321afb8395f7a30a1f31cd55')
+        self.assertEqual(candidate.version, binding.CANDIDATE_1030.version)
+        self.assertNotEqual(candidate, binding.CANDIDATE_1030)
+        self.assertEqual(candidate.installer_sha256,
+                         'f1b6d4d843504e09410cd90dcd309a0e485e9fd7a59a524b64941c61719f5a32')
+        self.assertEqual(candidate.installer_bytes, 164150064)
+        self.assertEqual(binding.candidate_reference_sha256(candidate),
+                         'bfc8d8283d0196c5dfaed9bfdfad4459e5a07a9a1e42758b71dba2ce325498e3')
+        self.check_explicit_candidate(candidate)
+
+
+    def test_final_1030_identity_is_distinct_from_same_version_previous_build(self):
+        candidate = binding.candidate_from_commit('685dde946e8ce2e34c65c6dde05be16e342f068e')
+        self.assertEqual(candidate.version, binding.CANDIDATE_1030.version)
+        self.assertNotEqual(candidate, binding.CANDIDATE_1030)
+        self.assertEqual(candidate.installer_sha256,
+                         '2965d4c0cb98bdedb4357c308f9c23d4b5f319cf259b8639201669650b0e9303')
+        self.assertEqual(candidate.installer_bytes, 164149766)
+        self.assertEqual(binding.candidate_reference_sha256(candidate),
+                         'bb8d9e36be3f158e0555f48a6c013fbaa98d8d5208cc19e4b35c6e4b354faa30')
+        self.check_explicit_candidate(candidate)
+
     def check_explicit_candidate(self, candidate):
         self.document.update(candidate_commit=candidate.commit, version=candidate.version,
                              installer_sha256=candidate.installer_sha256,
@@ -120,8 +143,14 @@ class InstallationBindingTests(unittest.TestCase):
             self.assertEqual(self.capture(payload, health)['binding_status'], 'PASS')
             self.assertEqual(self.capture(payload, self.health())['binding_status'], 'FAIL')
             previous = dict(health, app_version=binding.CANDIDATE_1029.version)
-            if candidate == binding.CANDIDATE_1030:
+            if candidate.version == '1.0.30':
                 self.assertEqual(self.capture(payload, previous)['binding_status'], 'FAIL')
+                same_version_other_build = deepcopy(health)
+                for other in binding.CANDIDATES:
+                    if other.version != candidate.version or other == candidate:
+                        continue
+                    same_version_other_build['spot_temperature']['build_git_commit'] = other.commit
+                    self.assertEqual(self.capture(payload, same_version_other_build)['binding_status'], 'FAIL')
         wrong = dict(self.document, installer_sha256=binding.INSTALLER_SHA)
         with self.assertRaisesRegex(ValueError, 'candidate-identity'):
             with self.payload(candidate=candidate, document=wrong):

@@ -94,11 +94,13 @@ def review_streams(files, request_sha256, launch_exit):
     require(type(launch_exit) is int and launch_exit == 0, 'launcher-nonzero')
     request = decode(files['request.json'])
     require(sha(files['request.json']) == request_sha256, 'external-request-pin')
-    history = request['schema'] == 'sfl-health-runtime-close-request-v3'
-    candidate = binding.CANDIDATE_1030 if history else binding.CANDIDATE_1029
-    require(request['schema'] in ('sfl-health-runtime-close-request-v1', 'sfl-health-runtime-close-request-v2',
-                                  'sfl-health-runtime-close-request-v3')
-            and request['candidate_commit'] == candidate.commit, 'request-build-schema')
+    candidates = {'sfl-health-runtime-close-request-v1': binding.CANDIDATE_1029,
+                  'sfl-health-runtime-close-request-v2': binding.CANDIDATE_1029,
+                  'sfl-health-runtime-close-request-v3': binding.CANDIDATE_1030,
+                  'sfl-health-runtime-close-request-v4': binding.CANDIDATE_1030_FINAL,
+                  'sfl-health-runtime-close-request-v5': binding.CANDIDATE_1030_RENDERER_FIX}
+    candidate = candidates.get(request['schema'])
+    require(candidate is not None and request['candidate_commit'] == candidate.commit, 'request-build-schema')
     rollover = request['schema'] != 'sfl-health-runtime-close-request-v1'
     first_seq = request.get('csv_first_sample_seq') if rollover else 1
     require(integer(first_seq, 1), 'request-first-sequence')
