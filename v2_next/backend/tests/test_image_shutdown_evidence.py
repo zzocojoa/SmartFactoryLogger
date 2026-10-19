@@ -679,8 +679,8 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             clock.monotonic.return_value = time.monotonic()
             self.run_overlapping_cleanup(hold_peer_final=True)
 
-    async def wait_control_receipt(self):
-        async with asyncio.timeout(3):
+    async def wait_control_receipt(self, *, timeout_sec=3):
+        async with asyncio.timeout(timeout_sec):
             while True:
                 state = app._get_shutdown_evidence_status().get('control', {})
                 if state.get('receipt_verified') and not state['writer_alive']:
@@ -757,6 +757,10 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.loop.run_until_complete(run())
 
     def run_overlapping_cleanup(self, *, hold_peer_final=False):
+        # The frozen-clock peer-ordering case retains real file publication and
+        # readback. Give its host I/O a separate bounded watchdog; the product's
+        # 1s receipt / 0.2s final deadlines and explicit stall tests stay intact.
+        host_timeout = 10 if hold_peer_final else 3
         self.enqueue()
         self.assertTrue(spot.flush_spot_image_capture_queue(3))
         logger = CSVLoggerService()
@@ -774,10 +778,10 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             name = threading.current_thread().name
             if hold_peer_final and name == 'shutdown-evidence-final-lifespan':
                 peer_entered.set()
-                if not peer_release.wait(5):
+                if not peer_release.wait(host_timeout):
                     raise RuntimeError('peer final release missing')
             if hold_peer_final and name == 'shutdown-evidence-final-control':
-                if not peer_entered.wait(3):
+                if not peer_entered.wait(host_timeout):
                     raise RuntimeError('peer final did not start')
             return original_fsync(fd)
         def fail_start():
@@ -788,17 +792,17 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 stopped.append(True)
                 if len(stopped) == 2:
                     reached.set()
-            return release.wait(5)
+            return release.wait(max(5, host_timeout))
         async def partial():
             async with app.lifespan(app.app):
                 self.fail('partial startup should fail')
         async def run():
             tasks = [asyncio.create_task(partial()), asyncio.create_task(app._run_control_shutdown('overlap'))]
             try:
-                self.assertTrue(await asyncio.to_thread(reached.wait, 3))
+                self.assertTrue(await asyncio.to_thread(reached.wait, host_timeout))
                 release.set()
                 if hold_peer_final:
-                    await self.wait_control_receipt()
+                    await self.wait_control_receipt(timeout_sec=host_timeout)
                     # Hold the real peer fsync beyond the control writer's poll
                     # tick, then release within the existing final 0.2s budget.
                     await asyncio.sleep(.03)
@@ -814,7 +818,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 # The test-controlled app clock must not make a broken peer
                 # handshake hang the runner. asyncio retains its real clock.
                 results = await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True), timeout=3,
+                    asyncio.gather(*tasks, return_exceptions=True), timeout=host_timeout,
                 )
             self.assertIsInstance(results[0], OSError)
             self.assertIsNone(results[1])
