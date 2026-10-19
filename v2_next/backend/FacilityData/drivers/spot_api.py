@@ -69,7 +69,7 @@ from backend.FacilityData.spot_observation_fact import (
     encode_spot_diagnostic_evidence_codes,
 )
 from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
-from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
+from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FILENAME, SpotImageCaptureWriter
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -258,6 +258,8 @@ _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
 _SPOT_IMAGE_CAPTURE_QUEUE: queue.Queue[_SpotImageCaptureEvent] = queue.Queue(maxsize=_SPOT_IMAGE_CAPTURE_QUEUE_MAX)
 _SPOT_IMAGE_CAPTURE_STOP = threading.Event()
 _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED = threading.Event()
+_SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED = threading.Event()
+_SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED = threading.Event()
 _spot_image_capture_lock = threading.Lock()
 # Historical fact hashing/row scans must not block producer accounting or
 # memory-only shutdown snapshots. Writer construction has its own lock.
@@ -610,6 +612,16 @@ def _start_spot_image_capture_worker(*, force: bool = False) -> None:
         _spot_image_capture_thread.start()
 
 
+def _request_spot_image_manifest_initialization() -> None:
+    # Reuse the owned, joined image worker even when no images are captured.
+    # Otherwise a cold startup would merely move the historical scan to exit.
+    with _spot_image_capture_lock:
+        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
+            return
+        _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.set()
+    _start_spot_image_capture_worker()
+
+
 def _spot_image_capture_failure_evidence(
     event: _SpotImageCaptureEvent, error: Exception, *, stage: str, error_at: float, failure_count: int,
 ) -> Dict[str, Any]:
@@ -643,7 +655,21 @@ def _spot_image_capture_worker() -> None:
     global _spot_image_capture_last_write_at, _spot_image_capture_written_count
     writer: Optional[SpotImageCaptureWriter] = None
     try:
-        while not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty():
+        while (not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty()
+               or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()):
+            if _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set():
+                _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
+                try:
+                    current_writer = _get_spot_image_capture_writer()
+                    if writer is not None and writer is not current_writer:
+                        writer.close_retention_scan()
+                    writer = current_writer
+                except Exception:
+                    # Initialization is not an image capture. Keep its failure
+                    # separate from the capture enqueue/write/failure equation.
+                    _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.set()
+                    _logger.exception("SPOT image manifest initialization failed")
+                continue
             try:
                 event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
             except queue.Empty:
@@ -731,7 +757,9 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
     thread = _spot_image_capture_thread
     if thread is not None and thread.is_alive():
         thread.join(timeout=max(0.0, timeout_sec))
-    return getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0 and not (
+    return (not _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
+            and not _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
+            and getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0) and not (
         thread is not None and thread.is_alive()
     )
 
@@ -754,7 +782,10 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
     )
     blocked = _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()
     stopping = _SPOT_IMAGE_CAPTURE_STOP.is_set()
-    writes_drained = bool(baseline) and blocked and stopping and not alive and queued == 0 and unfinished == 0 and accounting
+    initialization_pending = _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
+    initialization_failed = _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
+    writes_drained = (bool(baseline) and blocked and stopping and not alive and queued == 0
+                      and unfinished == 0 and accounting and not initialization_pending)
     return {
         "shutdown_id": baseline.get("shutdown_id"),
         "requested_at": baseline.get("requested_at"),
@@ -778,10 +809,12 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
+        "manifest_initialization_requested": initialization_pending,
+        "manifest_initialization_failed": initialization_failed,
         "writes_drained": writes_drained,
         # This is evidence of unresolved writes, not an image-loss estimate.
         "integrity_unresolved": failures > 0 or _spot_image_capture_dropped_count > 0
-        or not writes_drained or delta is None,
+        or not writes_drained or delta is None or initialization_failed,
     }
 
 
@@ -817,7 +850,8 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
         _spot_poll_running = False
         _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
     thread = _spot_image_capture_thread
-    if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0 and (
+    if (getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0
+            or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()) and (
         thread is None or not thread.is_alive()
     ):
         _start_spot_image_capture_worker(force=True)
@@ -861,6 +895,8 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_shutdown_baseline = None
     _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.clear()
     _SPOT_IMAGE_CAPTURE_STOP.clear()
+    _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
+    _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.clear()
 
 
 def _reset_spot_image_request_state_for_tests() -> None:
@@ -972,6 +1008,8 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "fact_row_count": fact_row_count,
             "fact_sha256": fact_sha256,
             "fact_manifest_state_ready": fact_manifest_state_ready,
+            "manifest_initialization_requested": _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set(),
+            "manifest_initialization_failed": _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set(),
             "dropped_count": _spot_image_capture_dropped_count,
             "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
             "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
@@ -992,7 +1030,40 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
 def get_spot_image_capture_manifest_stats(
     *,
     fact_path: Path,
+    wait_for_manifest: bool = True,
 ) -> Dict[str, Any] | None:
+    if _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set():
+        raise RuntimeError("SPOT image manifest initialization failed")
+    if not wait_for_manifest:
+        # CSV startup may precede the image worker or its historical scan. It
+        # must neither start that scan nor wait for its lock. Closeout keeps
+        # the default blocking, path-bound validation below.
+        configured_fact_path = _spot_image_capture_log_path() / SPOT_IMAGE_FACT_FILENAME
+        if configured_fact_path.resolve() != fact_path.resolve():
+            return None
+        if not _spot_image_capture_writer_lock.acquire(blocking=False):
+            raise FactPersistencePending("image writer is initializing")
+        request_initialization = False
+        try:
+            writer = _spot_image_capture_writer
+            if writer is None or _spot_image_capture_writer_signature != _spot_image_capture_config_signature():
+                request_initialization = True
+                raise FactPersistencePending("image writer is not ready")
+            if writer.fact_path.resolve() != fact_path.resolve():
+                return None
+            snapshot = writer.try_manifest_stats()
+            if snapshot is None:
+                raise FactPersistencePending("image manifest is busy")
+            fact_row_count, fact_sha256, state_ready = snapshot
+            return {
+                "fact_row_count": fact_row_count,
+                "fact_sha256": fact_sha256,
+                "fact_manifest_state_ready": state_ready,
+            }
+        finally:
+            _spot_image_capture_writer_lock.release()
+            if request_initialization:
+                _request_spot_image_manifest_initialization()
     writer = _get_spot_image_capture_writer()
     if writer.fact_path.resolve() != fact_path.resolve():
         return None

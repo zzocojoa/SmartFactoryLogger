@@ -885,7 +885,9 @@ class CSVLoggerService:
             device_readback_status="not_supported",
         )
 
-    def _spot_image_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+    def _spot_image_fact_manifest(
+        self, log_path: Path, *, wait_for_manifest: bool = True,
+    ) -> dict[str, Any]:
         raw_capture_path = str(getattr(config, "SPOT_IMAGE_CAPTURE_PATH", "spot_images") or "spot_images").strip()
         capture_root = Path(raw_capture_path or "spot_images")
         if not capture_root.is_absolute():
@@ -893,10 +895,13 @@ class CSVLoggerService:
         try:
             from backend.FacilityData.drivers import spot_api
 
-            health = spot_api.get_spot_image_capture_health()
             runtime_stats = spot_api.get_spot_image_capture_manifest_stats(
                 fact_path=log_path / SPOT_IMAGE_FACT_FILENAME,
+                wait_for_manifest=wait_for_manifest,
             )
+            health = spot_api.get_spot_image_capture_health(wait_for_manifest=wait_for_manifest)
+        except FactPersistencePending:
+            raise
         except Exception as exc:
             if self._require_runtime_manifest_state:
                 raise RuntimeError(
@@ -1484,20 +1489,25 @@ class CSVLoggerService:
                 "spot_observation_fact_manifest",
                 "spot_observation_fact_closeout",
                 lambda: self._spot_observation_fact_manifest(sidecar_path.parent),
+                "observation-persistence-pending-at-open",
             ),
             (
                 "spot_image_fact_manifest",
                 "spot_image_fact_closeout",
-                lambda: self._spot_image_fact_manifest(sidecar_path.parent),
+                lambda: self._spot_image_fact_manifest(
+                    sidecar_path.parent,
+                    wait_for_manifest=not self._require_runtime_manifest_state,
+                ),
+                "image-persistence-pending-at-open",
             ),
         )
-        for manifest_key, closeout_key, build_manifest in runtime_manifests:
+        for manifest_key, closeout_key, build_manifest, pending_reason in runtime_manifests:
             try:
                 payload[manifest_key] = build_manifest()
             except FactPersistencePending:
                 payload[closeout_key] = {
                     "finalized": False, "writes_drained": False,
-                    "reason": "observation-persistence-pending-at-open",
+                    "reason": pending_reason,
                 }
             except Exception as exc:
                 # A runtime fact writer can remain bound to the previous configured

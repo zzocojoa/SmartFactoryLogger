@@ -1074,6 +1074,9 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 patch.object(spot_api, "_spot_image_capture_writer", None),
                 patch.object(spot_api, "_spot_image_capture_writer_signature", None),
             ):
+                # This case isolates an old observation writer with a ready
+                # image writer already bound to the new configuration.
+                spot_api._get_spot_image_capture_writer()
                 handle, writer = service._open_v2_log_file(
                     "20260729_160000",
                     "Factory_Integrated_Log_v2",
