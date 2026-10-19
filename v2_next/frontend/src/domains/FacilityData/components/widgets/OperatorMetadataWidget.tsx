@@ -121,9 +121,9 @@ const formatAppliedAt = (value?: string | null): string => {
   return date.toLocaleString();
 };
 
-export const OperatorMetadataComponent = React.memo(function OperatorMetadataComponent() {
-  const applied = useDashboardStore(useShallow(selectDashboardOperatorMetadataSlice));
+const useOperatorMetadataEditorState = () => {
   const productInputRef = useRef<HTMLInputElement | null>(null);
+  const initialLoadStarted = useRef(false);
   const [serverMetadata, setServerMetadata] = useState<OperatorMetadata>(EMPTY_METADATA);
   const [productNo, setProductNo] = useState('');
   const [operatorMoldNo, setOperatorMoldNo] = useState('');
@@ -135,6 +135,37 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
   const [touched, setTouched] = useState(false);
   const [changeNeeded, setChangeNeeded] = useState(false);
   const [requiredAlertNonce, setRequiredAlertNonce] = useState(0);
+
+  return useMemo(() => ({
+    productInputRef, initialLoadStarted,
+    serverMetadata, setServerMetadata, productNo, setProductNo, operatorMoldNo, setOperatorMoldNo,
+    loading, setLoading, saving, setSaving, resetting, setResetting,
+    loadError, setLoadError, saveError, setSaveError, touched, setTouched,
+    changeNeeded, setChangeNeeded, requiredAlertNonce, setRequiredAlertNonce,
+  }), [serverMetadata, productNo, operatorMoldNo, loading, saving, resetting,
+    loadError, saveError, touched, changeNeeded, requiredAlertNonce]);
+};
+
+const OperatorMetadataEditorContext = React.createContext<ReturnType<typeof useOperatorMetadataEditorState> | null>(null);
+
+// Own drafts and pending writes above the Native/Scenes switch. They last only
+// for this dashboard session; they are not persisted as applied server values.
+export const OperatorMetadataProvider = ({ children }: { children: React.ReactNode }): JSX.Element => {
+  const editor = useOperatorMetadataEditorState();
+  return <OperatorMetadataEditorContext.Provider value={editor}>{children}</OperatorMetadataEditorContext.Provider>;
+};
+
+export const OperatorMetadataComponent = React.memo(function OperatorMetadataComponent() {
+  const applied = useDashboardStore(useShallow(selectDashboardOperatorMetadataSlice));
+  const editor = React.useContext(OperatorMetadataEditorContext);
+  if (!editor) throw new Error('OperatorMetadataComponent requires OperatorMetadataProvider');
+  const {
+    productInputRef, initialLoadStarted,
+    serverMetadata, setServerMetadata, productNo, setProductNo, operatorMoldNo, setOperatorMoldNo,
+    loading, setLoading, saving, setSaving, resetting, setResetting,
+    loadError, setLoadError, saveError, setSaveError, touched, setTouched,
+    changeNeeded, setChangeNeeded, requiredAlertNonce, setRequiredAlertNonce,
+  } = editor;
 
   const fieldErrors = useMemo(() => validateFields(productNo, operatorMoldNo), [operatorMoldNo, productNo]);
   const hasFieldErrors = Boolean(fieldErrors.productNo || fieldErrors.operatorMoldNo);
@@ -254,8 +285,11 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
     }
   }, []);
   useEffect(() => {
-    void loadMetadata();
-  }, [loadMetadata]);
+    if (!initialLoadStarted.current) {
+      initialLoadStarted.current = true;
+      void loadMetadata();
+    }
+  }, [initialLoadStarted, loadMetadata]);
 
   useEffect(() => {
     if (loading) {

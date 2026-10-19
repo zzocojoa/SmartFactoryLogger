@@ -1,10 +1,12 @@
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render as renderWithWrapper, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FactoryData, OperatorMetadata } from '../../../../shared/types';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
-import { OperatorMetadataComponent } from './OperatorMetadataWidget';
+import { OperatorMetadataComponent, OperatorMetadataProvider } from './OperatorMetadataWidget';
+
+const render = (ui: React.ReactElement) => renderWithWrapper(ui, { wrapper: OperatorMetadataProvider });
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -284,6 +286,64 @@ describe('OperatorMetadataComponent', () => {
     expect(screen.queryByTestId('operator-metadata-guidance')).not.toBeInTheDocument();
     expect(screen.getByTestId('operator-metadata-history')).toBeInTheDocument();
     expect(applyButton).not.toHaveAttribute('data-disabled', 'true');
+  });
+
+  it('keeps the product-change warning when the dashboard surface remounts its widget', async () => {
+    mocks.get.mockResolvedValue(buildMetadata({
+      product_no: '12345', operator_mold_no: '123', valid: true, missing_fields: [],
+    }));
+    const view = render(<OperatorMetadataComponent key="native" />);
+    await screen.findByLabelText('제품번호');
+    fireEvent.click(screen.getByTestId('operator-metadata-change-needed'));
+    expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'stale');
+
+    view.rerender(<OperatorMetadataComponent key="scenes" />);
+
+    await screen.findByLabelText('제품번호');
+    expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'stale');
+    expect(screen.getByTestId('operator-metadata-apply')).not.toHaveAttribute('data-disabled', 'true');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps unsaved input and its required-field warning across both surface switches', async () => {
+    mocks.get.mockResolvedValue(buildMetadata({
+      product_no: '12345', operator_mold_no: '123', valid: true, missing_fields: [],
+    }));
+    const view = render(<OperatorMetadataComponent key="native" />);
+    await screen.findByLabelText('제품번호');
+    fireEvent.change(screen.getByLabelText('제품번호'), { target: { value: '99999' } });
+    fireEvent.change(screen.getByLabelText('금형 번호'), { target: { value: '' } });
+
+    for (const surface of ['scenes', 'native-again']) {
+      view.rerender(<OperatorMetadataComponent key={surface} />);
+      await screen.findByLabelText('제품번호');
+      expect(screen.getByLabelText('제품번호')).toHaveValue('99999');
+      expect(screen.getByLabelText('금형 번호')).toHaveValue('');
+      expect(screen.getByTestId('operator-metadata-required-alert')).toBeInTheDocument();
+    }
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.reset).not.toHaveBeenCalled();
+  });
+
+  it('keeps an in-flight save and its failure visible after switching surfaces', async () => {
+    mocks.get.mockResolvedValue(buildMetadata({
+      product_no: '12345', operator_mold_no: '123', valid: true, missing_fields: [],
+    }));
+    let rejectSave!: (error: Error) => void;
+    mocks.update.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+    const view = render(<OperatorMetadataComponent key="native" />);
+    await screen.findByLabelText('제품번호');
+    fireEvent.change(screen.getByLabelText('제품번호'), { target: { value: '99999' } });
+    fireEvent.click(screen.getByTestId('operator-metadata-apply'));
+    expect(screen.getByText('저장 중')).toBeInTheDocument();
+
+    view.rerender(<OperatorMetadataComponent key="scenes" />);
+    await screen.findByLabelText('제품번호');
+    await act(async () => { rejectSave(new Error('save unavailable')); });
+
+    expect(await screen.findByText('서버 검증 또는 저장에 실패했습니다.')).toBeInTheDocument();
+    expect(screen.getByLabelText('제품번호')).toHaveValue('99999');
+    expect(mocks.update).toHaveBeenCalledTimes(1);
   });
 
   it('lets the operator mark a product change and confirm the current values', async () => {

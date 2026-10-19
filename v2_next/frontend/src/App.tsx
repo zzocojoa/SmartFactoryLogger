@@ -40,6 +40,7 @@ import { useTheme } from './shared/hooks/useThemeContext';
 import { SettingsModalContainer } from './domains/Configuration/components/SettingsModal/SettingsModalContainer';
 
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
+const OperatorMetadataProvider = React.lazy(() => import('./domains/FacilityData/components/widgets/OperatorMetadataWidget').then(m => ({ default: m.OperatorMetadataProvider })));
 const NativeDashboardSurface = React.lazy(() => {
   recordStartupEventOnce('renderer.native-surface-import-start', 'renderer.native-surface-import-start', {
     surface: 'native',
@@ -855,6 +856,7 @@ function App() {
           <SnapshotContext.Provider value={snapshotContextValue}>
             <LayoutEditContext.Provider value={layoutEditContextValue}>
               <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
+                <OperatorMetadataProvider>
                 {layoutEditing ? (
                   <ProfilerProbe id="DashboardSceneSurface">
                     <DashboardSceneSurface
@@ -882,6 +884,7 @@ function App() {
                     />
                   </ProfilerProbe>
                 )}
+                </OperatorMetadataProvider>
               </React.Suspense>
             </LayoutEditContext.Provider>
           </SnapshotContext.Provider>
