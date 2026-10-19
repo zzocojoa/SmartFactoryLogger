@@ -163,12 +163,15 @@ def collect_process_window(spec, output, duration_seconds, origin_ns, stop):
     files, rows = {}, []
     count = math.floor(duration_seconds / 5) + 1
     previous_finished = None
+    previous_turn = None
     for sequence in range(count):
         target = origin_ns + sequence * 5_000_000_000
-        row = {'sequence': sequence, 'scheduled_ns': target}
-        if stop.wait(max(0, (target - time.perf_counter_ns()) / 1e9)):
+        row = {'sequence': sequence, 'scheduled_ns': target, 'previous_turn': previous_turn}
+        cancelled = stop.wait(max(0, (target - time.perf_counter_ns()) / 1e9))
+        row['observed_ns'] = time.perf_counter_ns()
+        if cancelled:
             row.update(status='CANCELLED', remaining_slots=count - sequence)
-        elif (previous_finished is not None and previous_finished >= target) or time.perf_counter_ns() >= target + 5_000_000_000:
+        elif (previous_finished is not None and previous_finished >= target) or row['observed_ns'] >= target + 5_000_000_000:
             row['status'] = 'MISSED'
             stop.set()
         else:
@@ -181,9 +184,13 @@ def collect_process_window(spec, output, duration_seconds, origin_ns, stop):
                 stop.set()
             row['finished_ns'] = time.perf_counter_ns()
         name = f'process-{sequence:05d}.json'
+        persistence_started = time.perf_counter_ns()
         files[name] = write_json(output / name, row)
         rows.append(row)
         previous_finished = time.perf_counter_ns()
+        previous_turn = {'sample_finished_ns': row.get('finished_ns'),
+                         'persistence_started_ns': persistence_started,
+                         'persistence_finished_ns': previous_finished}
         if row['status'] != 'PASS':
             break
     stop.wait(max(0, (origin_ns + duration_seconds * 1e9 - time.perf_counter_ns()) / 1e9))
@@ -247,6 +254,14 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
             health_records.append(record)
     for sequence in range(math.ceil(duration_seconds / 2)):
         row, _ = read_json(output / 'http' / f'health-{sequence:05d}.json')
+        if row.get('kind') == 'cancelled_remaining':
+            remaining = row.get('remaining_slots')
+            binding.require(type(remaining) is int and remaining == math.ceil(duration_seconds / 2) - sequence
+                            and type(row.get('sequence')) is int and row['sequence'] == sequence
+                            and row.get('scheduled_ns') == origin_ns + sequence * 2_000_000_000,
+                            'health-cancelled-span')
+            issues.append(f'health-{sequence}-cancelled-remaining:{remaining}')
+            break  # One durable marker represents the uncollected tail; it never counts as requests.
         if row.get('kind') != 'request':
             issues.append(f'health-{sequence}-not-request')
             continue
@@ -270,6 +285,14 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
                 issues.append(f'health-{sequence}-timing-not-bound')
     for sequence in range(math.floor(duration_seconds / 5) + 1):
         row, _ = read_json(output / 'resources' / f'resource-{sequence:05d}.json')
+        if row.get('kind') == 'cancelled_remaining':
+            remaining = row.get('remaining_slots')
+            binding.require(type(remaining) is int and remaining == math.floor(duration_seconds / 5) + 1 - sequence
+                            and type(row.get('sequence')) is int and row['sequence'] == sequence
+                            and row.get('scheduled_ns') == origin_ns + sequence * 5_000_000_000,
+                            'resource-cancelled-span')
+            issues.append(f'resource-{sequence}-cancelled-remaining:{remaining}')
+            break
         records = row.get('process', {}).get('records', [])
         if not any(p.get('pid') == spec.backend.pid and p.get('created') == spec.backend.created
                    and os.path.normcase(p.get('exe', '')) == spec.backend.exe for p in records):
