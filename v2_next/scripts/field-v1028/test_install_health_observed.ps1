@@ -203,9 +203,9 @@ try{
         $script:payloadFixture['Uninstall smart-factory.exe']=@{bytes=$row[3];sha256=$row[4]}
         $reference=[pscustomobject]@{version=$row[0];candidate_commit=$row[1];payload_file_count=$row[2];payload_files=[pscustomobject]$members}
         $null=Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $row[1];Pass $true ('payload-contract:'+ $row[1])
-        if($row[1] -ceq $finalPins.candidate_commit){
-            Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'payload-contract' 'final-requires-explicit-build'
-            Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $historyPins.candidate_commit} 'payload-contract' 'same-version-old-contract-rejects-final-payload'
+        if($row[1] -cin @($finalPins.candidate_commit,$rendererPins.candidate_commit)){
+            Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0]} 'payload-contract' ('candidate-requires-explicit-build:'+ $row[1])
+            Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $historyPins.candidate_commit} 'payload-contract' ('same-version-old-contract-rejects-new-payload:'+ $row[1])
         }else{$null=Get-HealthPayloadFacts 'C:\unused' $reference $row[0];Pass $true ('legacy-default-preserved:'+ $row[1])}
         $reference.candidate_commit=('f'*40);Reject {Get-HealthPayloadFacts 'C:\unused' $reference $row[0] $row[1]} 'payload-contract' ('mixed-payload-build:'+ $row[1]);$reference.candidate_commit=$row[1]
         $script:payloadFixture['Uninstall smart-factory.exe'].bytes++
