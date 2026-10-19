@@ -166,7 +166,27 @@ def run_command(command, folder, *, timeout=120):
         receipt['worker_exit_code'] = process.exitcode
         binding.require(process.exitcode == 0, 'command-worker-exit')
         receipt['job_before_close'] = job.accounting()
-        binding.require(receipt['job_before_close']['active_processes'] == 0, 'command-descendants-remain')
+        # A signaled worker and an idle owned job are distinct observations.
+        # Preserve the first count; confirm the whole tree within both budgets.
+        drain_started = time.monotonic()
+        drain = receipt['job_drain'] = dict(budget_seconds=2, observations=[], idle_confirmed=False)
+        try:
+            while True:
+                current = job.accounting()
+                now = time.monotonic()
+                drain['observations'].append(dict(elapsed_ms=(now-drain_started)*1000, accounting=current))
+                binding.require(now < deadline, 'command-deadline')
+                if current['active_processes'] == 0:
+                    drain['idle_confirmed'] = True
+                    break
+                for name in ('stdout.log', 'stderr.log'):
+                    path = folder / name
+                    binding.require(not path.exists() or path.stat().st_size <= COMMAND_OUTPUT_LIMIT,
+                                    'command-output-budget')
+                binding.require(now < drain_started + 2, 'command-descendants-remain')
+                time.sleep(min(.025, max(0, min(deadline, drain_started + 2) - now)))
+        finally:
+            drain['elapsed_ms'] = (time.monotonic()-drain_started)*1000
         with binding.locked_read(folder / 'terminal.json') as stream:
             binding.require(os.fstat(stream.fileno()).st_size <= 65536, 'command-terminal-budget')
             terminal = binding.strict_json(stream.read())
@@ -205,10 +225,31 @@ def run_command(command, folder, *, timeout=120):
         if receipt['errors'] or receipt['termination_requested'] or receipt.get('worker_still_alive'):
             receipt['process_status'] = 'FAIL'
     receipt['outputs'] = {}
+    receipt['output_read_completion'] = {}
+    output_read_deadline = time.monotonic() + 2
     for name in ('stdout.log', 'stderr.log', 'terminal.json'):
         path = folder / name
         if path.exists():
-            with binding.locked_read(path) as stream: receipt['outputs'][name] = csv_inputs.file_fact(stream)
+            read_started = time.monotonic()
+            completion = receipt['output_read_completion'][name] = dict(sharing_retries=0, writers_closed=False)
+            try:
+                while True:
+                    try:
+                        with binding.locked_read(path) as stream:
+                            receipt['outputs'][name] = csv_inputs.file_fact(stream)
+                        completion['writers_closed'] = True
+                        break
+                    except OSError as error:
+                        if getattr(error, 'winerror', None) not in (32, 33) or time.monotonic() >= output_read_deadline:
+                            raise
+                        completion['sharing_retries'] += 1
+                        time.sleep(min(.025, max(0, output_read_deadline-time.monotonic())))
+            except Exception as error:
+                receipt['errors'].append(error_record(error))
+                receipt['process_status'] = 'FAIL'
+                continue
+            finally:
+                completion['elapsed_ms'] = (time.monotonic()-read_started)*1000
             if name != 'terminal.json' and receipt['outputs'][name]['bytes'] > COMMAND_OUTPUT_LIMIT:
                 receipt['errors'].append(dict(type='ValueError', reason='command-final-output-budget'))
                 receipt['process_status'] = 'FAIL'

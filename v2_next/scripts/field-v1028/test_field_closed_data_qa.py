@@ -34,12 +34,20 @@ def save(path, value):
 FAULT_SCRIPT = '''import json, os, subprocess, sys, time
 from pathlib import Path
 mode, marker = sys.argv[1], Path(sys.argv[2])
-if mode == 'orphan':
-    subprocess.Popen([sys.executable, '-S', __file__, 'hang', str(marker)], creationflags=subprocess.CREATE_NO_WINDOW)
+if mode in ('orphan', 'settling', 'drain-output'):
+    child_mode = {'settling':'settle-child', 'drain-output':'late-output'}.get(mode, 'hang')
+    subprocess.Popen([sys.executable, '-S', __file__, child_mode, str(marker)],
+                     stdout=sys.stdout, stderr=sys.stderr, creationflags=subprocess.CREATE_NO_WINDOW)
     end=time.monotonic()+5
     while not marker.exists() and time.monotonic()<end: time.sleep(.02)
     raise SystemExit(0)
 marker.write_text(json.dumps({'pid':os.getpid()}))
+if mode == 'settle-child':
+    time.sleep(.4)
+    raise SystemExit(0)
+if mode == 'late-output':
+    time.sleep(.2)
+    print('x'*4096, flush=True)
 if mode == 'exit': raise SystemExit(7)
 if mode in ('output', 'fast-output'):
     print('x'*4096, flush=True)
@@ -264,12 +272,68 @@ class ClosedDataTests(unittest.TestCase):
         finally:
             unrelated.terminate(); unrelated.wait(timeout=10)
 
+    def test_short_owned_descendant_is_confirmed_idle_before_pass(self):
+        command, marker = self.fault_command('settling')
+        result = qa.run_command(command, self.folder / 'run', timeout=10)
+        self.assertEqual(result['process_status'], 'PASS', result)
+        self.assertEqual(result['exit_code'], 0)
+        self.assertGreater(result['job_before_close']['active_processes'], 0)
+        self.assertTrue(result['job_drain']['idle_confirmed'])
+        self.assertEqual(result['job_drain']['observations'][-1]['accounting']['active_processes'], 0)
+        self.assertFalse(result['termination_requested'])
+        self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
+        self.assert_marker_process_gone(marker)
+
+    def test_owned_drain_does_not_extend_original_deadline(self):
+        command, marker = self.fault_command('orphan')
+        started = time.monotonic()
+        result = qa.run_command(command, self.folder / 'run', timeout=1)
+        self.assertEqual(result['process_status'], 'FAIL')
+        self.assertIn('command-deadline', str(result['errors']))
+        self.assertFalse(result['job_drain']['idle_confirmed'])
+        self.assertTrue(result['termination_requested'])
+        self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
+        self.assertLess(time.monotonic() - started, 6)
+        self.assert_marker_process_gone(marker)
+
+    def test_output_limit_remains_active_during_owned_drain(self):
+        command, marker = self.fault_command('drain-output')
+        with patch.object(qa, 'COMMAND_OUTPUT_LIMIT', 1024):
+            result = qa.run_command(command, self.folder / 'run', timeout=10)
+        self.assertEqual(result['process_status'], 'FAIL')
+        self.assertIn('command-output-budget', str(result['errors']))
+        self.assertTrue(result['termination_requested'])
+        self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
+        self.assert_marker_process_gone(marker)
+
     def test_nonzero_consumer_is_preserved_as_actual_exit(self):
         command, marker = self.fault_command('exit')
         result = qa.run_command(command, self.folder / 'run')
         self.assertEqual(result['process_status'], 'PASS', result)
         self.assertEqual(result['exit_code'], 7)
         self.assertFalse(result['termination_requested'])
+        self.assert_marker_process_gone(marker)
+
+    def test_output_access_denial_preserves_failure_receipt_without_retry(self):
+        command, marker = self.fault_command('exit')
+        original = qa.binding.locked_read
+        calls = []
+        def deny_output(path):
+            if Path(path).name == 'stdout.log':
+                calls.append(str(path))
+                error = PermissionError('test output access denied')
+                error.winerror = 5
+                raise error
+            return original(path)
+        with patch.object(qa.binding, 'locked_read', deny_output):
+            result = qa.run_command(command, self.folder / 'run')
+        self.assertEqual(result['process_status'], 'FAIL')
+        self.assertEqual(result['exit_code'], 7)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result['output_read_completion']['stdout.log']['sharing_retries'], 0)
+        self.assertFalse(result['output_read_completion']['stdout.log']['writers_closed'])
+        self.assertTrue(any(error['winerror'] == 5 for error in result['errors']))
+        self.assertEqual(json.loads((self.folder / 'run/process-receipt.json').read_bytes()), result)
         self.assert_marker_process_gone(marker)
 
     def test_output_budget_terminates_only_test_tree(self):
