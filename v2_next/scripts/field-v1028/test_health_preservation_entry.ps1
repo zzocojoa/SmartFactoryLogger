@@ -20,7 +20,8 @@ Test ($definition.Count -eq 1) 'one-scope-validator'
 . ([scriptblock]::Create($definition[0].Extent.Text))
 foreach($row in @(
     @('OMITTED_FOR_1029_HEALTH_ONLY','1.0.28','4cc7393e1bafbf90a329726aed9470fe0daacb21'),
-    @('OMITTED_FOR_1030_HISTORY_ONLY','1.0.29','acaf77d95101a050f4d3ecd76125d3502036f5a7'))){
+    @('OMITTED_FOR_1030_HISTORY_ONLY','1.0.29','acaf77d95101a050f4d3ecd76125d3502036f5a7'),
+    @('OMITTED_FOR_1030_RENDERER_LOSS_FIX','1.0.30','0732c8e810be3c46096b397812f53a9767354229'))){
     $scope=[pscustomobject]@{new_full_backup_policy=$row[0];expected_app_version=$row[1];preceding_candidate_build_reference=$row[2]}
     Assert-PreservationScope $scope;Test $true ('exact-scope:'+ $row[1])
     foreach($key in @('new_full_backup_policy','expected_app_version','preceding_candidate_build_reference')){
@@ -29,9 +30,16 @@ foreach($row in @(
         Test ($caught -ceq 'scope-build-policy') ('rejected-scope:'+ $row[1]+':'+$key);$scope.$key=$original
     }
 }
+$scope.new_full_backup_policy='OMITTED_FOR_1030_HISTORY_ONLY'
 $scope.expected_app_version='1.0.28';$scope.preceding_candidate_build_reference='4cc7393e1bafbf90a329726aed9470fe0daacb21';$caught=$null
 try{Assert-PreservationScope $scope}catch{$caught=$_.Exception.Message}
 Test ($caught -ceq 'scope-build-policy') 'history-policy-does-not-accept-old-generation'
+$scope.new_full_backup_policy='OMITTED_FOR_1030_RENDERER_LOSS_FIX';$scope.expected_app_version='1.0.30'
+foreach($otherBuild in @('685dde946e8ce2e34c65c6dde05be16e342f068e','8de064317d6de42d321afb8395f7a30a1f31cd55')){
+    $scope.preceding_candidate_build_reference=$otherBuild;$caught=$null
+    try{Assert-PreservationScope $scope}catch{$caught=$_.Exception.Message}
+    Test ($caught -ceq 'scope-build-policy') ('same-version-other-build-rejected:'+ $otherBuild)
+}
 function Invoke-Entry([string]$Root,[string]$Pin,[string]$Name,[bool]$Library=$true){
     $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$native
     $info.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$Root+'\invoke-health-preservation.ps1" -ExpectedPackageManifestSha256 '+$Pin+' -PackageRoot "'+$Root+'"'

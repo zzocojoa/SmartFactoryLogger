@@ -65,7 +65,10 @@ function Assert-PreservationScope($Scope){
     $history=$Scope.new_full_backup_policy -ceq 'OMITTED_FOR_1030_HISTORY_ONLY' -and
         $Scope.expected_app_version -ceq '1.0.29' -and
         $Scope.preceding_candidate_build_reference -ceq 'acaf77d95101a050f4d3ecd76125d3502036f5a7'
-    if(-not ($health -or $history)){throw 'scope-build-policy'}
+    $rendererFix=$Scope.new_full_backup_policy -ceq 'OMITTED_FOR_1030_RENDERER_LOSS_FIX' -and
+        $Scope.expected_app_version -ceq '1.0.30' -and
+        $Scope.preceding_candidate_build_reference -ceq '0732c8e810be3c46096b397812f53a9767354229'
+    if(-not ($health -or $history -or $rendererFix)){throw 'scope-build-policy'}
 }
 try {
     $native=[Environment]::SystemDirectory+'\WindowsPowerShell\v1.0\powershell.exe'
