@@ -470,6 +470,13 @@ function createWindow() {
     logStartupEvent('electron.webcontents-did-finish-load');
   });
 
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    logStartupEvent('renderer.process-gone', {
+      reason: details.reason,
+      exit_code: details.exitCode,
+    });
+  });
+
   mainWindow.webContents.on('did-navigate', (_event, url, httpResponseCode) => {
     logStartupEvent('electron.webcontents-did-navigate', {
       protocol: getStartupUrlProtocol(url),

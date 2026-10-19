@@ -29,6 +29,7 @@ function createRendererHarness(timeoutMs = 1000) {
   const contents = new EventEmitter();
   const sent = [];
   contents.isDestroyed = () => false;
+  contents.isCrashed = () => false;
   contents.send = (channel, attemptId) => sent.push({ channel, attemptId });
   const window = { isDestroyed: () => false, webContents: contents };
   const controller = createRendererShutdownController({
@@ -83,6 +84,64 @@ test('a renderer destroyed during preparation cannot leave the shutdown waiting'
   contents.emit('destroyed');
   await pending;
   assert.equal(sent.length, 0);
+});
+
+test('an already crashed renderer cannot acknowledge preparation but backend closeout is still required', async () => {
+  const { contents, sent, controller } = createRendererHarness(20);
+  contents.isCrashed = () => true;
+  const gate = createBackendCloseoutGate();
+  gate.markBackendStarted();
+  let backendCalls = 0;
+  let quitCalls = 0;
+  const errors = [];
+  const shutdown = createCloseoutVerifiedStop({ closeoutGate: gate, stopProcess: async () => {
+    backendCalls += 1;
+    return { stopped: true, reason: 'close', exitCode: backendCalls === 1 ? 2 : 0, forced: false };
+  } });
+  const application = createApplicationShutdownController({
+    setQuitting: () => undefined,
+    prepareShutdown: controller.prepare,
+    shutdown: () => shutdown(createChild()),
+    quitApplication: () => { quitCalls += 1; },
+    onFailure: error => errors.push(error.message),
+  });
+  assert.equal(await application.beginShutdown(), false);
+  assert.equal(backendCalls, 1);
+  assert.equal(quitCalls, 0);
+  assert.equal(gate.isCloseoutRequired(), true);
+  assert.match(errors[0], /did not verify a graceful closeout/);
+  assert.equal(await application.beginShutdown(), true);
+  assert.equal(backendCalls, 2);
+  assert.equal(quitCalls, 1);
+  assert.equal(gate.isCloseoutRequired(), false);
+  assert.deepEqual(sent, []);
+  assert.equal(controller.resume(), false);
+});
+
+test('renderer process loss during preparation releases the wait without accepting a stale acknowledgement', async () => {
+  const { ipcMain, contents, controller } = createRendererHarness(20);
+  const pending = controller.prepare();
+  await Promise.resolve();
+  contents.isCrashed = () => true;
+  contents.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+  await pending;
+  assert.equal(ipcMain.listenerCount('sfl:renderer-shutdown-ready'), 0);
+  assert.equal(contents.listenerCount('render-process-gone'), 0);
+  assert.equal(contents.listenerCount('destroyed'), 0);
+  assert.equal(contents.listenerCount('dom-ready'), 0);
+  contents.isCrashed = () => false;
+  // A replacement renderer must perform its own handshake; do not cache the loss.
+  await assert.rejects(controller.prepare(), /timed out/);
+  assert.equal(contents.listenerCount('render-process-gone'), 0);
+});
+
+test('a renderer lost before the queued preparation send is not sent a new message', async () => {
+  const { contents, sent, controller } = createRendererHarness(20);
+  const pending = controller.prepare();
+  contents.isCrashed = () => true;
+  await pending;
+  assert.deepEqual(sent, []);
+  assert.equal(contents.listenerCount('render-process-gone'), 0);
 });
 
 test('native window close is held until application shutdown completes', async () => {

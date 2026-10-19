@@ -400,6 +400,9 @@ function createRendererShutdownController({
     if (!window || window.isDestroyed() || !contents || contents.isDestroyed()) {
       return Promise.resolve();
     }
+    // A crashed renderer leaves its WebContents alive but cannot acknowledge IPC.
+    // Only skip that handshake; the application's backend closeout still runs.
+    if (contents.isCrashed()) return Promise.resolve();
     const attemptId = randomUUID();
     let settled = false;
     const promise = new Promise((resolve, reject) => {
@@ -410,6 +413,7 @@ function createRendererShutdownController({
         ipcMain.removeListener(readyChannel, onReady);
         contents.removeListener('dom-ready', sendPreparation);
         contents.removeListener('destroyed', onDestroyed);
+        contents.removeListener('render-process-gone', onDestroyed);
         active = null;
         if (error) reject(error);
         else resolve();
@@ -421,6 +425,7 @@ function createRendererShutdownController({
       };
       const sendPreparation = () => {
         if (settled) return;
+        if (contents.isCrashed()) { finish(); return; }
         try { contents.send('sfl:prepare-shutdown', attemptId); }
         catch (error) { finish(error); }
       };
@@ -429,6 +434,7 @@ function createRendererShutdownController({
       ipcMain.on(readyChannel, onReady);
       contents.on('dom-ready', sendPreparation);
       contents.once('destroyed', onDestroyed);
+      contents.once('render-process-gone', onDestroyed);
       // Send after active is assigned, including when a test/renderer answers immediately.
       queueMicrotask(sendPreparation);
     });
@@ -440,6 +446,7 @@ function createRendererShutdownController({
     const window = getMainWindow();
     const contents = window?.webContents;
     if (window && !window.isDestroyed() && contents && !contents.isDestroyed()) {
+      if (contents.isCrashed()) return false;
       try { contents.send('sfl:resume-after-shutdown-failure'); }
       catch (_error) { return false; }
     }
