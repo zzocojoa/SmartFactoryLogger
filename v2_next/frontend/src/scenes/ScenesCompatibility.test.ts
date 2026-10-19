@@ -41,12 +41,12 @@ describe('pinned Scenes runtime compatibility', () => {
     grid.setState({ isDraggable: true, isResizable: true });
     const item = grid.state.children.find((entry) => entry.state.key === 'operatorMetadata') as SceneGridItem;
     // Non-overlapping geometry: collision resolution is a separate existing model policy.
-    item.setState({ x: 40, y: 12, width: 19, height: 16 });
+    item.setState({ x: 40, y: 100, width: 19, height: 16 });
     const body = item.state.body;
     if (!(body instanceof ReactWidget)) throw new Error('Expected the real metadata widget');
     body.setState({ title: '작업 정보 검증' });
     const saved = buildLayoutMap(grid.state.children);
-    expect(saved.operatorMetadata).toMatchObject({ x: 40, y: 12, width: 19, height: 16, title: '작업 정보 검증', type: 'operatorMetadata' });
+    expect(saved.operatorMetadata).toMatchObject({ x: 40, y: 100, width: 19, height: 16, title: '작업 정보 검증', type: 'operatorMetadata' });
     const restored = getDashboardScene({ markdown: () => null }, JSON.parse(JSON.stringify(saved)));
     expect(buildLayoutMap((restored.state.body as SceneGridLayout).state.children)).toEqual(saved);
     expect((restored.state.body as SceneGridLayout).state.isDraggable).toBe(false);

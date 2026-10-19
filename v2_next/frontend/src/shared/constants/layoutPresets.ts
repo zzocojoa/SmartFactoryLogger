@@ -15,14 +15,14 @@ const OPERATOR_METADATA_TITLE = '작업 정보';
  * Balanced layout with all widgets visible
  */
 const PRESET_16_9: LayoutMap = {
-  kpi: { x: 0, y: 0, width: 15, height: 28, type: 'kpi', title: '공정 KPI' },
-  spot: { x: 15, y: 0, width: 25, height: 4, type: 'spot', title: 'SPOT 온도' },
-  temps: { x: 15, y: 4, width: 25, height: 4, type: 'temps', title: '보조 온도' },
-  camera: { x: 15, y: 8, width: 25, height: 20, type: 'camera', title: 'SPOT 카메라' },
-  molds: { x: 40, y: 0, width: 20, height: 8, type: 'molds', title: '몰드 존' },
-  env: { x: 40, y: 8, width: 20, height: 4, type: 'env', title: '환경' },
-  operatorMetadata: { x: 40, y: 12, width: 20, height: 16, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
-  timeseries: { x: 0, y: 28, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
+  kpi: { x: 0, y: 0, width: 15, height: 36, type: 'kpi', title: '공정 KPI' },
+  spot: { x: 15, y: 0, width: 25, height: 12, type: 'spot', title: 'SPOT 온도' },
+  temps: { x: 15, y: 12, width: 25, height: 8, type: 'temps', title: '보조 온도' },
+  camera: { x: 15, y: 20, width: 25, height: 16, type: 'camera', title: 'SPOT 카메라' },
+  molds: { x: 40, y: 0, width: 20, height: 12, type: 'molds', title: '몰드 존' },
+  env: { x: 40, y: 12, width: 20, height: 8, type: 'env', title: '환경' },
+  operatorMetadata: { x: 40, y: 20, width: 20, height: 16, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
+  timeseries: { x: 0, y: 36, width: 60, height: 16, type: 'timeseries', title: '타임 시리즈' },
 };
 
 /**

@@ -91,7 +91,7 @@ const NativeWidget = ({ item, children }: NativeWidgetProps): JSX.Element => {
         <div className="panel-header grid-drag-handle-dashboard-grid">
           <span className="panel-title-text">{item.title}</span>
         </div>
-        <div className="panel-content" style={{ flex: 1, position: 'relative', overflow: 'visible' }}>
+        <div className="panel-content" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           {children}
         </div>
       </div>

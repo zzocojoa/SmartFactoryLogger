@@ -26,14 +26,14 @@ export type SavedLayoutMap = Record<string, SavedLayoutItem>;
 const OPERATOR_METADATA_MIN_HEIGHT = 16;
 
 export const DEFAULT_DASHBOARD_ITEMS: DashboardItem[] = [
-  { key: 'kpi', type: 'kpi', title: '\uACF5\uC815 KPI', x: 0, y: 0, width: 15, height: 28 },
-  { key: 'spot', type: 'spot', title: 'SPOT \uC628\uB3C4', x: 15, y: 0, width: 25, height: 4 },
-  { key: 'temps', type: 'temps', title: '\uBCF4\uC870 \uC628\uB3C4', x: 15, y: 4, width: 25, height: 4 },
-  { key: 'camera', type: 'camera', title: 'SPOT \uCE74\uBA54\uB77C', x: 15, y: 8, width: 25, height: 20 },
-  { key: 'molds', type: 'molds', title: '\uBAB0\uB4DC \uC874', x: 40, y: 0, width: 20, height: 8 },
-  { key: 'env', type: 'env', title: '\uD658\uACBD', x: 40, y: 8, width: 20, height: 4 },
-  { key: 'operatorMetadata', type: 'operatorMetadata', title: '\uC791\uC5C5 \uC815\uBCF4', x: 40, y: 12, width: 20, height: OPERATOR_METADATA_MIN_HEIGHT },
-  { key: 'timeseries', type: 'timeseries', title: '\uD0C0\uC784 \uC2DC\uB9AC\uC988', x: 0, y: 28, width: 60, height: 8 },
+  { key: 'kpi', type: 'kpi', title: '\uACF5\uC815 KPI', x: 0, y: 0, width: 15, height: 36 },
+  { key: 'spot', type: 'spot', title: 'SPOT \uC628\uB3C4', x: 15, y: 0, width: 25, height: 12 },
+  { key: 'temps', type: 'temps', title: '\uBCF4\uC870 \uC628\uB3C4', x: 15, y: 12, width: 25, height: 8 },
+  { key: 'camera', type: 'camera', title: 'SPOT \uCE74\uBA54\uB77C', x: 15, y: 20, width: 25, height: 16 },
+  { key: 'molds', type: 'molds', title: '\uBAB0\uB4DC \uC874', x: 40, y: 0, width: 20, height: 12 },
+  { key: 'env', type: 'env', title: '\uD658\uACBD', x: 40, y: 12, width: 20, height: 8 },
+  { key: 'operatorMetadata', type: 'operatorMetadata', title: '\uC791\uC5C5 \uC815\uBCF4', x: 40, y: 20, width: 20, height: OPERATOR_METADATA_MIN_HEIGHT },
+  { key: 'timeseries', type: 'timeseries', title: '\uD0C0\uC784 \uC2DC\uB9AC\uC988', x: 0, y: 36, width: 60, height: 16 },
 ];
 
 export const DASHBOARD_LAYOUT_KEYS = [

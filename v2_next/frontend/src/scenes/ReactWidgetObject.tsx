@@ -120,7 +120,7 @@ export class ReactWidget extends SceneObjectBase<ReactWidgetState> {
             )}
           </div>
         )}
-        <div className="panel-content" style={{ flex: 1, position: 'relative', overflow: 'visible' }}>
+        <div className="panel-content" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
           {renderWidget(model)}
         </div>
       </div>

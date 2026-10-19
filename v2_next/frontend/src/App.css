@@ -4288,6 +4288,7 @@ body {
 
 .panel-header {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-1) var(--space-2);
@@ -4310,7 +4311,8 @@ body {
 
 .panel-content {
   flex-grow: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow: auto;
 }
 
 .card-handle {

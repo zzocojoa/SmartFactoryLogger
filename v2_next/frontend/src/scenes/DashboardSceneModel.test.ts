@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { getPresetById } from '../shared/constants/layoutPresets';
+import { DEFAULT_ROW_HEIGHT } from '../shared/constants/logic';
 import {
   resolveDashboardItems,
   type DashboardItem,
@@ -22,6 +24,38 @@ const expectNoOverlappingItems = (items: DashboardItem[]): void => {
 };
 
 describe('resolveDashboardItems', () => {
+  it('gives fresh dashboard cards enough vertical space for their readings and controls', () => {
+    const items = resolveDashboardItems(null);
+    const minimumPixels: Record<string, number> = {
+      spot: 240, temps: 160, molds: 240, env: 160, operatorMetadata: 360, timeseries: 320,
+    };
+    for (const [key, minimum] of Object.entries(minimumPixels)) {
+      const item = items.find((entry) => entry.key === key);
+      expect(item, key).toBeDefined();
+      // Twenty-pixel tracks plus the four-pixel gaps used by the native grid.
+      expect(item!.height * DEFAULT_ROW_HEIGHT + (item!.height - 1) * 4, key)
+        .toBeGreaterThanOrEqual(minimum);
+    }
+    expectNoOverlappingItems(items);
+    expect(Object.fromEntries(items.map(({ key, properties: _properties, ...item }) => [key, item])))
+      .toEqual(getPresetById('16:9')!.layout);
+  });
+
+  it('does not replace a complete operator-saved layout with the fresh dashboard geometry', () => {
+    const saved: SavedLayoutMap = {
+      spot: { x: 0, y: 0, width: 30, height: 18, type: 'spot', title: 'Saved temperature' },
+      camera: { x: 0, y: 18, width: 30, height: 20, type: 'camera', title: 'Saved camera' },
+      operatorMetadata: { x: 30, y: 0, width: 30, height: 18, type: 'operatorMetadata', title: 'Saved work' },
+      timeseries: { x: 0, y: 38, width: 60, height: 14, type: 'timeseries', title: 'Saved chart' },
+    };
+    const before = JSON.parse(JSON.stringify(saved));
+    const items = resolveDashboardItems(saved);
+    expect(items).toHaveLength(Object.keys(saved).length);
+    for (const item of items) expect(item).toMatchObject({ key: item.key, ...saved[item.key] });
+    expect(saved).toEqual(before);
+    expectNoOverlappingItems(items);
+  });
+
   it('adds required operator metadata when a saved layout does not include it', () => {
     const savedLayout: SavedLayoutMap = {
       kpi: { x: 0, y: 0, width: 15, height: 18, type: 'kpi', title: 'KPI' },
