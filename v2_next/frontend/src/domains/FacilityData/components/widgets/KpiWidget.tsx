@@ -83,7 +83,8 @@ export const KpiComponent = React.memo(function KpiComponent() {
     (thresholdMasterOn && thresholdEndPosEnabled && thresholdEndPosValue !== null && typeof endPosValue === 'number' && Number.isFinite(endPosValue) && endPosValue >= thresholdEndPosValue);
   const thresholdWarn = speedThresholdHit || pressThresholdHit || countThresholdHit || endPosThresholdHit;
 
-  if (!hasData) return <div>Loading...</div>;
+  // Keep the responsive card size while the first sample is pending.
+  if (!hasData) return <div className="card kpi-card" aria-busy="true">Loading...</div>;
 
   const kpiAlertClass = jamDanger ? 'card-danger' : jamWarn || thresholdWarn ? 'card-warning' : '';
   const speedState = mapSpeedLevel(computedSpeedLevel) ?? getSpeedState(safeSpeed);

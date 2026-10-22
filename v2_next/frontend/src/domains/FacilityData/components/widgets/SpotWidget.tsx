@@ -85,7 +85,7 @@ export const SpotComponent = React.memo(function SpotComponent() {
     });
   }, [spotDisplayValue]);
 
-  if (!dataReady) return <div>Loading...</div>;
+  if (!dataReady) return <div className="card spot-card" aria-busy="true">Loading...</div>;
 
   return (
     <div

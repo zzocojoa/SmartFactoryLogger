@@ -26,7 +26,7 @@ export const MoldsComponent = React.memo(function MoldsComponent() {
     computedMoldLevel6,
     missing,
   } = useDashboardStore(useShallow(selectDashboardMoldsSlice));
-  if (!hasData) return <div>Loading...</div>;
+  if (!hasData) return <div className="card" aria-busy="true">Loading...</div>;
   const mold1 = mapMoldLevel(computedMoldLevel1) ?? getMoldState(moldValue1 ?? 0).className;
   const mold2 = mapMoldLevel(computedMoldLevel2) ?? getMoldState(moldValue2 ?? 0).className;
   const mold3 = mapMoldLevel(computedMoldLevel3) ?? getMoldState(moldValue3 ?? 0).className;

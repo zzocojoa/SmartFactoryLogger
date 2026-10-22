@@ -55,7 +55,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
   const spotControlError = useDashboardStore(state => state.spotControlError);
   const spotLastSuccessAt = useDashboardStore(state => state.spotLastSuccessAt);
   const spotImageMetadata = useDashboardStore(state => state.spotImageMetadata);
-  if (!spotConfig) return <div>Loading Config...</div>;
+  if (!spotConfig) return <div className="card camera-card" aria-busy="true">Loading Config...</div>;
 
   // Crosshair logic
   const crosshairWidth = positiveNumberOr(spotConfig.widget_width, DEFAULT_CROSSHAIR_WIDTH);

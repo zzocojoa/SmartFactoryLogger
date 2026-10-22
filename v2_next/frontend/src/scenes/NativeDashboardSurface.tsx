@@ -51,7 +51,7 @@ type DeferredWidgetContentProps = {
 const WIDGET_FALLBACK_TEXT = 'Loading...';
 const DEFERRED_WIDGET_TYPES = new Set<DashboardItem['type']>(['timeseries']);
 const GRID_GAP_PX = 4;
-const WIDGET_PLACEHOLDER_CLASS_NAME = 'native-widget-placeholder';
+const WIDGET_PLACEHOLDER_CLASS_NAME = 'card native-widget-placeholder';
 const TIMESERIES_PLACEHOLDER_CLASS_NAME = `${WIDGET_PLACEHOLDER_CLASS_NAME} timeseries-card`;
 
 const resolveNativeGridItemClassName = (itemType: DashboardItem['type']): string => {
@@ -287,7 +287,7 @@ const NativeDashboardSurfaceComponent = ({
             item={item}
             onTimeSeriesVisible={onTimeSeriesVisible}
             renderContent={() => (
-              <Suspense fallback={<div className="widget-loading">{WIDGET_FALLBACK_TEXT}</div>}>
+              <Suspense fallback={<div className={resolvePlaceholderClassName(item)} aria-busy="true">{WIDGET_FALLBACK_TEXT}</div>}>
                 {renderWidget(item, onSpotImageLoaded, onSpotImageError, onSpotImageRetry, requestFocus, focusBusy)}
               </Suspense>
             )}

@@ -55,7 +55,7 @@ export const TempsComponent = React.memo(function TempsComponent() {
     computedBilletLengthThresholdHit ??
     (thresholdMasterOn && thresholdBilletLengthEnabled && thresholdBilletLengthValue !== null && typeof billetLengthValue === 'number' && Number.isFinite(billetLengthValue) && billetLengthValue >= thresholdBilletLengthValue);
 
-  if (!hasData) return <div>Loading...</div>;
+  if (!hasData) return <div className="card" aria-busy="true">Loading...</div>;
   const tempFClass = [
     tempFLevel === 'danger' ? 'temp-danger' : tempFLevel === 'warn' ? 'temp-warn' : '',
     tempFThresholdHit ? 'temp-threshold' : '',
