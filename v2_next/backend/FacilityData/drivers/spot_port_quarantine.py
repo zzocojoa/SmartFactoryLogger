@@ -229,6 +229,14 @@ class SourcePortLeasePool:
             with self._condition:
                 self._ensure_usable_locked()
                 now = self._monotonic()
+                if timeout > 0.0 and now >= deadline:
+                    self._exhaustion_count += 1
+                    raise SpotPortPoolExhausted("source-port pool acquire timed out")
+                # An existing exclusive guard needs no rebind. Do not delay it
+                # behind an OS query for other ports whose quarantine expired.
+                lease = self._lease_guarded_locked()
+                if lease is not None:
+                    return lease
                 due = [
                     (item, item.state, ready_at, item.last_connect_started)
                     for item in self._records
@@ -250,25 +258,9 @@ class SourcePortLeasePool:
                     self._exhaustion_count += 1
                     raise SpotPortPoolExhausted("source-port pool acquire timed out")
                 self._refresh_rebinds_locked(now, due, occupied_ports)
-                record = next((item for item in self._records if item.state == "guarded"), None)
-                if record is not None:
-                    guard = record.guard
-                    if guard is None:
-                        self._fatal = True
-                        raise SpotPortPoolError("guarded source-port record has no guard socket")
-                    try:
-                        guard.close()
-                    except Exception as exc:
-                        self._fatal = True
-                        self._condition.notify_all()
-                        raise SpotPortPoolError(
-                            "failed to release source-port guard socket"
-                        ) from exc
-                    record.guard = None
-                    record.state = "leased"
-                    record.quarantine_until = None
-                    record.retry_at = None
-                    return SourcePortLease(port=record.port, _record_id=record.record_id)
+                lease = self._lease_guarded_locked()
+                if lease is not None:
+                    return lease
 
                 if not counted_wait:
                     self._acquire_wait_count += 1
@@ -387,6 +379,26 @@ class SourcePortLeasePool:
             raise SpotPortReuseViolation("source-port pool is blocked by a policy violation")
         if not self._active:
             raise SpotPortPoolError("source-port pool is not active")
+
+    def _lease_guarded_locked(self) -> SourcePortLease | None:
+        record = next((item for item in self._records if item.state == "guarded"), None)
+        if record is None:
+            return None
+        guard = record.guard
+        if guard is None:
+            self._fatal = True
+            raise SpotPortPoolError("guarded source-port record has no guard socket")
+        try:
+            guard.close()
+        except Exception as exc:
+            self._fatal = True
+            self._condition.notify_all()
+            raise SpotPortPoolError("failed to release source-port guard socket") from exc
+        record.guard = None
+        record.state = "leased"
+        record.quarantine_until = None
+        record.retry_at = None
+        return SourcePortLease(port=record.port, _record_id=record.record_id)
 
     def _record_for_lease_locked(self, lease: SourcePortLease) -> _PortRecord:
         if lease._record_id < 0 or lease._record_id >= len(self._records):

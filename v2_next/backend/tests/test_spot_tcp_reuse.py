@@ -31,13 +31,82 @@ class OccupiedFactory(_SocketFactory):
 
 
 class TcpReuseTests(unittest.TestCase):
+    def test_guarded_port_does_not_wait_for_unneeded_os_query(self):
+        for query_error in (None, PermissionError('synthetic OS query failure')):
+            with self.subTest(query_error=query_error):
+                factory, clock = OccupiedFactory(), _Clock()
+
+                def slow_query():
+                    factory.queries += 1
+                    clock.now += 6
+                    if query_error:
+                        raise query_error
+                    return set()
+
+                factory.occupied_ports = slow_query
+                pool = SourcePortLeasePool(capacity=2, socket_factory=factory, monotonic=clock)
+                pool.initialize()
+                try:
+                    old = pool.acquire(); pool.mark_connect_started(old); pool.release(old)
+                    clock.now = 77
+                    fresh = pool.acquire(timeout_seconds=5)
+                    self.assertNotEqual(fresh.port, old.port)
+                    self.assertEqual(factory.queries, 0)
+                    self.assertEqual(clock.now, 77)
+                    self.assertEqual(len(factory.guards), 2)
+                    diag = pool.diagnostics()
+                    self.assertEqual(diag['source_port_pool_exhaustion_count'], 0)
+                    self.assertEqual(diag['source_port_pool_acquire_wait_count'], 0)
+                    self.assertEqual(diag['source_port_pool_quarantined_count'], 1)
+                    pool.mark_connect_started(fresh); pool.release(fresh)
+                finally:
+                    pool.close()
+                    self.assertTrue(all(guard.closed for guard in factory.guards))
+
+    def test_guarded_port_is_not_leased_if_lock_wait_uses_positive_deadline(self):
+        factory, clock = OccupiedFactory(), _Clock()
+        pool = SourcePortLeasePool(capacity=1, socket_factory=factory, monotonic=clock)
+        pool.initialize()
+        entered = threading.Event()
+        errors = []
+
+        def observed_clock():
+            sampled = clock.now
+            entered.set()  # The next operation must acquire the ownership lock.
+            return sampled
+
+        def acquire():
+            try:
+                pool.acquire(timeout_seconds=5)
+            except Exception as exc:
+                errors.append(exc)
+
+        pool._monotonic = observed_clock
+        waiting = threading.Thread(target=acquire)
+        try:
+            with pool._condition:
+                waiting.start()
+                self.assertTrue(entered.wait(1))
+                clock.now = 6
+            waiting.join(2)
+            self.assertFalse(waiting.is_alive())
+            self.assertEqual(len(errors), 1)
+            self.assertIsInstance(errors[0], SpotPortPoolExhausted)
+            self.assertEqual(pool.diagnostics()['source_port_pool_leased_count'], 0)
+            self.assertFalse(factory.guards[0].closed)
+            self.assertEqual(factory.queries, 0)
+        finally:
+            waiting.join(2)
+            pool.close()
+
     def test_slow_os_query_cannot_issue_a_lease_after_positive_deadline(self):
         factory, clock = OccupiedFactory(), _Clock()
         def slow_query():
             clock.now += 6
             return set()
         factory.occupied_ports = slow_query
-        pool = SourcePortLeasePool(capacity=2, socket_factory=factory, monotonic=clock)
+        # No existing guard: reusing the only port requires the OS query.
+        pool = SourcePortLeasePool(capacity=1, socket_factory=factory, monotonic=clock)
         pool.initialize()
         old = pool.acquire(); pool.mark_connect_started(old); pool.release(old)
         clock.now = 77
@@ -45,8 +114,8 @@ class TcpReuseTests(unittest.TestCase):
             with self.assertRaises(SpotPortPoolExhausted):
                 pool.acquire(timeout_seconds=5)
             self.assertEqual(pool.diagnostics()['source_port_pool_leased_count'], 0)
-            self.assertEqual(len(factory.guards), 2)
-            self.assertFalse(factory.guards[-1].closed)
+            self.assertEqual(len(factory.guards), 1)
+            self.assertTrue(factory.guards[0].closed)
         finally:
             pool.close()
 
@@ -69,6 +138,7 @@ class TcpReuseTests(unittest.TestCase):
         pool = SourcePortLeasePool(capacity=2, socket_factory=factory, monotonic=clock)
         pool.initialize()
         old = pool.acquire(); pool.mark_connect_started(old); pool.release(old)
+        second = pool.acquire(); pool.mark_connect_started(second); pool.release(second)
         clock.now = 77
         leases, errors = [], []
         def acquire():
@@ -84,7 +154,7 @@ class TcpReuseTests(unittest.TestCase):
             release.set(); waiting.join(2)
             self.assertFalse(waiting.is_alive()); self.assertEqual(errors, [])
             self.assertEqual(len(leases), 1); self.assertNotEqual(leases[0].port, other.port)
-            self.assertEqual(len(factory.guards), 3)
+            self.assertEqual(len(factory.guards), 4)
             pool.release(other); pool.release(leases[0])
         finally:
             release.set(); waiting.join(3); pool.close()
@@ -101,7 +171,7 @@ class TcpReuseTests(unittest.TestCase):
             return set()
 
         factory.occupied_ports = blocked_query
-        pool = SourcePortLeasePool(capacity=2, socket_factory=factory, monotonic=clock)
+        pool = SourcePortLeasePool(capacity=1, socket_factory=factory, monotonic=clock)
         pool.initialize()
         lease = pool.acquire(); pool.mark_connect_started(lease); pool.release(lease)
         clock.now = 77
@@ -134,7 +204,7 @@ class TcpReuseTests(unittest.TestCase):
                 self.assertGreaterEqual(len(ticks), 3)
                 self.assertTrue(worker.is_alive())  # Unfinished ownership cannot be called drained.
                 self.assertFalse(pool.active)
-                self.assertEqual(len(factory.guards), 2)
+                self.assertEqual(len(factory.guards), 1)
             finally:
                 close_returned.set(); release.set()
                 await heartbeat_task
@@ -142,7 +212,7 @@ class TcpReuseTests(unittest.TestCase):
                 await asyncio.to_thread(worker.join, 2)
                 self.assertTrue(await transport.close(timeout_sec=.1))
                 self.assertFalse(worker.is_alive()); self.assertFalse(watchdog.is_alive())
-                self.assertEqual(len(factory.guards), 2)  # No late rebind after close.
+                self.assertEqual(len(factory.guards), 1)  # No late rebind after close.
                 self.assertTrue(all(guard.closed for guard in factory.guards))
         try:
             asyncio.run(exercise())
@@ -197,10 +267,12 @@ class TcpReuseTests(unittest.TestCase):
             clock.now = 77
             fresh = pool.acquire()
             self.assertNotIn(fresh.port, factory.occupied)
-            self.assertEqual(factory.queries, 1)  # One OS snapshot for all due rebinds.
-            self.assertEqual(pool.diagnostics()['source_port_pool_rebind_pending_count'], 2)
+            self.assertEqual(factory.queries, 0)  # The existing guard needs no query.
+            self.assertEqual(pool.diagnostics()['source_port_pool_quarantined_count'], 2)
             pool.release(fresh)
             with self.assertRaises(SpotPortPoolExhausted): pool.acquire()
+            self.assertEqual(factory.queries, 1)  # One OS snapshot for all due rebinds.
+            self.assertEqual(pool.diagnostics()['source_port_pool_rebind_pending_count'], 2)
             factory.occupied.clear(); clock.now = 78
             recovered = pool.acquire(); pool.mark_connect_started(recovered)
             self.assertEqual(recovered.port, first.port)
@@ -210,7 +282,7 @@ class TcpReuseTests(unittest.TestCase):
 
     def test_os_query_failure_cannot_promote_any_port_and_retry_is_supported(self):
         factory, clock = OccupiedFactory(), _Clock()
-        pool = SourcePortLeasePool(capacity=2, socket_factory=factory, monotonic=clock, acquire_timeout_seconds=0)
+        pool = SourcePortLeasePool(capacity=1, socket_factory=factory, monotonic=clock, acquire_timeout_seconds=0)
         pool.initialize()
         try:
             lease = pool.acquire(); pool.mark_connect_started(lease); pool.release(lease)
@@ -235,7 +307,7 @@ class TcpReuseTests(unittest.TestCase):
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         thread = threading.Thread(target=server.serve_forever); thread.start()
         offset = [0.0]
-        pool = SourcePortLeasePool(capacity=12, monotonic=lambda: time.monotonic() + offset[0])
+        pool = SourcePortLeasePool(capacity=9, monotonic=lambda: time.monotonic() + offset[0])
         transport = SpotHttpTransport(pool=pool)
         worker = watchdog = None
         try:
@@ -256,6 +328,9 @@ class TcpReuseTests(unittest.TestCase):
             offset[0] += 77.2  # Accelerates only the pool's eligibility clock, not OS TCP state.
             self.assertEqual(transport.request_sync(request).body, b'500')
             self.assertNotIn(peers[-1], first_ports)
+            # All fresh guards are now consumed; an actual query must reject
+            # the eight eligible ports still in TIME_WAIT, without connecting.
+            with self.assertRaises(SpotPortPoolExhausted): pool.acquire(timeout_seconds=0)
             diag = transport.diagnostics()
             self.assertEqual(diag['source_port_bind_collision_count'], 0)
             self.assertEqual(diag['source_port_transport_failure_count'], 0)
