@@ -366,3 +366,15 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - Starlette/httpx deprecation 경고는 남아 있다. 이 실행은 frontend/Electron/패키지 빌드 또는 현장 검증을 새로 수행한 것이 아니다.
 - 관련 backend Ruff와 기본 mypy10파일도 최종 제품 변경에서 exit0이다. 이후에는 이 보고서와 CHANGELOG만 갱신했다.
 - 이번5개 행동 수정은 b94bcc58·8f1d7657·78ed68ed·2a46f31a·4a753efe에 분리해 커밋했다. 전체 HTTP7단계/17명세, 새4MiB segment와 원본 읽기 전용 전환, master 통합 및 최종 설치본 검증은 계속 미완료다. 운영 서버에는 변경을 적용하지 않았다.
+
+## HTTP 1단계 — 새 fact 스풀 분할과 기존 단일 원본 보존
+
+새 임시 기록은 `<기존 스풀 파일명>.segments-v1` 폴더의 고유 순번/UUID 파일에 저장한다.
+한 파일은4MiB 이하이며 기존 단일 스풀에는 덧붙이거나 복구 후 삭제하지 않는다.
+잘못된 기존 스풀도 자동 이동하지 않고 원래 경로/위치의 UNCERTAIN 오류로 남긴다.
+새 segment만 해당 데이터 복구 후 정리하며 기존20행/1MiB 읽기와64MiB 미복구 상한을 유지한다.
+
+- `test_segmented_spool_rotates_and_preserves_legacy_source`: 기존2,331bytes가4,350,331bytes로 늘어나는 RED(`fact-spool-segments-red`, exit1)를 확인했다. 수정 후 새2파일 각각4MiB 이하·원본 불변·전체13키/JPEG 아닌 실제 fact CSV 내용·재시작 중복 없음·미복구0을 확인했다.
+- 기존 파일 삭제/오류 파일 이동을 기대하던 fixture를 승인된 읽기 전용 원본 정책으로 변경했다. 기존 성공 데이터·미복구 건수·실패 판정 assertions를 유지하고, 디스크 실패 주입도 실제 새 segment 쓰기 경로에 적용했다.
+- `fact-spool-segments-green`: fact/queue/종료 회귀/SPOT API273시험 중272통과·기존 private F01자료 미제공1skip,77.204초,exit0. backend Ruff·mypy10파일 exit0.
+- 새 segment의 부분 쓰기/닫기 불확실성, 임시 사본 선예약·독립 복구 예약과 나머지17명세 전체는 계속 남은 범위다. 이전994시험 전체 결과를 이 제품 변경 이후의 전체 검사로 재사용하지 않는다.

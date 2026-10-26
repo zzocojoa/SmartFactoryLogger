@@ -576,8 +576,11 @@ class FactQueueTests(unittest.TestCase):
             writer = SpotObservationFactWriter(path)
             self.assertTrue(writer.ensure_initialized())
             original = Path.open
+            spool_directory = writer._effective_spool_path().with_name(
+                writer._effective_spool_path().name + ".segments-v1")
             def failing_open(target, mode="r", *args, **kwargs):
-                if "a" in mode and (target == path or target == writer._effective_spool_path()):
+                if any(flag in mode for flag in ("a", "w", "x")) and (
+                        target == path or target.parent == spool_directory):
                     raise OSError("synthetic disk failure")
                 return original(target, mode, *args, **kwargs)
             with patch.object(Path, "open", failing_open):

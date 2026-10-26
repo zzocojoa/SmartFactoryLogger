@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn, Optional
+from uuid import uuid4
 
 from backend.FacilityData.spot_low_signal import (
     LOW_SIGNAL_ALARM_BIT,
@@ -38,6 +39,8 @@ _MANIFEST_SQL_BATCH_SIZE = 4096
 FACT_SPOOL_RECOVERY_ROW_LIMIT = 20
 FACT_SPOOL_RECOVERY_BYTE_LIMIT = 1024**2
 FACT_SPOOL_PENDING_BYTE_LIMIT = 64 * 1024**2
+FACT_SPOOL_SEGMENT_BYTE_LIMIT = 4 * 1024**2
+FACT_SPOOL_STORAGE_VERSION = 1
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -220,6 +223,7 @@ class SpotObservationFactWriter:
         repr=False,
     )
     _spool_read_offsets: dict[Path, int] = field(default_factory=dict, init=False, repr=False)
+    _active_spool_segment: Path | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.load_existing_keys:
@@ -316,8 +320,9 @@ class SpotObservationFactWriter:
 
     def _flush_spool(self) -> None:
         with self._spool_state_lock:
-            spool_path = self._effective_spool_path()
-            if not spool_path.exists() or spool_path.stat().st_size == 0:
+            spool_path = next((path for path in self._spool_recoverable_paths()
+                               if path.exists() and path.stat().st_size > self._spool_read_offsets.get(path, 0)), None)
+            if spool_path is None:
                 return
             pending: list[tuple[dict[str, str], int]] = []
             spool_lines: list[tuple[bytes, int]] = []
@@ -350,13 +355,13 @@ class SpotObservationFactWriter:
                 try:
                     raw = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    self._quarantine_invalid_spool(
+                    self._reject_invalid_spool(
                         spool_path,
                         "malformed-json",
                         exc,
                     )
                 if not isinstance(raw, dict):
-                    self._quarantine_invalid_spool(
+                    self._reject_invalid_spool(
                         spool_path,
                         "non-object-row",
                     )
@@ -365,7 +370,7 @@ class SpotObservationFactWriter:
                     != SPOT_OBSERVATION_FACT_SCHEMA_VERSION
                     or not set(SPOT_OBSERVATION_FACT_COLUMNS).issubset(raw)
                 ):
-                    self._quarantine_invalid_spool(
+                    self._reject_invalid_spool(
                         spool_path,
                         "schema-mismatch",
                     )
@@ -383,21 +388,22 @@ class SpotObservationFactWriter:
                 if self._spool_pending_count_cache is not None:
                     self._spool_pending_count_cache = max(0, self._spool_pending_count_cache - 1)
             self._spool_read_offsets[spool_path] = end_offset
-            if end_offset == spool_path.stat().st_size:
+            if end_offset == spool_path.stat().st_size and spool_path != self._effective_spool_path():
                 spool_path.unlink()
                 self._spool_read_offsets.pop(spool_path, None)
+                if spool_path == self._active_spool_segment:
+                    self._active_spool_segment = None
 
-    def _quarantine_invalid_spool(
+    def _reject_invalid_spool(
         self,
         spool_path: Path,
         reason: str,
         cause: Exception | None = None,
     ) -> NoReturn:
-        archive_path = self._next_schema_mismatch_archive_path(spool_path)
-        spool_path.rename(archive_path)
-        self._spool_read_offsets.pop(spool_path, None)
+        self.spool_last_error_code = f"spool_{reason}"
         error = ValueError(
-            f"Invalid SPOT observation fact spool quarantined: {reason}: {archive_path.name}"
+            f"UNCERTAIN invalid SPOT observation fact spool: {reason}: {spool_path} "
+            f"offset={self._spool_read_offsets.get(spool_path, 0)}"
         )
         if cause is not None:
             raise error from cause
@@ -406,7 +412,6 @@ class SpotObservationFactWriter:
     def _spool_fact(self, fact: Mapping[str, str]) -> None:
         try:
             with self._spool_state_lock:
-                spool_path = self._effective_spool_path()
                 payload = (json.dumps(dict(fact), sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
                 pending_bytes = sum(
                     max(0, path.stat().st_size - self._spool_read_offsets.get(path, 0))
@@ -416,9 +421,10 @@ class SpotObservationFactWriter:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_byte_limit"
                     return
-                spool_path.parent.mkdir(parents=True, exist_ok=True)
-                with spool_path.open("ab") as handle:
+                spool_path, mode = self._spool_append_target(len(payload))
+                with spool_path.open(mode) as handle:
                     handle.write(payload)
+                self._active_spool_segment = spool_path
                 if self._spool_pending_count_cache is not None:
                     self._spool_pending_count_cache += 1
         except Exception:
@@ -430,10 +436,26 @@ class SpotObservationFactWriter:
             return self.spool_path
         return self.output_path.with_name(f"{self.output_path.name}.failed.jsonl")
 
+    def _spool_append_target(self, payload_size: int) -> tuple[Path, str]:
+        if payload_size > FACT_SPOOL_SEGMENT_BYTE_LIMIT:
+            raise ValueError("spool row exceeds segment capacity")
+        active = self._active_spool_segment
+        if active is not None and active.stat().st_size + payload_size <= FACT_SPOOL_SEGMENT_BYTE_LIMIT:
+            return active, "ab"
+        directory = _spool_segment_directory(self._effective_spool_path())
+        directory.mkdir(parents=True, exist_ok=True)
+        existing = _spool_segment_paths(self._effective_spool_path())
+        sequence = max((int(path.name.split("-")[1]) for path in existing), default=0) + 1
+        return directory / f"segment-{sequence:020d}-{uuid4().hex}.jsonl", "xb"
+
+    def _spool_recoverable_paths(self) -> list[Path]:
+        spool_path = self._effective_spool_path()
+        return [spool_path, *_spool_segment_paths(spool_path)]
+
     def _spool_pending_paths(self) -> list[Path]:
         spool_path = self._effective_spool_path()
         archive_pattern = f"{spool_path.stem}.*.schema-mismatch{spool_path.suffix}"
-        return [spool_path, *sorted(spool_path.parent.glob(archive_pattern))]
+        return [*self._spool_recoverable_paths(), *sorted(spool_path.parent.glob(archive_pattern))]
 
     def spool_pending_count(self) -> int:
         with self._spool_state_lock:
@@ -929,6 +951,14 @@ def _file_sha256_digest(path: Path) -> Any:
     return digest
 
 
+def _spool_segment_directory(spool_path: Path) -> Path:
+    return spool_path.with_name(f"{spool_path.name}.segments-v{FACT_SPOOL_STORAGE_VERSION}")
+
+
+def _spool_segment_paths(spool_path: Path) -> list[Path]:
+    return sorted(_spool_segment_directory(spool_path).glob("segment-*.jsonl"))
+
+
 def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
     """Count physical nonblank rows without allocating an unbounded line."""
     count = 0
@@ -944,10 +974,9 @@ def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
 
 
 def _spool_pending_count(spool_path: Path) -> int:
-    if not spool_path.exists() or spool_path.stat().st_size == 0:
-        return 0
     try:
-        return _count_spool_rows(spool_path)
+        return sum(_count_spool_rows(path) for path in [spool_path, *_spool_segment_paths(spool_path)]
+                   if path.exists() and path.stat().st_size)
     except OSError:
         return 0
 

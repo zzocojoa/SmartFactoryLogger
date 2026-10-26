@@ -387,6 +387,50 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual(archive.read_bytes(), archive_before)
             self.assertEqual(writer.spool_pending_count(), 2)
 
+    def test_segmented_spool_rotates_and_preserves_legacy_source(self) -> None:
+        from backend.FacilityData.spot_observation_fact import _spool_pending_count
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            legacy = (json.dumps(self.current_fact_row(1)) + "\n").encode("utf-8")
+            spool.write_bytes(legacy)
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            info = "온" * 120000
+            for seq in range(2, 14):
+                writer._spool_fact(self.current_fact_row(seq, instrument_info=info))
+            self.assertEqual(spool.stat().st_size, len(legacy))
+            self.assertEqual(spool.read_bytes(), legacy)
+            segments_dir = spool.with_name(spool.name + ".segments-v1")
+            segments = sorted(segments_dir.glob("*.jsonl"))
+            self.assertEqual(len(segments), 2)
+            self.assertTrue(all(0 < path.stat().st_size <= 4 * 1024**2 for path in segments))
+            stored_keys = []
+            for path in segments:
+                stored_keys.extend(json.loads(line)["spot_observation_key"]
+                                   for line in path.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(stored_keys, [f"svc-1:{seq}" for seq in range(2, 14)])
+            self.assertEqual(writer.spool_failure_count, 0)
+            self.assertEqual(writer.spool_pending_count(), 13)
+            self.assertEqual(_spool_pending_count(spool), 13)
+            for _ in range(20):
+                if not writer.spool_pending_count():
+                    break
+                writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 0)
+            self.assertEqual(spool.read_bytes(), legacy)
+            self.assertEqual(list(segments_dir.glob("*.jsonl")), [])
+            with output.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_observation_key"] for row in rows],
+                             [f"svc-1:{seq}" for seq in range(1, 14)])
+            self.assertEqual([row["instrument_info"] for row in rows[1:]], [info] * 12)
+            restarted = SpotObservationFactWriter(output, spool_path=spool)
+            restarted._flush_spool()
+            self.assertEqual(restarted.spool_pending_count(), 0)
+            self.assertEqual(restarted.manifest_summary()["row_count"], 13)
+            self.assertEqual(spool.read_bytes(), legacy)
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",
@@ -417,7 +461,9 @@ class SpotObservationFactTests(unittest.TestCase):
             )
             self.assertIsNone(failing_writer.write_fact(failed_snapshot))
             self.assertEqual(failing_writer.failure_count, 1)
-            self.assertTrue(spool_path.exists())
+            segments = spool_path.with_name(spool_path.name + ".segments-v1")
+            self.assertFalse(spool_path.exists())
+            self.assertEqual(len(list(segments.glob("*.jsonl"))), 1)
 
             output_path = tmp_path / "spot_observation_fact.csv"
             retrying_writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
@@ -428,6 +474,7 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("svc-1:7", rows[1])
             self.assertIn("svc-1:8", rows[2])
             self.assertFalse(spool_path.exists())
+            self.assertEqual(list(segments.glob("*.jsonl")), [])
 
     def test_writer_archives_existing_fact_when_header_mismatches_current_schema(self) -> None:
         snapshot = {
@@ -496,12 +543,13 @@ class SpotObservationFactTests(unittest.TestCase):
                 json.dumps(build_spot_observation_fact(pending_snapshot), ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
+            original_spool = spool_path.read_bytes()
 
             writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
             fact = writer.write_fact(success_snapshot)
 
             self.assertIsNotNone(fact)
-            self.assertFalse(spool_path.exists())
+            self.assertEqual(spool_path.read_bytes(), original_spool)
             archives = list(output_path.parent.glob("spot_observation_fact.*.schema-mismatch.csv"))
             self.assertEqual(len(archives), 1)
             with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -512,7 +560,7 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("svc-spooled:11", rows[1])
             self.assertIn("svc-current:12", rows[2])
 
-    def test_spool_flush_archives_legacy_schema_without_rewriting_it_as_current(self) -> None:
+    def test_spool_flush_preserves_legacy_schema_without_rewriting_it_as_current(self) -> None:
         success_snapshot = {
             "spot_service_instance_id": "svc-current",
             "spot_poll_seq": 12,
@@ -534,6 +582,7 @@ class SpotObservationFactTests(unittest.TestCase):
             output_path = tmp_path / "spot_observation_fact.csv"
             spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
             spool_path.write_text(json.dumps(legacy_fact) + "\n", encoding="utf-8")
+            original_spool = spool_path.read_bytes()
 
             writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
             fact = writer.write_fact(success_snapshot)
@@ -544,9 +593,11 @@ class SpotObservationFactTests(unittest.TestCase):
             archives = list(
                 tmp_path.glob("spot_observation_fact.failed.*.schema-mismatch.jsonl")
             )
-            self.assertEqual(len(archives), 1)
-            self.assertIn("svc-legacy:11", archives[0].read_text(encoding="utf-8"))
-            self.assertIn("svc-current:12", spool_path.read_text(encoding="utf-8"))
+            self.assertEqual(archives, [])
+            self.assertEqual(spool_path.read_bytes(), original_spool)
+            segments = list(spool_path.with_name(spool_path.name + ".segments-v1").glob("*.jsonl"))
+            self.assertEqual(len(segments), 1)
+            self.assertIn("svc-current:12", segments[0].read_text(encoding="utf-8"))
             self.assertFalse(output_path.exists())
             restarted_writer = SpotObservationFactWriter(
                 output_path,
@@ -586,9 +637,11 @@ class SpotObservationFactTests(unittest.TestCase):
             writer._spool_fact(second_fact)
             self.assertEqual(writer.spool_pending_count(), 4)
             writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 3)
+            writer._flush_spool()
             self.assertEqual(writer.spool_pending_count(), 2)
 
-    def test_spool_flush_quarantines_invalid_rows_and_fails_closed(self) -> None:
+    def test_spool_flush_preserves_invalid_rows_and_fails_closed(self) -> None:
         success_snapshot = {
             "spot_service_instance_id": "svc-current",
             "spot_poll_seq": 12,
@@ -622,12 +675,14 @@ class SpotObservationFactTests(unittest.TestCase):
                         "spot_observation_fact.failed.*.schema-mismatch.jsonl"
                     )
                 )
-                self.assertEqual(len(archives), 1)
-                self.assertEqual(archives[0].read_text(encoding="utf-8").strip(), invalid_row)
+                self.assertEqual(archives, [])
+                self.assertEqual(spool_path.read_text(encoding="utf-8").strip(), invalid_row)
                 self.assertTrue(spool_path.exists())
+                segments = list(spool_path.with_name(spool_path.name + ".segments-v1").glob("*.jsonl"))
+                self.assertEqual(len(segments), 1)
                 self.assertIn(
                     "svc-current:12",
-                    spool_path.read_text(encoding="utf-8"),
+                    segments[0].read_text(encoding="utf-8"),
                 )
 
                 restarted_writer = SpotObservationFactWriter(
