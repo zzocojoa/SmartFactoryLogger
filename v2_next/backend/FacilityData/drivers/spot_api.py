@@ -245,6 +245,20 @@ _logger = logging.getLogger("spot_control")
 
 
 @dataclass(frozen=True)
+class ImageCaptureAdmissionResult:
+    status: Literal[
+        "ACCEPTED", "REJECTED_FULL", "REJECTED_LIMIT", "REJECTED_UNAVAILABLE",
+        "REJECTED_CLOSED", "DISABLED", "INVALID",
+    ]
+    reason: Optional[str]
+    capture_id: Optional[str]
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "ACCEPTED"
+
+
+@dataclass(frozen=True)
 class _SpotImageCaptureEvent:
     image_bytes: bytes
     captured_at: float
@@ -1219,11 +1233,11 @@ def _maybe_enqueue_spot_image_capture(
     source: str,
     image_age_ms: Optional[float] = None,
     capture_id: Optional[str] = None,
-) -> None:
+) -> ImageCaptureAdmissionResult:
     # The publisher holds the same lock only while swapping prepared values.
     # Capture policy, limits, and writer settings therefore belong to one state.
     with config.PERSISTENCE_CONFIG_LOCK:
-        _enqueue_spot_image_capture_locked(
+        return _enqueue_spot_image_capture_locked(
             image_bytes=image_bytes, captured_at=captured_at, image_url=image_url,
             source=source, image_age_ms=image_age_ms,
             capture_id=capture_id,
@@ -1238,7 +1252,7 @@ def _enqueue_spot_image_capture_locked(
     source: str,
     image_age_ms: Optional[float],
     capture_id: Optional[str],
-) -> None:
+) -> ImageCaptureAdmissionResult:
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     global _spot_image_capture_dropped_pending_limit_count
@@ -1246,23 +1260,23 @@ def _enqueue_spot_image_capture_locked(
     global _spot_image_capture_dropped_invalid_count
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
-        return
+        return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
     mode = _spot_image_capture_mode()
     if mode == "off":
-        return
+        return ImageCaptureAdmissionResult("DISABLED", "capture_disabled", capture_id)
     max_bytes = int(getattr(config, "SPOT_IMAGE_CAPTURE_MAX_BYTES", 2_000_000) or 1)
     if len(image_bytes) > max_bytes:
         with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
             _spot_image_capture_dropped_oversize_count += 1
-        return
+        return ImageCaptureAdmissionResult("REJECTED_LIMIT", "image_too_large", capture_id)
     link_checked_at: Optional[float] = None
     snapshot = None
     if bool(getattr(config, "SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION", True)):
         link_checked_at = time.time()
         snapshot = get_spot_temperature_poll_snapshot()
     if not _should_enqueue_spot_image_capture(mode, snapshot):
-        return
+        return ImageCaptureAdmissionResult("DISABLED", "policy_skipped_mode", capture_id)
     try:
         snapshot_payload = (json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
                                        separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -1275,15 +1289,15 @@ def _enqueue_spot_image_capture_locked(
             _spot_image_capture_last_error_at = time.time()
             _spot_image_capture_last_error_code = "snapshot_serialization_failed"
             _spot_image_capture_last_error_message = "capture observation snapshot is not serializable"
-        return
+        return ImageCaptureAdmissionResult("INVALID", "snapshot_serialization_failed", capture_id)
     payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
     now = time.time()
     with _spot_image_capture_lock:
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
-            return
+            return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
         if min_interval_sec > 0.0 and now - _spot_image_capture_last_enqueue_at < min_interval_sec:
-            return
+            return ImageCaptureAdmissionResult("DISABLED", "policy_skipped_interval", capture_id)
         # The single writer owns a dequeued capture until task_done. Include it
         # in admission rather than freeing its reservation at queue.get().
         with _SPOT_IMAGE_CAPTURE_QUEUE.mutex:
@@ -1293,13 +1307,13 @@ def _enqueue_spot_image_capture_locked(
             _spot_image_capture_dropped_count += 1
             if queued >= _SPOT_IMAGE_CAPTURE_QUEUE.maxsize:
                 _spot_image_capture_dropped_queue_full_count += 1
-            else:
-                _spot_image_capture_dropped_pending_limit_count += 1
-            return
+                return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
+            _spot_image_capture_dropped_pending_limit_count += 1
+            return ImageCaptureAdmissionResult("REJECTED_LIMIT", "pending_item_limit", capture_id)
         if _spot_image_capture_pending_payload_bytes + payload_size > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
             _spot_image_capture_dropped_count += 1
             _spot_image_capture_dropped_payload_limit_count += 1
-            return
+            return ImageCaptureAdmissionResult("REJECTED_LIMIT", "pending_byte_limit", capture_id)
         event = _SpotImageCaptureEvent(
             image_bytes=bytes(image_bytes),
             captured_at=captured_at,
@@ -1317,11 +1331,12 @@ def _enqueue_spot_image_capture_locked(
         except queue.Full:
             _spot_image_capture_dropped_count += 1
             _spot_image_capture_dropped_queue_full_count += 1
-            return
+            return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
         _spot_image_capture_enqueued_count += 1
         _spot_image_capture_pending_payload_bytes += payload_size
         _spot_image_capture_last_enqueue_at = now
     _start_spot_image_capture_worker()
+    return ImageCaptureAdmissionResult("ACCEPTED", None, capture_id)
 
 
 def _format_exception_message(exc: BaseException) -> str:

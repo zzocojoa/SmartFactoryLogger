@@ -256,6 +256,43 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(spot.get_spot_image_capture_health()['fact_row_count'], 3)
         self.assertTrue(finished['accounting_consistent'])
 
+    def test_capture_admission_reports_pending_limit_with_identity(self):
+        self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_QUEUE_MAX', 2))
+        entered, release = self.block_write()
+        image = io.BytesIO()
+        Image.new('RGB', (2, 2), (31, 2, 3)).save(image, format='JPEG')
+        payload = image.getvalue()
+        identities = [f'spotimg_20260929T000000000000Z_{n:032x}' for n in range(1, 4)]
+
+        def submit(identity):
+            return spot._maybe_enqueue_spot_image_capture(
+                image_bytes=payload, captured_at=1790640000.,
+                image_url='http://synthetic.invalid/image.jpg', source='test',
+                capture_id=identity,
+            )
+
+        first = submit(identities[0])
+        self.assertTrue(entered.wait(3))
+        second = submit(identities[1])
+        rejected = submit(identities[2])
+        self.assertEqual(rejected.status, 'REJECTED_LIMIT')
+        self.assertEqual(rejected.reason, 'pending_item_limit')
+        self.assertEqual(rejected.capture_id, identities[2])
+        self.assertFalse(rejected.accepted)
+        self.assertEqual([first.status, second.status], ['ACCEPTED', 'ACCEPTED'])
+        self.assertEqual([first.capture_id, second.capture_id], identities[:2])
+        self.assertTrue(first.accepted and second.accepted)
+        release.set()
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([r['spot_image_capture_id'] for r in rows], identities[:2])
+        self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 2)
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['dropped_pending_limit_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertTrue(final['accounting_consistent'])
+
     def test_capture_during_config_apply_uses_complete_previous_settings(self):
         from backend.Configuration import Configuration_DB_Manager as settings
 

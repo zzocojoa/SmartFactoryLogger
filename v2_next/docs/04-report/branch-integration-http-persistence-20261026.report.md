@@ -275,3 +275,13 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `image-acquisition-id-green`: 실제 229시험은 통과했으나 제가 마지막 모듈 이름을 잘못 적어 import 오류1개로 exit1이었다. 제품 실패와 구분해 보존했다. 정확한 `test_csv_image_startup`의 별도 실행 `image-acquisition-id-startup`은 13시험 exit0이다. 합계 해당 242시험의 실제 통과를 확인했다.
 - backend Ruff와 기본 mypy10파일은 exit0. 기존 single-flight/캐시 재사용과 이미지 retention 검사를 포함했다.
 - 취득 ID 전달은 동일 ID의 부분 쓰기 복구·내용 충돌 판정 완료를 뜻하지 않는다. 상세 이미지 접수 결과, 설정 세대/출력 계약과 영속 추적은 계속 남은 필수 범위다.
+
+## HTTP 1단계 — 이미지 상세 접수 결과
+
+이미지 접수 함수가 불변 `ImageCaptureAdmissionResult(status, reason, capture_id)`를 반환한다.
+기존 queue/건수/bytes/한 건 크기 거절, 비활성·모드/간격 제외, 잘못된 snapshot과 종료를
+구분하고 원래 취득 ID를 유지한다. 저장 성공과 접수 성공은 구분한다.
+
+- `test_capture_admission_reports_pending_limit_with_identity`: 실제 writer를 지연하고2건 한도에서 세 번째 접수의 LIMIT/사유/원래 ID, 앞선 두 ACCEPTED와 실제 저장 ID를 대조했다. 임시 CLOSED 결과와 필요한 LIMIT의 RED(`image-admission-red`, exit1)를 확인했다.
+- `image-admission-green`: 이미지 종료·SPOT API·retention·CSV 시작243시험 통과(exit0). backend Ruff·mypy10파일 exit0.
+- 기존 정책 제외를 drop으로 바꾸지 않았다. 현재 저장 불가의 가용성 계약과 상세 결과의 실제 HTTP 호출부 기록·영속 추적은 다음 경계이며, 전체 접수 계약 완료로 표시하지 않는다.
