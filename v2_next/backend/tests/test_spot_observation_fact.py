@@ -408,6 +408,45 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual(archive.read_bytes(), archive_before)
             self.assertEqual(writer.spool_pending_count(), 2)
 
+    def test_spool_rejects_rows_above_recovery_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            directory = spool.with_name(spool.name + ".segments-v1")
+            limit = 1024**2
+            fact = self.current_fact_row(1, instrument_info="")
+            overhead = len((json.dumps(fact, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8"))
+            fact["instrument_info"] = "x" * (limit - overhead)
+            payload = (json.dumps(fact, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+            self.assertEqual(len(payload), limit)
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            writer._spool_fact(fact)
+            first = list(directory.glob("*.jsonl"))
+            self.assertEqual(len(first), 1)
+            self.assertEqual(first[0].read_bytes(), payload)
+            large = self.current_fact_row(2, instrument_info=fact["instrument_info"] + "x")
+            writer._spool_fact(large)
+            self.assertEqual(writer.spool_failure_count, 1)
+            self.assertEqual(writer.spool_last_error_code, "spool_row_too_large")
+            self.assertEqual(first[0].read_bytes(), payload)
+            self.assertEqual(writer.spool_pending_count(), 1)
+            writer._spool_fact(self.current_fact_row(3))
+            self.assertEqual(writer.spool_pending_count(), 2)
+            writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 1)
+            writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 0)
+            self.assertEqual(writer.spool_failure_count, 1)
+            self.assertEqual(list(directory.glob("*.jsonl")), [])
+            previous_limit = csv.field_size_limit(limit * 2)
+            try:
+                with output.open(encoding="utf-8-sig", newline="") as handle:
+                    rows = list(csv.DictReader(handle))
+            finally:
+                csv.field_size_limit(previous_limit)
+            self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1", "svc-1:3"])
+            self.assertEqual(rows[0]["instrument_info"], fact["instrument_info"])
+
     def test_segmented_spool_rotates_and_preserves_legacy_source(self) -> None:
         from backend.FacilityData.spot_observation_fact import _spool_pending_count
 

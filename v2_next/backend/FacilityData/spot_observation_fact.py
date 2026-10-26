@@ -421,6 +421,10 @@ class SpotObservationFactWriter:
                     self.spool_last_error_code = "spool_write_uncertain"
                     return
                 payload = (json.dumps(dict(fact), sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+                if len(payload) > FACT_SPOOL_RECOVERY_BYTE_LIMIT:
+                    self.spool_failure_count += 1
+                    self.spool_last_error_code = "spool_row_too_large"
+                    return
                 pending_bytes = sum(
                     max(0, path.stat().st_size - self._spool_read_offsets.get(path, 0))
                     for path in self._spool_pending_paths() if path.exists()

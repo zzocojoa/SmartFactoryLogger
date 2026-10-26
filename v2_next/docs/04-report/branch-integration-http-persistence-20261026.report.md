@@ -401,3 +401,10 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 
 - `test_short_spool_write_blocks_retry`: 실제 파일에 절반만 기록하는 경계에서 기존 실패0/기대1의 RED(`fact-spool-short-write-red`, exit1)를 확인했다. 수정 후 부분 bytes·거절 사유·다음 쓰기 차단·pending1·CSV 미생성을 대조했다.
 - `fact-spool-short-write-green`: fact 모듈39시험 통과(0.807초, exit0). backend Ruff·기본 mypy10파일도 exit0. 전체 백엔드 회귀는 남은 스풀 경계를 반영한 뒤 수행한다.
+
+## HTTP 1단계 — 새 스풀 행과 복구 크기 계약 일치
+
+새 fact 스풀의 직렬화 행이1MiB를 넘으면 파일에 추가하지 않고 `spool_row_too_large`로 명시적으로 실패 처리한다. 기존 초과 원본은 읽기 전용 UNCERTAIN 처리대로 보존한다. 이 제한은 JPEG 크기 제한에 적용하지 않는다.
+
+- `test_spool_rejects_rows_above_recovery_limit`: 정확히1MiB의 실제 행 뒤1바이트 초과 행을 보냈을 때 기존 실패0/기대1의 RED(`fact-spool-write-size-red`, exit1)를 확인했다. 수정 후 기존 bytes 불변·초과 행 거절·다음 정상 행 접수·두 배치의 실제 CSV 복구/내용·과거 실패1 유지·잔여0을 대조했다.
+- `fact-spool-write-size-green`: fact 모듈40시험 통과(0.816초, exit0). backend Ruff·기본 mypy10파일 exit0. 직렬화 전에 필요한 임시 메모리의 선예약과 전체 출력별 계약은 후속 범위다.
