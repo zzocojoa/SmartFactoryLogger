@@ -88,3 +88,11 @@
 - `tdd/fact-unavailable-red` 및 `audit-recheck-20261027-d66ea095`에서 CLOSED/UNAVAILABLE의 예상 행동 실패를 확인했다.
 - `tdd/fact-unavailable-green`: 모듈 17시험 중 16통과·기존 F01 1skip, exit0. 해당 변경의 Ruff/mypy도 exit0.
 - 이는 실패 상태의 분류 수정이며, 독립 재초기화·복구 제어까지 구현했다는 의미는 아니다.
+
+## HTTP 1단계 — 실제 수집 경로의 거절 처리
+
+`_write_spot_observation_fact_async`가 상세 접수 API를 사용하고 거절 status/reason/기존 observation key를 구조화 로그에 남긴다. 추가 재시도나 새 관측 ID를 만들지 않으며 화면용 최신 캐시 갱신은 유지한다.
+
+- `test_rejected_poll_keeps_display_and_identity`: 실제 HTTP 수집 함수와 capacity1 owner를 사용하고 외부 HTTP 응답만 대체했다. 두 번째 온도502가 캐시에 반영되고, 거절된 원래 poll2의 상세 결과가 로그에 남으며 실제 fact에는 poll1만 저장되는지 검사한다.
+- `tdd/fact-producer-red`: 상세 상태가 None인 예상 실패(exit1). `fact-producer-green`: 모듈18시험 중17통과·기존 F01 1skip, exit0. Ruff/mypy exit0.
+- 구조화 로그는 후속 data-trace 대조 계약의 대체물이 아니다. 생산–저장 전체 대조와 거절 범위 보존은 2단계에서 계속 구현한다.

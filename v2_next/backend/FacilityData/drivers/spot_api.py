@@ -2338,8 +2338,14 @@ def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
 async def _write_spot_observation_fact_async(snapshot: Dict[str, Any]) -> None:
     if not bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)):
         return
-    if not _get_spot_observation_queue().enqueue(snapshot):
-        _logger.error("SPOT observation persistence rejected an event", extra={"code": "spot-fact-enqueue-rejected"})
+    admission = _get_spot_observation_queue().enqueue_detailed(snapshot)
+    if not admission.accepted:
+        _logger.error("SPOT observation persistence rejected an event", extra={
+            "code": "spot-fact-enqueue-rejected",
+            "admission_status": admission.status,
+            "admission_reason": admission.reason,
+            "observation_key": admission.observation_key,
+        })
 
 
 def spot_observation_fact_writes_drained() -> bool:

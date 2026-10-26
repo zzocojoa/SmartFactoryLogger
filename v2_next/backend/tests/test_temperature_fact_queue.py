@@ -22,6 +22,51 @@ from backend.FacilityData.drivers.real_plc import RealPLCDriver
 
 
 class FactPollingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_poll_keeps_display_and_identity(self):
+        started, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            path = Path(tmp) / "spot_observation_fact.csv"
+
+            def create_writer():
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("test did not release initialization")
+                return SpotObservationFactWriter(path)
+
+            owner = SpotObservationQueue(create_writer, capacity=1)
+            for name, value in {"LOG_PATH": tmp, "SPOT_OBSERVATION_FACT_ENABLED": True,
+                                "SPOT_URL": "http://spot.test/output"}.items():
+                stack.enter_context(patch.object(spot_api.config, name, value))
+            for name, value in {"_spot_observation_queue": owner, "_spot_observation_queue_path": path.resolve(),
+                                "_spot_poll_seq": 0, "_spot_observation_seq": 0,
+                                "_spot_temperature_snapshot": None, "_spot_http_transport": None,
+                                "_spot_http_transport_enforcement_required": False}.items():
+                stack.enter_context(patch.object(spot_api, name, value))
+            responses = iter(["501", "502"])
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request:
+                    httpx.Response(200, text=next(responses), request=request))) as client:
+                    await spot_api._refresh_spot_temperature(client)
+                    with self.assertLogs(spot_api._logger, "ERROR") as logs:
+                        await spot_api._refresh_spot_temperature(client)
+                snapshot = spot_api._spot_temperature_snapshot
+                self.assertEqual(snapshot["spot_poll_seq"], 2)
+                self.assertEqual(snapshot["spot_raw_value_text"], "502")
+                record = logs.records[-1]
+                self.assertEqual(getattr(record, "admission_status", None), "REJECTED_FULL")
+                self.assertEqual(record.admission_reason, "queue_full")
+                self.assertEqual(record.observation_key,
+                                 f'{snapshot["spot_service_instance_id"]}:2')
+                self.assertEqual(owner.snapshot()["accepted_count"], 1)
+                self.assertEqual(owner.snapshot()["rejected_count"], 1)
+            finally:
+                release.set()
+                await asyncio.to_thread(owner.close, 3)
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_poll_seq"] for row in rows], ["1"])
+
     async def test_logger_loop_daily_rollover_and_stop_propagate_deferred_failure(self):
         for successful in [True, False]:
             written = threading.Event()
