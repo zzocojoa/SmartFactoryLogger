@@ -15,6 +15,9 @@ from typing import Any, Callable, Mapping
 from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
 
 
+FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
+
+
 class FactPersistencePending(RuntimeError):
     """Normal asynchronous work remains; it is not a disk failure."""
 
@@ -37,6 +40,8 @@ class SpotObservationQueue:
             "initialization_duration_ms": None, "last_write_duration_ms": None,
             "last_error_code": None, "last_success_at": None, "accepting": True,
             "last_queue_residence_ms": None, "existing_fact_hash_ms": None, "existing_fact_index_ms": None,
+            "pending_payload_bytes": 0,
+            "pending_payload_byte_limit": FACT_PENDING_PAYLOAD_BYTE_LIMIT,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
         self._thread.start()
@@ -56,11 +61,14 @@ class SpotObservationQueue:
             pending = self._state["accepted_count"] - self._state["completed_count"]
             if pending >= self._queue.maxsize:
                 return self._reject_locked("pending_item_limit")
+            if self._state["pending_payload_bytes"] + len(payload) > FACT_PENDING_PAYLOAD_BYTE_LIMIT:
+                return self._reject_locked("pending_byte_limit")
             try:
                 self._queue.put_nowait((payload, time.monotonic()))
             except queue.Full:
                 return self._reject_locked("queue_full")
             self._state["accepted_count"] += 1
+            self._state["pending_payload_bytes"] += len(payload)
         return True
 
     def _reject(self, code: str) -> bool:
@@ -178,8 +186,11 @@ class SpotObservationQueue:
                     self._state["write_failure_count"] += 1
                     self._state["last_error_code"] = "writer_state_unavailable"
             finally:
+                payload_size = len(payload)
+                payload = b""
                 with self._lock:
                     self._state["inflight"] = False
                     self._state["completed_count"] += 1
+                    self._state["pending_payload_bytes"] -= payload_size
                     self._state["last_write_duration_ms"] = (time.monotonic()-started)*1000
                 self._queue.task_done()

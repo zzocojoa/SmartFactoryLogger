@@ -279,6 +279,53 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        limit = 16 * 1024**2
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def blocked_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    started.set()
+                    if not release.wait(10):
+                        raise TimeoutError("test disk write not released")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                owner = SpotObservationQueue(lambda: writer)
+                accepted, serialized_bytes = 0, 0
+                try:
+                    for seq in range(1, 257):
+                        snapshot = observation(seq)
+                        snapshot["source_payload_for_budget"] = "a" * (70 * 1024)
+                        encoded_size = len(json.dumps(snapshot, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+                        if not owner.enqueue(snapshot):
+                            break
+                        accepted += 1
+                        serialized_bytes += encoded_size
+                        if seq == 1:
+                            self.assertTrue(started.wait(2))
+                    self.assertLess(accepted, 256, "payload bytes must limit admission before queue slots run out")
+                    state = owner.snapshot()
+                    self.assertEqual(state["pending_payload_bytes"], serialized_bytes)
+                    self.assertLessEqual(serialized_bytes, limit)
+                    self.assertGreater(serialized_bytes + encoded_size, limit)
+                    self.assertEqual(state["last_error_code"], "pending_byte_limit")
+                    release.set()
+                    owner._queue.join()
+                    self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+                    self.assertTrue(owner.enqueue(observation(999)))
+                finally:
+                    release.set()
+                    owner.close(30)
+                    self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertEqual([int(row["spot_poll_seq"]) for row in self.read_rows(path)],
+                             [*range(1, accepted + 1), 999])
+
     def test_pending_limit_includes_inflight_writes(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open
