@@ -253,6 +253,7 @@ class _SpotImageCaptureEvent:
     link_checked_at: Optional[float]
     observation_snapshot: Optional[Dict[str, Any] | bytes]
     reserved_payload_bytes: int = 0
+    writer_signature: Optional[tuple[Path, Path, int, float]] = None
 
 
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
@@ -578,17 +579,20 @@ def _spot_image_capture_link_stale_threshold_ms() -> float:
 
 def _spot_image_capture_config_signature() -> tuple[Path, Path, int, float]:
     return (
-        _spot_image_capture_log_path(),
-        _spot_image_capture_root(),
+        _spot_image_capture_log_path().absolute(),
+        _spot_image_capture_root().absolute(),
         _spot_image_capture_retention_days(),
         _spot_image_capture_link_stale_threshold_ms(),
     )
 
 
-def _get_spot_image_capture_writer() -> SpotImageCaptureWriter:
+def _get_spot_image_capture_writer(
+    signature: Optional[tuple[Path, Path, int, float]] = None,
+) -> SpotImageCaptureWriter:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature
     with _spot_image_capture_writer_lock:
-        signature = _spot_image_capture_config_signature()
+        if signature is None:
+            signature = _spot_image_capture_config_signature()
         if _spot_image_capture_writer is None or _spot_image_capture_writer_signature != signature:
             _spot_image_capture_writer = SpotImageCaptureWriter(
                 log_path=signature[0],
@@ -693,7 +697,7 @@ def _spot_image_capture_worker() -> None:
             failure_stage = "writer_initialization"
             failure_evidence = None
             try:
-                current_writer = _get_spot_image_capture_writer()
+                current_writer = _get_spot_image_capture_writer(event.writer_signature)
                 if writer is not None and writer is not current_writer:
                     writer.close_retention_scan()
                 writer = current_writer
@@ -1280,6 +1284,7 @@ def _maybe_enqueue_spot_image_capture(
             link_checked_at=link_checked_at,
             observation_snapshot=snapshot_payload,
             reserved_payload_bytes=payload_size,
+            writer_signature=_spot_image_capture_config_signature(),
         )
         try:
             _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)

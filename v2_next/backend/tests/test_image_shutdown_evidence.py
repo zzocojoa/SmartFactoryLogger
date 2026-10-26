@@ -158,6 +158,36 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(final['written_count'], 2)
         self.assertTrue(timed_out['worker_alive'], 'prior snapshot must remain immutable')
 
+    def test_queued_captures_keep_admitted_destinations(self):
+        entered, release = self.block_write()
+        self.enqueue()
+        self.assertTrue(entered.wait(3))
+        self.enqueue()
+        new_log = self.root / 'new-log'
+        new_images = self.root / 'new-images'
+        with patch.object(spot.config, 'LOG_PATH', str(new_log)), \
+             patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_PATH', str(new_images)):
+            self.enqueue()
+            release.set()
+            self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 2)
+            self.assertEqual(len(list(new_images.rglob('*.jpg'))), 1)
+            with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+                old_rows = list(csv.DictReader(handle))
+            with (new_log / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+                new_rows = list(csv.DictReader(handle))
+            self.assertEqual(len(old_rows), 2)
+            self.assertEqual(len(new_rows), 1)
+            for row, parent in [(row, self.root / 'images') for row in old_rows] + \
+                               [(row, new_images) for row in new_rows]:
+                image = next(parent.rglob(row['spot_image_capture_id'] + '.jpg'))
+                self.assertEqual(hashlib.sha256(image.read_bytes()).hexdigest(),
+                                 row['spot_image_sha256'])
+            final = spot.get_spot_image_capture_shutdown_status()
+            self.assertEqual(final['written_count'], 3)
+            self.assertEqual(final['pending_payload_bytes'], 0)
+            self.assertTrue(final['accounting_consistent'])
+
     def test_capture_pending_limit_includes_inflight(self):
         self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_QUEUE_MAX', 2))
         self.stack.enter_context(patch.object(spot._SPOT_IMAGE_CAPTURE_QUEUE, 'maxsize', 2))

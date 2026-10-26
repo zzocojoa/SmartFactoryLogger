@@ -216,3 +216,11 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - `test_invalid_link_snapshot_rejects_capture_and_next_capture_succeeds`: NaN의 실제 JSON ValueError가 호출부로 전파되는 RED(`image-invalid-red`, exit1)를 확인했다. 수정 후 다음 정상 이미지만 저장되고 연결 키2·예약0·거절1/쓰기 실패0을 대조했다.
 - `image-invalid-green`: 이미지 종료·SPOT API·retention·CSV 이미지 시작239시험 통과(exit0), backend Ruff·mypy10파일 exit0.
 - 전체 상세 admission/영속 trace와 이미지 설정 세대·실제 목적지 고정은 아직 후속 작업이다. 이번 수정은 입력 오류 격리 범위다.
+
+## HTTP 1단계 — 접수한 이미지의 저장 경로 고정
+
+이미지 envelope에 접수 당시 writer 설정(절대 log/image 경로, 보존 기간, 연결 신선도 기준)을 고정했다. worker는 현재 전역 설정이 아닌 해당 envelope의 설정으로 writer를 선택한다. 접수 뒤 설정 변경으로 이전 이미지의 JPEG와 연결 fact가 새 위치로 이동하지 않는다.
+
+- `test_queued_captures_keep_admitted_destinations`: 첫 실제 JPEG 쓰기를 지연하고 두 번째 접수 후 log/image 경로를 변경했다. `image-destination-red`는 이전 경로의 이미지1개/기대2개로 실패(exit1). 수정 후 이전 경로2개·새 경로1개와 각 원장/JPEG SHA256, 종료 예약0을 확인했다.
+- `image-destination-green`: 이미지 종료·SPOT API·retention·CSV 이미지 시작240시험 통과(exit0). backend Ruff·기본 mypy10파일도 exit0.
+- 이 결과는 접수 후 writer 선택 경계다. 설정 적용 전체와 접수의 원자성, 명시적 설정 세대·출력 계약 식별자, 날짜별 실제 목적지·영속 trace와 복구 계약은 계속 남은 필수 범위다. 기존 보존 자료와 서버 설치본은 변경하지 않았다.
