@@ -36,6 +36,7 @@ SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
 _SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
 _MANIFEST_SQL_BATCH_SIZE = 4096
 FACT_SPOOL_RECOVERY_ROW_LIMIT = 20
+FACT_SPOOL_RECOVERY_BYTE_LIMIT = 1024**2
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -320,12 +321,22 @@ class SpotObservationFactWriter:
             spool_lines: list[tuple[bytes, int]] = []
             with spool_path.open("rb") as handle:
                 handle.seek(self._spool_read_offsets.get(spool_path, 0))
+                end_offset = handle.tell()
+                remaining_bytes = FACT_SPOOL_RECOVERY_BYTE_LIMIT
                 for _ in range(FACT_SPOOL_RECOVERY_ROW_LIMIT):
-                    line = handle.readline()
+                    if remaining_bytes == 0:
+                        break
+                    line = handle.readline(remaining_bytes)
                     if not line:
                         break
+                    if (len(line) == remaining_bytes and not line.endswith(b"\n")
+                            and handle.tell() < spool_path.stat().st_size):
+                        # Retry this whole row in the next bounded batch; a
+                        # byte boundary may fall inside a UTF-8 character.
+                        break
+                    remaining_bytes -= len(line)
                     spool_lines.append((line, handle.tell()))
-                end_offset = handle.tell()
+                    end_offset = handle.tell()
             for line, row_end in spool_lines:
                 line = line.strip()
                 if not line:

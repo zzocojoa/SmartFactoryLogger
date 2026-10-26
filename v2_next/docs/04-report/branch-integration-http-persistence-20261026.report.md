@@ -314,3 +314,12 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 
 - `test_spool_recovery_processes_at_most_twenty_rows`:23건을 준비했을 때 첫 복구의 실제 CSV23행/기대20행으로 RED(`fact-spool-rows-red`, exit1)를 확인했다. 수정 후 첫20행·미복구3건, 다음3행과 전체 키·manifest23행을 대조했다.
 - `fact-spool-rows-green`: fact/queue/종료 회귀/SPOT API268시험 중267통과·기존1skip,76.844초,exit0. backend Ruff 및 기본 mypy10파일 exit0. 전체17명세의 통과로 집계하지 않는다.
+
+## HTTP 1단계 — fact 복구의 한 번 읽기 용량
+
+복구 읽기에1MiB 상한을 추가했다. 다음 행이 남은 bytes 안에 다 들어오지 않으면
+그 행을 해석하거나 저장하지 않고 다음 배치에서 원래 시작 위치부터 읽는다.
+
+- `test_spool_recovery_read_budget_preserves_utf8_rows`: 한글 필드가 큰3건에서 첫 복구3행/기대2행의 RED(`fact-spool-bytes-red`, exit1)를 확인했다. 수정 후 첫2행·잔여1건과 다음1행의 원래 키/한글 내용을 대조했다. 실제 파일 읽기의 각 합계가1MiB 이하임도 확인했다.
+- `fact-spool-bytes-green`: fact/queue/종료 회귀90시험 중89통과·기존 private F01자료 미제공1skip,46.301초,exit0. backend Ruff·mypy10파일 exit0.
+- 이 단계는 읽기 bytes 경계다. 한 행 자체의 상한 초과 종결, 새 segment/전체 스풀 예산 및 임시 해석 사본 예약은 후속 필수 범위다.

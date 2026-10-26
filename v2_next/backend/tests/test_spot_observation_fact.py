@@ -248,6 +248,59 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual(writer.spool_pending_count(), 0)
             self.assertEqual(writer.manifest_summary()["row_count"], 23)
 
+    def test_spool_recovery_read_budget_preserves_utf8_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            info = "온" * 120000
+            spool.write_text("".join(json.dumps(self.current_fact_row(seq, instrument_info=info),
+                                               ensure_ascii=False) + "\n"
+                                     for seq in range(1, 4)), encoding="utf-8")
+            self.assertGreater(spool.stat().st_size, 1024**2)
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            original_open = Path.open
+            read_totals = []
+
+            class ObservedReader:
+                def __init__(self, handle):
+                    self.handle = handle
+                    self.read_bytes = 0
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    read_totals.append(self.read_bytes)
+                    self.handle.close()
+
+                def readline(self, size=-1):
+                    data = self.handle.readline(size)
+                    self.read_bytes += len(data)
+                    return data
+
+            def observe_open(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                return ObservedReader(handle) if path == spool and mode == "rb" else handle
+
+            with patch.object(Path, "open", observe_open):
+                writer._flush_spool()
+                with output.open(encoding="utf-8-sig", newline="") as handle:
+                    first = list(csv.DictReader(handle))
+                self.assertEqual(len(first), 2)
+                self.assertLessEqual(read_totals[-1], 1024**2)
+                self.assertEqual(writer.spool_pending_count(), 1)
+                writer._flush_spool()
+            self.assertTrue(all(0 < size <= 1024**2 for size in read_totals))
+            with output.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_observation_key"] for row in rows],
+                             ["svc-1:1", "svc-1:2", "svc-1:3"])
+            self.assertEqual([row["instrument_info"] for row in rows], [info] * 3)
+            self.assertEqual(writer.spool_pending_count(), 0)
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",
