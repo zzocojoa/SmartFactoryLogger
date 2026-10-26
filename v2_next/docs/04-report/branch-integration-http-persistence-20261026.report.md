@@ -332,3 +332,13 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_oversized_spool_row_is_preserved_and_rejected`: 정상 앞 행 다음의 큰 행에서 오류가 없던 RED(`fact-spool-large-row-red`, exit1)를 확인했다. 수정 후 두 번의 같은 오류/위치, 원본 바이트 불변, CSV 앞1행·미복구1건을 대조했다.
 - `fact-spool-large-row-green`: fact/queue/종료 회귀91시험 중90통과·기존 private F01자료 미제공1skip,exit0. backend Ruff·mypy10파일 exit0.
 - 오류의 최종 상태/API 연결과 새 segment·원본 읽기 전용 정책 전체는 미완료다. 이 한 경계로 전체 복구를 통과 처리하지 않는다.
+
+## HTTP 1단계 — fact 미복구 건수 집계의 행 메모리 제한
+
+복구 외의 미복구 건수 집계도 최대64KiB 조각으로 읽는다. 긴 한 행을 통째로 올리지 않고,
+빈 행·공백뿐인 긴 행·마지막 줄바꿈이 없는 행을 구분한다. 기존 집계 cache는 유지한다.
+
+- `test_spool_pending_count_uses_bounded_reads`: 실제 파일에1MiB를 넘는 행을 만들고 파일 읽기 경계에서 무제한 읽기를 거부했다. 기존 행 반복의 RED(`fact-spool-count-red`, exit1) 뒤, writer 및 독립 집계의 정확한3건/2건과 cache 재조회 무 I/O를 확인했다.
+- 기존 unreadable-spool 시험은 binary 읽기에도 같은 I/O 실패를 주입하도록 보완했으며 실패를 clean으로 바꾸지 않는 assertion을 유지했다.
+- `fact-spool-count-green`: fact/queue/종료 회귀/SPOT API271시험 중270통과·기존 private F01자료 미제공1skip,75.979초,exit0. backend Ruff·mypy10파일 exit0.
+- 읽기 조각 크기 제한이며 집계 총 스캔 시간의 보장은 아니다. 스풀 전체64MiB·4MiB segment·원본 읽기 전용 전환과 독립 복구 제어는 계속 남아 있다.

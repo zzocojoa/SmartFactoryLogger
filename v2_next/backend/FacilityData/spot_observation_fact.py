@@ -445,13 +445,9 @@ class SpotObservationFactWriter:
                     or pending_path.stat().st_size == 0
                 ):
                     continue
-                with pending_path.open("r", encoding="utf-8") as handle:
-                    handle.seek(self._spool_read_offsets.get(pending_path, 0))
-                    pending_count += sum(
-                        1
-                        for line in handle
-                        if line.strip()
-                    )
+                pending_count += _count_spool_rows(
+                    pending_path, self._spool_read_offsets.get(pending_path, 0)
+                )
             self._spool_pending_count_cache = pending_count
             return pending_count
 
@@ -932,12 +928,25 @@ def _file_sha256_digest(path: Path) -> Any:
     return digest
 
 
+def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
+    """Count physical nonblank rows without allocating an unbounded line."""
+    count = 0
+    row_has_content = False
+    with spool_path.open("rb") as handle:
+        handle.seek(offset)
+        while chunk := handle.readline(min(64 * 1024, FACT_SPOOL_RECOVERY_BYTE_LIMIT)):
+            row_has_content = row_has_content or bool(chunk.strip())
+            if chunk.endswith(b"\n"):
+                count += int(row_has_content)
+                row_has_content = False
+    return count + int(row_has_content)
+
+
 def _spool_pending_count(spool_path: Path) -> int:
     if not spool_path.exists() or spool_path.stat().st_size == 0:
         return 0
     try:
-        with spool_path.open("r", encoding="utf-8") as handle:
-            return sum(1 for line in handle if line.strip())
+        return _count_spool_rows(spool_path)
     except OSError:
         return 0
 

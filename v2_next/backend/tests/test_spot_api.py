@@ -3652,7 +3652,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 *args: object,
                 **kwargs: object,
             ):
-                if path == spool_path and mode == "r":
+                if path == spool_path and mode in ("r", "rb"):
                     raise OSError("unreadable restarted spool")
                 return original_open(path, mode, *args, **kwargs)
 

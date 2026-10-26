@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
@@ -324,6 +324,44 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual(writer.spool_pending_count(), 1)
             self.assertEqual(writer.manifest_summary()["row_count"], 1)
             self.assertEqual(list(Path(tmp).glob("*.schema-mismatch.*")), [])
+
+    def test_spool_pending_count_uses_bounded_reads(self) -> None:
+        from backend.FacilityData.spot_observation_fact import _spool_pending_count
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            archive = Path(tmp) / "facts.failed.20261027T000000Z.schema-mismatch.jsonl"
+            spool.write_bytes(b"\n \t\n" + b"x" * (1024**2 + 100) + b"\nlast-row")
+            archive.write_bytes(b"legacy-row\n" + b"\t" * (1024**2 + 100) + b"\n")
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            original_open = Path.open
+            reads = []
+
+            def bounded_open(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                if path not in (spool, archive) or "r" not in mode:
+                    return handle
+                guarded = MagicMock(wraps=handle)
+                guarded.__enter__.return_value = guarded
+                guarded.__exit__.side_effect = lambda *args: handle.close()
+                guarded.__iter__.side_effect = AssertionError("unbounded spool count read")
+
+                def readline(size=-1):
+                    self.assertTrue(0 < size <= 1024**2, "unbounded spool count read")
+                    data = handle.readline(size)
+                    reads.append(len(data))
+                    return data
+
+                guarded.readline.side_effect = readline
+                return guarded
+
+            with patch.object(Path, "open", bounded_open):
+                self.assertEqual(writer.spool_pending_count(), 3)
+                self.assertEqual(_spool_pending_count(spool), 2)
+            self.assertGreater(len(reads), 4)
+            with patch.object(Path, "open", side_effect=AssertionError("cached count performed I/O")):
+                self.assertEqual(writer.spool_pending_count(), 3)
 
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
