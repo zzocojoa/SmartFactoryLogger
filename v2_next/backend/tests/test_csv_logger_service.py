@@ -539,6 +539,27 @@ class CSVLoggerServiceTests(unittest.TestCase):
             rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
             self.assertEqual([float(row[3]) for row in rows[1:]], [31.0])
 
+    def test_bounded_temperature_text_avoids_full_raw_copies(self) -> None:
+        service = CSVLoggerService()
+        raw = "=" + "한\r\n둘\r" * (512 * 1024)
+        expected = "'" + raw.replace("\r\n", "\n").replace("\r", "\n")[:256]
+        tracemalloc.start()
+        try:
+            actual = service._bounded_csv_text(raw, 256)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertLessEqual(peak, 128 * 1024, "bounded CSV text copied the full raw input")
+        self.assertEqual(actual, (expected, True))
+        for value in (None, "", "\r\n", "\r\r\n", "=\r\n한🙂\rB", "A\r\n" * 300):
+            for limit in (-1, 0, 1, 2, 3, 7, 256):
+                normalized = (value or "").replace("\r\n", "\n").replace("\r", "\n")
+                truncated = len(normalized) > limit if value is not None else False
+                text = normalized[:limit] if truncated else normalized
+                if text and text[0] in ("=", "+", "-", "@"):
+                    text = "'" + text
+                self.assertEqual(service._bounded_csv_text(value, limit), (text, truncated))
+
     def test_csv_escaped_row_copy_remains_in_pending_budget(self) -> None:
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

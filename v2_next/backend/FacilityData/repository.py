@@ -2739,7 +2739,13 @@ class CSVLoggerService:
     def _bounded_csv_text(self, value: Optional[str], max_length: int) -> tuple[str, bool]:
         if value is None:
             return "", False
-        text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+        text = str(value)
+        if max_length >= 0:
+            # Each normalized character consumes at most two source characters
+            # (CRLF). One extra character proves truncation without copying the
+            # complete raw response. Keep legacy negative-slice semantics.
+            text = text[:2 * (max_length + 1)]
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         truncated = len(text) > max_length
         if truncated:
             text = text[:max_length]
