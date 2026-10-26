@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Iterable, Tuple
+from typing import Any, Optional, Iterable, Protocol, TextIO, Tuple
 from uuid import uuid4
 
 from .. import config
@@ -311,6 +311,12 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
 
 CSV_PENDING_EVENT_LIMIT = 5000
 CSV_PENDING_PAYLOAD_BYTE_LIMIT = 64 * 1024**2
+
+
+class _CSVWriter(Protocol):
+    def writerow(self, row: Iterable[Any], /) -> Any: ...
+
+    def writerows(self, rows: Iterable[Iterable[Any]], /) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -752,7 +758,7 @@ class CSVLoggerService:
                 self._logpath_warned = warned
         return active_dir
 
-    def _open_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[object], Optional[csv.writer]]:
+    def _open_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[TextIO], Optional[_CSVWriter]]:
         settings = self._write_settings()
         if not settings.auto_save or not settings.v1_enabled:
             return None, None
@@ -762,7 +768,7 @@ class CSVLoggerService:
         self,
         timestamp_str: str,
         prefix: str,
-    ) -> Tuple[Optional[object], Optional[csv.writer]]:
+    ) -> Tuple[Optional[TextIO], Optional[_CSVWriter]]:
         if not self._write_settings().auto_save:
             return None, None
         return self._open_v1_log_file_unchecked(timestamp_str, prefix)
@@ -771,7 +777,7 @@ class CSVLoggerService:
         self,
         timestamp_str: str,
         prefix: str,
-    ) -> Tuple[Optional[object], Optional[csv.writer]]:
+    ) -> Tuple[Optional[TextIO], Optional[_CSVWriter]]:
         filename = f"{prefix}_{timestamp_str}.csv"
         settings = self._write_settings()
         log_dir = self._get_log_dir()
@@ -851,7 +857,7 @@ class CSVLoggerService:
             return csv_path
         return candidate
 
-    def _open_v2_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[object], Optional[csv.writer]]:
+    def _open_v2_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[TextIO], Optional[_CSVWriter]]:
         settings = self._write_settings()
         if not settings.auto_save or not settings.v2_enabled:
             return None, None
@@ -984,6 +990,7 @@ class CSVLoggerService:
             json.dumps(sentinel_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         active_contract = contract or self._get_active_v2_contract()
+        row_freshness_threshold_ms = self._spot_row_freshness_threshold_ms()
         return {
             "schema_version": active_contract.schema_version,
             "shadow_columns": SPOT_TEMPERATURE_SHADOW_COLUMNS,
@@ -995,8 +1002,8 @@ class CSVLoggerService:
             "spot_temperature_max_c": SPOT_TEMPERATURE_MAX_C,
             "cache_expiry_threshold_sec": SPOT_CACHE_EXPIRY_THRESHOLD_SEC,
             "poll_freshness_threshold_sec": (
-                self._spot_row_freshness_threshold_ms() / 1000.0
-                if self._spot_row_freshness_threshold_ms() is not None else None
+                row_freshness_threshold_ms / 1000.0
+                if row_freshness_threshold_ms is not None else None
             ),
             "poll_freshness_threshold_status": "candidate_unverified_server_pc",
             "raw_payload_realtime_csv_policy": "temporary validation-period repetition; long-term storage belongs in spot_observation_fact",
@@ -2624,8 +2631,8 @@ class CSVLoggerService:
 
     def _flush_buffer(
         self,
-        writer: Optional[csv.writer],
-        handle: Optional[object],
+        writer: Optional[_CSVWriter],
+        handle: Optional[TextIO],
         buffer: Iterable[Tuple[list, datetime]],
     ) -> bool:
         rows = list(buffer)
@@ -2642,8 +2649,8 @@ class CSVLoggerService:
 
     def _flush_v2_buffer(
         self,
-        writer: Optional[csv.writer],
-        handle: Optional[object],
+        writer: Optional[_CSVWriter],
+        handle: Optional[TextIO],
         buffer: Iterable[Tuple[list, datetime]],
     ) -> bool:
         rows = list(buffer)
@@ -2715,7 +2722,7 @@ class CSVLoggerService:
         with self._runtime_lock:
             self._last_write_at = time.time()
 
-    def _close_file(self, handle: Optional[object]) -> None:
+    def _close_file(self, handle: Optional[TextIO]) -> None:
         if handle is None:
             return
         try:
@@ -2725,7 +2732,7 @@ class CSVLoggerService:
 
     def _close_v2_file(
         self,
-        handle: Optional[object],
+        handle: Optional[TextIO],
         *,
         closeout_reason: str = "runtime-close",
         finalize_closeout: bool = True,

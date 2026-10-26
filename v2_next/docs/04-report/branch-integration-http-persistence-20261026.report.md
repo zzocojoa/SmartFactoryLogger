@@ -153,3 +153,11 @@ CSV 접수에서 queue 슬롯과 별개로 원본 이벤트를 예약하고 v1/v
 - `test_invalid_csv_payload_keeps_producer_identity`: 생성 후 NaN으로 변한 압력의 실제 JSON ValueError를 RED로 확인(`csv-invalid-red`, exit1). 수정 후 CSV service/runtime61시험·Ruff·프로젝트 mypy exit0.
 - 추가 소비 경로 검사 `csv-envelope-consumer-check`에서 기존 시험3개가 queue 항목을 FactoryData로 직접 읽어 AttributeError를 냈다. 제품의 승인된 immutable envelope 계약에 맞춰 fixture 읽기만 payload decode로 변경했다. 원래 값·시각·내부 PLC 시계·이력 ID 검사와 생산 순번을 유지/추가했다.
 - `csv-envelope-consumer-green`: 실제 생산/소비·clock source·history31시험 통과, backend Ruff exit0. 전체 backend 또는 17개 추가 시나리오 완료 주장은 아니다.
+
+## CSV 타입 검사 범위 보완
+
+csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, object 파일 핸들을 TextIO로 명시했다. Optional freshness 값은 한 번 읽고 null 여부를 확인한다. repository.py를 pyproject의 기본 mypy 대상에 추가해 기본 검사 범위가9→10파일이 됐다.
+
+- 첫 편집은 보조 변수를 잘못된 함수에 넣어 정적 검사2오류와 CSV 회귀 실패를 냈다(`csv-types-mypy/ruff/regression`). 이는 TDD RED가 아닌 편집 오류이며 원문을 보존한다.
+- 위치를 수정한 `csv-types-mypy-r2`는10파일 오류0, `csv-types-ruff-r2`는 backend 오류0, `csv-types-regression-r2`는 CSV162시험 통과로 모두 exit0이다. 앞 감사의 기존9+추가2 타입 오류는 현재 남아 있지 않다.
+- 이 검사는 현재 CSV 코드 범위의 보완이며 전체 health/빌드·서버 적용을 완료 처리하지 않는다.
