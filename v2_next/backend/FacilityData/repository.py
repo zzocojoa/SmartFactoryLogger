@@ -3059,6 +3059,10 @@ class CSVLoggerService:
                     last_flush_time = now
             except Exception as exc:
                 self.logger.error("Error in CSV logger loop: %s", exc)
+                if envelope is not None and envelope.write_config.generation != current_config_version:
+                    # The old generation failed before this event was adopted.
+                    # Retain the same immutable event for the next handoff.
+                    deferred_item = envelope
                 if item is not None and current_file_date is not None:
                     try:
                         item_file_date = self._log_file_date(self._parse_timestamp(item))

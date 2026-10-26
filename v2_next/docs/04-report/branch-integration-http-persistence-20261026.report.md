@@ -114,3 +114,11 @@ CSV 접수 전에 canonical JSON bytes와 source payload hash를 만들고, `log
 - `test_queued_records_keep_admitted_sink_after_config_change`: 실제 첫 파일 열기를 지연하고 두 번째 v1 자료 접수 후 경로와 형식을 v2로 변경한다. `tdd/csv-config-red`에서 이전 v1 파일에30만 남는 실패(exit1)를 확인했고, 수정 후 이전 파일30/31·새 v2 파일32와 세대/출력 영수증을 대조했다.
 - `tdd/csv-config-regression`: 기존 CSV service/runtime/image-startup/replay/v2 운영 계약157시험 통과, exit0. Ruff와 프로젝트 지정 mypy9파일도 exit0.
 - 현재 고정한 것은 설정상의 출력 경로와 계약이다. 파일명·schema rollover의 최종 실제 목적지 ID, trace 출력·복구 중 가용성의 세대별 결합, 합산 예산 및 실패 경계는 아직 미완료다. RV03/RV04/RR02 전체 통과로 집계하지 않는다.
+
+## HTTP 1단계 — 세대 전환 예외에서 다음 원본 보존
+
+이전 세대 flush가 예외를 던지면 아직 채택하지 않은 다음 세대 envelope를 동일 ID·내용으로 deferred에 보존한다. 큐에서 이미 꺼냈다는 이유로 다음 자료가 사라지는 경계를 수정했다.
+
+- `test_config_flush_error_preserves_next_generation_event`: 실제 파일 write에서 데이터 쓰기 전 한 번 OSError를 주입. `tdd/csv-config-failure-red`에서 새 경로의 파일0개라는 예상 실패(exit1), 수정 후 이전·새 경로에 각각 원래 행 한 개가 저장됨을 확인.
+- `tdd/csv-config-failure-green`: CSV158시험 통과, exit0. 변경 Ruff 및 프로젝트 mypy9파일 exit0.
+- 이번 오류는 bytes가 쓰이기 전의 실패다. 일부 행 쓰기 후의 중복 방지·불확실 파일 중단은 여전히 3단계의 별도 미완료 계약이다.

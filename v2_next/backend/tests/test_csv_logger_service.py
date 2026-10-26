@@ -222,6 +222,54 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(second["required_sinks"], ("csv_v1",))
             self.assertEqual(third["required_sinks"], ("csv_v2",))
 
+    def test_config_flush_error_preserves_next_generation_event(self) -> None:
+        started, release, failed = threading.Event(), threading.Event(), threading.Event()
+        original_open = Path.open
+
+        class FailFirstDataWrite:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def write(self, value):
+                if value.startswith("2026-03-09") and not failed.is_set():
+                    failed.set()
+                    raise OSError("injected pre-write failure at generation handoff")
+                return self.handle.write(value)
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+        with self.create_temp_dir() as tmp_dir:
+            old_dir, new_dir = tmp_dir / "before", tmp_dir / "after"
+            old_dir.mkdir()
+            new_dir.mkdir()
+            service = self.create_service(old_dir, True)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == old_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test did not release old CSV destination")
+                    return FailFirstDataWrite(original_open(path, mode, *args, **kwargs))
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                try:
+                    service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertTrue(started.wait(2))
+                    service.apply_config(log_path=new_dir)
+                    service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                finally:
+                    release.set()
+                    self.assertTrue(service.stop(timeout_sec=5))
+            self.assertTrue(failed.is_set())
+            self.assertEqual(len(self.list_v1_files(new_dir)), 1)
+            old_rows = self.read_rows(self.list_v1_files(old_dir)[0])
+            new_rows = self.read_rows(self.list_v1_files(new_dir)[0])
+            self.assertEqual([float(row[3]) for row in old_rows[1:]], [30.0])
+            self.assertEqual([float(row[3]) for row in new_rows[1:]], [31.0])
+
     def test_same_date_rows_stay_in_one_file(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             log_dir = tmp_dir
