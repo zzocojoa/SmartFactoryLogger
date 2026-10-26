@@ -443,3 +443,12 @@ fact owner에서 JSON 컨테이너를 분리하고 인코딩 길이를 먼저 �
 - `fact-wide-serialization-green`: fact queue/fact/종료/SPOT API280시험 중279통과·기존 private F01자료 미제공1skip,76.682초,exit0. 전체 로그 검사에 unittest FAIL/ERROR/Traceback은 없고, 기존 오류 주입 로그·asyncio 지연 알림·Starlette 경고는 보존한다. backend Ruff·기본 mypy10파일도 exit0.
 - `verify_fact_json_budget.py`의 독립 대조는269개 JSON 자료의 실제 직렬화 bytes·문자 수·문자 폭, 정확한 경계/1바이트 부족, 공유 중첩 참조 분리와 잘못된6입력을 확인해 exit0이었다. 근거 `fact-json-budget-differential.json`은 소스 SHA256에 결합돼 있다. 이269개는17개 필수 시나리오에 추가 통과로 합산하지 않는다.
 - fact 접수 직렬화 경계의 구현이다. decode·writer 출력·스풀 직렬화 및 CSV·이미지 경로의 임시 사본 예약, 컨테이너/인덱스 메모리 계측과 전체7단계/17명세는 계속 남아 있다. 직전58fd675f의 전체1,000시험에는 이후 직렬화 변경이 포함되지 않으므로 최신 전체 회귀로 표시하지 않는다.
+
+## HTTP 1단계 — fact JSON 해석 전 예약과 실패 ID
+
+큐의 불변 이벤트에 접수 당시 JSON 문자열 크기와 관측 ID를 유지한다. worker는 UTF-8 해석 문자열과 결과 문자열 공간을 먼저 예약하고, 해석 후에는 공유 문자열을 한 번만 계산한 실제 내용 크기로 줄인다. 원본 bytes와 해석 결과를 놓은 뒤에만 예약을 반환한다. 공간이 부족하면 `decode_byte_limit`와 원래 ID를 실패로 기록하고 뒤의 항목을 처리한다. 실패한 접수 건을 정상 drain으로 표시하지 않는다.
+
+- `test_decode_budget_failure_records_admitted_identity`: 초기화를 지연해 6/4/2MiB 입력을 먼저 접수했다. 기존 실패0/기대1의 RED(`fact-decode-budget-red`, 이번 재점검 `branch-final-audit-decode-20261027`, exit1)를 확인했다. 수정 후 첫 ID 실패, 뒤 두 ID의 실제 CSV 저장, 접수/완료3·잔량/예약0과 close 실패 유지가 일치했다.
+- 기존 직렬화 시험의 첫 입력은 해석까지 정상 수용할 수 있는5MiB로 변경했다. 두 번째6MiB 거절·첫째/셋째 실제 저장을 유지했다. 기존 bytes 시험은 source와 processing을 분리해 검산하고 합산16MiB 제한을 확인한다.
+- `fact-decode-budget-green`: 관련21시험 중20통과·기존 private F01자료 미제공1skip,6.845초,exit0. backend Ruff·기본 mypy10파일도 exit0이다.
+- 이 구현은 fact JSON 해석 경계다. writer 출력·스풀 사본 및 CSV/이미지 선예약, 영속 실패 추적·복구/압력 제어·전체17명세는 계속 남아 있다. 직전 전체 회귀를 이 변경 후의 전체 검증으로 표시하지 않는다.

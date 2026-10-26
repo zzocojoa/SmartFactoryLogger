@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 import json
+import logging
 import queue
 import threading
 import time
@@ -17,6 +18,7 @@ from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
 
 
 FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
+_logger = logging.getLogger(__name__)
 FactAdmissionStatus = Literal[
     "ACCEPTED", "REJECTED_FULL", "REJECTED_LIMIT", "REJECTED_UNAVAILABLE",
     "REJECTED_CLOSED", "DISABLED", "INVALID",
@@ -40,6 +42,37 @@ class FactPersistencePending(RuntimeError):
 
 class _PayloadBudgetExceeded(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class _FactEvent:
+    payload: bytes
+    text_storage_bytes: int
+    observation_key: str
+    enqueued_at: float
+
+
+def _decoded_string_bytes(value: Any, seen: set[int] | None = None) -> int:
+    """Count owned JSON string contents, sharing repeated references once.
+
+    Container/scalar object overhead is outside the payload budget. The JSON
+    decoder can share object-key strings between nested dictionaries.
+    """
+    seen = set() if seen is None else seen
+    if isinstance(value, str):
+        identity = id(value)
+        if identity in seen:
+            return 0
+        seen.add(identity)
+        highest = 0 if value.isascii() else ord(max(value))
+        width = 4 if highest > 0xFFFF else 2 if highest > 0xFF else 1
+        return len(value) * width
+    if isinstance(value, dict):
+        return sum(_decoded_string_bytes(key, seen) + _decoded_string_bytes(item, seen)
+                   for key, item in value.items())
+    if isinstance(value, list):
+        return sum(_decoded_string_bytes(item, seen) for item in value)
+    return 0
 
 
 def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = None) -> tuple[Any, int, int, int]:
@@ -130,7 +163,7 @@ class SpotObservationQueue:
         if isinstance(capacity, bool) or capacity <= 0:
             raise ValueError("capacity must be positive")
         self._factory = factory
-        self._queue: queue.Queue[tuple[bytes, float]] = queue.Queue(maxsize=capacity)
+        self._queue: queue.Queue[_FactEvent] = queue.Queue(maxsize=capacity)
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._writer: SpotObservationFactWriter | None = None
@@ -144,7 +177,8 @@ class SpotObservationQueue:
             "initialization_duration_ms": None, "last_write_duration_ms": None,
             "last_error_code": None, "last_success_at": None, "accepting": True,
             "last_queue_residence_ms": None, "existing_fact_hash_ms": None, "existing_fact_index_ms": None,
-            "pending_payload_bytes": 0,
+            "pending_payload_bytes": 0, "pending_source_payload_bytes": 0,
+            "processing_payload_bytes": 0, "last_failed_observation_key": None,
             "pending_payload_byte_limit": FACT_PENDING_PAYLOAD_BYTE_LIMIT,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
@@ -190,8 +224,10 @@ class SpotObservationQueue:
                 payload = json.dumps(source, ensure_ascii=False, allow_nan=False).encode("utf-8")
                 if len(payload) != payload_size:
                     raise ValueError("JSON payload size changed after reservation")
-                self._queue.put_nowait((payload, time.monotonic()))
+                self._queue.put_nowait(_FactEvent(payload, text_characters * text_width,
+                                                  observation_key, time.monotonic()))
                 self._state["accepted_count"] += 1
+                self._state["pending_source_payload_bytes"] += payload_size
                 accepted = True
             except queue.Full:
                 return self._reject_locked("REJECTED_FULL", "queue_full", observation_key)
@@ -299,31 +335,62 @@ class SpotObservationQueue:
             return  # Accepted-but-unwritten items remain visible; never claim clean.
         while not self._stop.is_set() or not self._queue.empty():
             try:
-                payload, enqueued_at = self._queue.get(timeout=.05)
+                event = self._queue.get(timeout=.05)
             except queue.Empty:
                 continue
             started = time.monotonic()
+            decoded = None
+            processing_bytes = 0
             with self._lock:
                 self._state["inflight"] = True
-                self._state["last_queue_residence_ms"] = (started-enqueued_at)*1000
+                self._state["last_queue_residence_ms"] = (started-event.enqueued_at)*1000
             try:
-                writer.write_fact(json.loads(payload))
+                # bytes decoding temporarily owns the whole JSON text while
+                # building strings in the result. Both fit within twice the
+                # text bound computed at admission; queued bytes remain owned.
+                decode_reservation = 2 * event.text_storage_bytes
+                with self._lock:
+                    if self._state["pending_payload_bytes"] + decode_reservation > FACT_PENDING_PAYLOAD_BYTE_LIMIT:
+                        raise _PayloadBudgetExceeded
+                    self._state["pending_payload_bytes"] += decode_reservation
+                    self._state["processing_payload_bytes"] += decode_reservation
+                    processing_bytes = decode_reservation
+                decoded = json.loads(event.payload)
+                decoded_bytes = _decoded_string_bytes(decoded)
+                with self._lock:
+                    self._state["pending_payload_bytes"] -= processing_bytes - decoded_bytes
+                    self._state["processing_payload_bytes"] -= processing_bytes - decoded_bytes
+                    processing_bytes = decoded_bytes
+                writer.write_fact(decoded)
                 self._refresh_state(writer)
                 with self._lock:
                     if writer.failure_count:
                         self._state["last_error_code"] = "fact_or_spool_write_failed"
                     else:
                         self._state["last_success_at"] = time.time()
+            except _PayloadBudgetExceeded:
+                with self._lock:
+                    self._state["write_failure_count"] += 1
+                    self._state["last_error_code"] = "decode_byte_limit"
+                    self._state["last_failed_observation_key"] = event.observation_key
+                _logger.error("SPOT fact processing failed", extra={
+                    "observation_key": event.observation_key, "reason": "decode_byte_limit",
+                })
             except Exception:
                 with self._lock:
                     self._state["write_failure_count"] += 1
                     self._state["last_error_code"] = "writer_state_unavailable"
+                    self._state["last_failed_observation_key"] = event.observation_key
             finally:
-                payload_size = len(payload)
-                payload = b""
+                payload_size = len(event.payload)
+                # Release the actual references before returning their budget.
+                decoded = None
+                del event
                 with self._lock:
                     self._state["inflight"] = False
                     self._state["completed_count"] += 1
-                    self._state["pending_payload_bytes"] -= payload_size
+                    self._state["pending_payload_bytes"] -= payload_size + processing_bytes
+                    self._state["pending_source_payload_bytes"] -= payload_size
+                    self._state["processing_payload_bytes"] -= processing_bytes
                     self._state["last_write_duration_ms"] = (time.monotonic()-started)*1000
                 self._queue.task_done()

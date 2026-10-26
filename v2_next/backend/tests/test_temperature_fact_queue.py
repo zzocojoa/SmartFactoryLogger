@@ -395,7 +395,9 @@ class FactQueueTests(unittest.TestCase):
                 owner = SpotObservationQueue(lambda: writer)
                 try:
                     first = observation(1)
-                    first["source_payload_for_budget"] = "a" * (6 * 1024**2)
+                    # Leave room for decoding the first input, then reject the
+                    # second serialization while the first writer is blocked.
+                    first["source_payload_for_budget"] = "a" * (5 * 1024**2)
                     second = observation(2)
                     second["source_payload_for_budget"] = "b" * (6 * 1024**2)
                     first_size = len(json.dumps(first, ensure_ascii=False, allow_nan=False).encode("utf-8"))
@@ -405,7 +407,10 @@ class FactQueueTests(unittest.TestCase):
                     self.assertEqual(result.status, "REJECTED_LIMIT")
                     self.assertEqual(result.reason, "pending_byte_limit")
                     self.assertEqual(result.observation_key, "synthetic-A:2")
-                    self.assertEqual(owner.snapshot()["pending_payload_bytes"], first_size)
+                    state = owner.snapshot()
+                    self.assertEqual(state["pending_source_payload_bytes"], first_size)
+                    self.assertGreaterEqual(state["processing_payload_bytes"], 5 * 1024**2)
+                    self.assertEqual(state["pending_payload_bytes"], first_size + state["processing_payload_bytes"])
                     release.set()
                     owner._queue.join()
                     self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
@@ -440,6 +445,42 @@ class FactQueueTests(unittest.TestCase):
             self.assertEqual(rows[0]["instrument_info"], small["instrument_info"])
             self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
 
+    def test_decode_budget_failure_records_admitted_identity(self):
+        started, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+
+            def factory():
+                started.set()
+                if not release.wait(10):
+                    raise TimeoutError("test initialization not released")
+                return SpotObservationFactWriter(path)
+
+            owner = SpotObservationQueue(factory)
+            try:
+                self.assertTrue(started.wait(2))
+                for sequence, size in [(1, 6), (2, 4), (3, 2)]:
+                    snapshot = observation(sequence)
+                    snapshot["source_payload_for_budget"] = "x" * (size * 1024**2)
+                    self.assertTrue(owner.enqueue(snapshot))
+                release.set()
+                closed = owner.close(10)
+                state = owner.snapshot()
+                self.assertEqual(state["write_failure_count"], 1)
+                self.assertEqual(state["last_error_code"], "decode_byte_limit")
+                self.assertEqual(state["last_failed_observation_key"], "synthetic-A:1")
+                self.assertEqual(state["accepted_count"], 3)
+                self.assertEqual(state["completed_count"], 3)
+                self.assertEqual(state["pending_write_count"], 0)
+                self.assertEqual(state["pending_payload_bytes"], 0)
+                self.assertFalse(state["writes_drained"])
+                self.assertFalse(closed)
+            finally:
+                release.set()
+                owner.close(10)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["2", "3"])
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open
@@ -472,11 +513,13 @@ class FactQueueTests(unittest.TestCase):
                             self.assertTrue(started.wait(2))
                     self.assertLess(accepted, 256, "payload bytes must limit admission before queue slots run out")
                     state = owner.snapshot()
-                    self.assertEqual(state["pending_payload_bytes"], serialized_bytes)
-                    self.assertLessEqual(serialized_bytes, limit)
+                    self.assertEqual(state["pending_source_payload_bytes"], serialized_bytes)
+                    self.assertGreaterEqual(state["processing_payload_bytes"], 70 * 1024)
+                    self.assertEqual(state["pending_payload_bytes"], serialized_bytes + state["processing_payload_bytes"])
+                    self.assertLessEqual(state["pending_payload_bytes"], limit)
                     # Admission reserves encoded text and final UTF-8 bytes
                     # before either temporary allocation.
-                    self.assertGreater(serialized_bytes + 2 * encoded_size, limit)
+                    self.assertGreater(state["pending_payload_bytes"] + 2 * encoded_size, limit)
                     self.assertEqual(state["last_error_code"], "pending_byte_limit")
                     release.set()
                     owner._queue.join()
