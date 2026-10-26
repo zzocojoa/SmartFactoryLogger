@@ -521,7 +521,18 @@ class PLCService:
                     with self.lock:
                         self.current_data = current_data
                         self.last_update = driver_data_at
-                    logger_service.enqueue(next_data)
+                    admission = logger_service.enqueue_detailed(next_data)
+                    if admission["status"] not in {"ACCEPTED", "DISABLED"}:
+                        self._logger.warning("CSV persistence rejected a collected sample", extra={
+                            "code": "csv-enqueue-rejected",
+                            "admission_status": admission["status"],
+                            "admission_reason": admission["reason"],
+                            "producer_instance_id": admission["producer_instance_id"],
+                            "producer_seq": admission["producer_seq"],
+                            "source_payload_hash": admission["source_payload_hash"],
+                            "config_generation": admission["config_generation"],
+                            "required_sinks": admission["required_sinks"],
+                        })
                     self.last_processed_driver_data_at = driver_data_at
                     self.last_processed_driver_data_seq = driver_data_seq
                 self._stop_event.wait(self._current_interval())

@@ -139,6 +139,33 @@ class ServiceClockTests(unittest.TestCase):
         self.assertEqual([row.Time for row in rows], [str(value) for value in stamps])
         self.assertEqual(self.service.last_update, stamps[-1])
 
+    def test_consumer_reports_csv_rejection_without_losing_latest_sample(self):
+        self.logger.queue.maxsize = 1
+        self.logger.apply_config(auto_save=True, csv_v1_enabled=True, csv_v2_enabled=False)
+        with self.assertLogs('SmartFactoryLoggerV2', level='WARNING') as captured:
+            self.produce([0, 0, 0, 0], consume=True)
+        self.assertEqual([getattr(record, 'code', None) for record in captured.records],
+                         ['csv-enqueue-rejected'] * 3)
+        self.assertEqual([record.admission_status for record in captured.records], ['REJECTED_FULL'] * 3)
+        self.assertEqual([record.admission_reason for record in captured.records], ['queue_full'] * 3)
+        self.assertEqual([record.producer_seq for record in captured.records], [2, 3, 4])
+        for record in captured.records:
+            self.assertEqual(record.producer_instance_id, self.logger.logger_service_instance_id)
+            self.assertEqual(record.required_sinks, ('csv_v1',))
+            self.assertEqual(len(record.source_payload_hash), 64)
+            self.assertEqual(record.config_generation, self.logger._config_version)
+        self.assertEqual(self.logger.queue.qsize(), 1)
+        admitted = self.logger.queue.get_nowait()
+        self.assertEqual(admitted.producer_seq, 1)
+        self.assertEqual(FactoryData.model_validate_json(admitted.payload).Count, 1)
+        self.assertEqual(self.service.get_latest_data().Count, 4)
+        self.assertEqual(self.service.last_processed_driver_data_seq, 4)
+        # Keep the query in the producer's monotonic clock domain so TTL pruning
+        # does not expire the fixture when produce() restores the real clock.
+        with patch.object(module, 'time', SimpleNamespace(monotonic=lambda: 1001.0)):
+            history = self.service.get_data_history(0, 10)
+        self.assertEqual([sample.data.Count for sample in history.samples], [1, 2, 3, 4])
+
     def test_overrun_preserves_existing_zero_wait_policy(self):
         for elapsed in [.2, .5]:
             with self.subTest(elapsed=elapsed):
@@ -232,7 +259,7 @@ class ServiceClockTests(unittest.TestCase):
         def fail_enqueue(data):
             enqueue_attempted.set()
             raise OSError('synthetic queue failure')
-        with patch.object(self.logger, 'enqueue', side_effect=fail_enqueue):
+        with patch.object(self.logger, 'enqueue_detailed', side_effect=fail_enqueue):
             self.service.start()
             try:
                 self.assertTrue(enqueue_attempted.wait(1))

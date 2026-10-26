@@ -10,10 +10,10 @@
 | 1 | 현재 브랜치에 운영 태그의 후속 10개 커밋 통합 | `685dde94`에서 `cd46692a`로 fast-forward 완료. 로컬 후속 작업 재적용·검증 중 |
 | 2 | 운영본의 백엔드·회귀 시험 누락 보완 | `spot_api.py`, `repository.py`, CSV 시작 회귀 시험 등 운영 태그 파일 복원. 통합 검증 중 |
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
-| 4 | 기존 109개 변경 보존·검토·커밋 | 원래 내용 해시 대조 후 stash 보존, 재적용. 도구 충돌 15파일/29블록 통합. 문서/도구를 나누어 커밋하는 중 |
-| 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 미완료. 검증 전 기본 브랜치를 변경하지 않음 |
+| 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 HEAD에 추적됨. 도구 충돌 15파일/29블록 통합·커밋. 원본 4문서의 혼합 줄바꿈 SHA256 복원은 미완료이며 보호 stash 유지 |
+| 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 진행 중. 현재 완료된 일부 검사를 전체 완료로 간주하지 않음 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | lock 수정 상태 전체 health exit0. 이후 CSV 호출부 변경은 관련 45시험·Ruff·mypy exit0. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -178,3 +178,16 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 989ef1d6의 첫 push는 pre-push 비밀값 검사에서 인증정보 형태의 localhost 시험 URL1개 때문에 차단됐다. `push-auth-url-inspection.json`에서 해당 위치를 확인했고, `observe_operator_image.test.cjs`의 정확한 origin 거부 시험 입력이었다. 실제 인증정보나 네트워크 연결 값이 아니며 `resolveImageOrigin`의 username/password 검사로 즉시 거부된다. 해당 실제 시험을 다시 실행해1개 통과(exit0)를 확인했다.
 
 스캐너를 끄거나 시험 입력을 숨기는 대신 루트 `.gstack-redact-allowlist`에 검토한 정확한 scanner span1개만 기록한다. 와일드카드·규칙 비활성화·no-verify를 사용하지 않는다. 전체 health exit0은 직전 lock 수정 상태의 결과이며, 이 예외는 앱 동작이나 운영 QA 판정을 바꾸지 않는다. 원격 HEAD 확인 전까지 전달 완료로 표시하지 않는다.
+
+## 원격 작업 브랜치 반영 완료
+
+검토한 정확한 시험 입력 예외를 포함한 `72266d23`의 정상 push는 exit0이었다. `branch-remote-verification.json`에서 원격 작업 브랜치 HEAD와 로컬 HEAD가 같고 upstream이 설정됐음을 확인했다. master는 별도이며 아직 통합하지 않았다. 기존 실패 push 기록도 유지한다.
+
+## HTTP 1단계 — 실제 CSV 수집 호출부의 상세 결과 처리
+
+`PLCService._loop`가 `enqueue_detailed()`의 결과를 직접 처리한다. 저장 거절은 생산자·순번·원본 hash·설정 세대·필수 출력과 사유를 구조화 경고에 남긴다. 최신값과 화면 이력은 계속 갱신하고, 큐 거절을 이유로 같은 관측을 재생산하지 않는다. 정상 DISABLED는 오류로 기록하지 않는다.
+
+- `test_consumer_reports_csv_rejection_without_losing_latest_sample`: 실제 수집·소비 루프와 capacity1 CSV 큐에서 첫 이벤트만 접수하고, 나머지 ID2–4의 FULL/queue_full과 최신값4·화면 이력1–4를 확인한다. 원본 payload나 인증정보를 로그에 추가하지 않는다.
+- `csv-consumer-red`의 예상 실패는 상세 거절 code가 None인 것(exit1)이었다. 첫 green 시도에서는 가상 시각 생산 후 실제 시각으로 이력을 조회해 TTL이 만료되는 시험 오류1개가 남았다. 조회 시계만 같은 기준으로 맞췄고 제품 로직은 추가 변경하지 않았다.
+- `csv-consumer-green-r2`: 서비스 시계·원본 시계·history cursor·worker lifecycle 45시험 통과(exit0). backend Ruff(`csv-consumer-ruff-r2`)와 기본 mypy10파일(`csv-consumer-mypy`)도 exit0. Ruff 첫 실행은 기존 실행 폴더 이름 충돌로 시작하지 못했으며 새 이름으로 검사를 완료했다.
+- 기존 consumer 종료 시험의 I/O 예외 주입 위치를 실제 호출하는 상세 API로 옮겼으며 기존 종료/재시작 assertions를 유지했다. 구조화 로그를 영속 data-trace, 출력별 저장 대조 또는 7단계 전체 완료로 간주하지 않는다.
