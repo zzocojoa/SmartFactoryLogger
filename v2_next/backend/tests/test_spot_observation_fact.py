@@ -492,6 +492,50 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertEqual(writer.spool_pending_count(), 1)
 
+    def test_short_spool_write_blocks_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            directory = spool.with_name(spool.name + ".segments-v1")
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            self.assertEqual(writer.spool_pending_count(), 0)
+            original_open = Path.open
+            fact = self.current_fact_row(1, instrument_info="온도")
+            payload = (json.dumps(fact, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+
+            class ShortWrite:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    return self
+
+                def write(self, data):
+                    return self.handle.write(data[:len(data) // 2])
+
+                def __exit__(self, *args):
+                    self.handle.close()
+
+            def short_open(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                return ShortWrite(handle) if path.parent == directory and mode == "xb" else handle
+
+            with patch.object(Path, "open", short_open):
+                writer._spool_fact(fact)
+            self.assertEqual(writer.spool_failure_count, 1)
+            self.assertEqual(writer.spool_last_error_code, "spool_write_uncertain")
+            segments = list(directory.glob("*.jsonl"))
+            self.assertEqual(len(segments), 1)
+            self.assertEqual(segments[0].read_bytes(), payload[:len(payload) // 2])
+            writer._spool_fact(self.current_fact_row(2))
+            self.assertEqual(writer.spool_failure_count, 2)
+            self.assertEqual(list(directory.glob("*.jsonl")), segments)
+            self.assertEqual(segments[0].read_bytes(), payload[:len(payload) // 2])
+            with self.assertRaisesRegex(ValueError, "UNCERTAIN.*spool"):
+                writer._flush_spool()
+            self.assertFalse(output.exists())
+            self.assertEqual(writer.spool_pending_count(), 1)
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",

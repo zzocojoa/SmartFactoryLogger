@@ -432,7 +432,8 @@ class SpotObservationFactWriter:
                 spool_path, mode = self._spool_append_target(len(payload))
                 with spool_path.open(mode) as handle:
                     writing_path = spool_path
-                    handle.write(payload)
+                    if handle.write(payload) != len(payload):
+                        raise OSError("Incomplete SPOT observation spool write")
                 self._active_spool_segment = spool_path
                 if self._spool_pending_count_cache is not None:
                     self._spool_pending_count_cache += 1

@@ -394,3 +394,10 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_manifest_rejects_unreadable_spool`: 실제1행 파일의 읽기만 PermissionError로 막았을 때 기존 manifest가 정상 반환되는 RED(`fact-spool-read-error-red`, OSError not raised, exit1)를 확인했다. 수정 후 오류 전달·읽기 복구 뒤 pending1·원본 불변을 확인했다.
 - `fact-spool-read-error-green`: fact/queue/종료 회귀96개 중95통과·기존 private F01자료 미제공1skip,47.775초,exit0. backend Ruff·기본 mypy10파일도 exit0이다.
 - 명시적으로 전달된 runtime pending과 독립 재계산 경로는 구분한다. 이 수정은 독립 집계의 I/O 오류 은폐를 제거하며 전체 metadata/validator 계약 완료는 아니다.
+
+## HTTP 1단계 — 스풀의 짧은 쓰기 반환 확인
+
+스풀 write의 반환 길이가 요청 bytes보다 작으면 성공으로 확정하지 않고 UNCERTAIN 상태를 유지한다. 같은 writer에서 추가 쓰기/자동 복구를 차단하고 실제 부분 원본을 보존한다.
+
+- `test_short_spool_write_blocks_retry`: 실제 파일에 절반만 기록하는 경계에서 기존 실패0/기대1의 RED(`fact-spool-short-write-red`, exit1)를 확인했다. 수정 후 부분 bytes·거절 사유·다음 쓰기 차단·pending1·CSV 미생성을 대조했다.
+- `fact-spool-short-write-green`: fact 모듈39시험 통과(0.807초, exit0). backend Ruff·기본 mypy10파일도 exit0. 전체 백엔드 회귀는 남은 스풀 경계를 반영한 뒤 수행한다.
