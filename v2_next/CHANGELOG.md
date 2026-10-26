@@ -36,7 +36,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
   transfer admitted source bytes without charging them twice.
 - Classify disabled or closed CSV admission before allocating large payloads;
   preserve producer identities without reporting a storage-budget failure.
-- Fact construction/readback, CSV decoding/row rendering, and image workspace
+- Reserve integrated CSV decoding workspace before allocation and retain decoded
+  strings referenced by pending output rows. Preserve the admitted identity and
+  failure history when decoding is invalid or exceeds the shared budget.
+- Fact construction/readback, CSV EMA sizing/row rendering, and image workspace
   reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,

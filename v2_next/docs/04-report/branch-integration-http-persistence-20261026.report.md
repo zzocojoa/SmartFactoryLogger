@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `5e42daf2` 전체 backend1,011시험 중1,010통과·1skip, backend Ruff·기본 mypy11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `62da5867` 전체 backend1,013시험 중1,012통과·1skip, backend Ruff·기본 mypy11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -563,3 +563,20 @@ JSON 크기 계산을 `persistence_payload.py`로 옮겨 접수와 스풀에서 
 - 전체 stdout/stderr를 읽고 직전1,009시험의 로그와 정규화 대조했다. unittest FAIL/ERROR0, 새 오류 문구0이다. manifest 초기화 traceback은 기존 `test_csv_image_startup.py`의 오류 주입이며 Starlette/httpx 경고는 유지한다.
 - `csv-serialization-budget/verification.json`에 RED·GREEN·전체 회귀의 명령/종료 코드·로그 해시와 최종 소스 해시를 연결했다. repository.py SHA256=`17b63197523a9490c2e052759f2454e6348570383da743009946eb3f796c501e`, 시험 SHA256=`315d2a945ced0e2604177a520ffc54a0a0a02148f5692bf8545100387f21a583`다.
 - 전체7단계/17명세는 계속 미완료다. 다음 CSV decode·출력 사본, 이미지·fact의 남은 예산, 영속 대조·부분 쓰기 복구·압력 제어·화면 연동, 최종 설치본 검증과 master 통합이 남아 있다. 이번 변경은 개발 브랜치 범위이며 운영 서버에 적용하지 않았다.
+
+## HTTP 1단계 — CSV 해석 공간과 실패 식별자
+
+CSV worker의 JSON 해석 전 원본 예약과 작업 공간을 합산하고, 해석된 문자열 중 출력 buffer가 계속 참조하는 문자열의 예약은 유지한다. 실제 참조를 놓고 필수 출력을 마친 뒤에만 원본/해석 예약을 반환한다. 공간 부족 또는 필드 검증 실패는 원래 생산 ID·원본 hash·실패 사유로 기록하고 정상 종료 성공에 포함하지 않는다. 같은 owner의 재시작과 후속 정상 저장도 실패 이력을 지우지 않는다.
+
+- `test_csv_decode_budget_failure_preserves_admitted_identity`: 실제 첫 파일 쓰기를 지연하고 큰 원본과 후속96건을 접수했다. 기존 stop True/기대 False로 RED(`csv-decode-shared-budget-red`,exit1)를 확인했다. 수정 후 seq2만 `decode_byte_limit`, 앞선1건·후속96건 저장, 재시작 뒤 작은 추가1건 저장과 실패 이력 유지·예약0을 확인했다.
+- 첫 mypy는 tuple 변수에 None을 대입한 오류로 exit1이었다. 참조를 명시적으로 삭제한 최종 CSV service/runtime64시험·Ruff·mypy11파일 모두 exit0이다. 실패 원문을 보존한다. commit `071a7a10`.
+- `test_csv_decode_validation_failure_preserves_identity`: JSON에는 유효하지만 Status 필드 형식이 잘못된 원본의 실패 집계0/기대1로 RED(`csv-decode-invalid-payload-red`,exit1)를 확인했다. 수정 후 같은 ID/hash의 `decode_invalid_payload`, 후속 정상 행만 저장·예약0이 일치했다. 관련110시험·Ruff·mypy11파일 exit0. commit `62da5867`.
+- 문자열 내용 크기 계산은 기존 fact 함수와 본문이 같음을 AST로 대조한 뒤 공통 모듈로 옮겼다. 출력 시 새로 만든 문자열·CSV 렌더링 공간과 EMA 계산의 추가 `model_dump_json()` 사본은 아직 전체 예산에 포함하지 못했다. 이를 R02 전체 또는 프로세스 RSS 검증 완료로 표시하지 않는다.
+
+## 2026-10-27 CSV 해석 보완 후 전체 회귀와 완료 감사
+
+제품 commit `62da58672c0bca73c1386ea6439bf9921df5bad1`에서 격리 AppData/설정의 `python -m unittest discover -s backend/tests`가 **1,013개 중1,012통과·기존 private F01자료 미제공1skip**,323.744초,exit0으로 끝났다. 실행 중 제품·시험·문서를 변경하지 않았다.
+
+- `completion-audit-62da-20261027/verification.json`: RED/GREEN·정적 검사·전체 stdout/stderr를 읽고 로그 해시·최종 소스 해시를 결합했다. unittest FAIL/ERROR0. 새 Pydantic 경고는 위 잘못된 Status 시험에 대응하고, manifest traceback과 shutdown 오류 문구는 기존 오류 주입 시험과 대조했다.
+- 같은 폴더의 `audit.json`/`review.md`:109경로 모두 추적, 원본4문서·승격4자료 해시 일치, 작업 트리 clean, master 미통합을 확인했다. 감사 당시 최신2커밋은 로컬에만 있었으며 이 감사 기록은 이후 push로 재작성하지 않는다.
+- 전체7단계/17명세·최종 설치본과 master 통합은 미완료다. 새 개발 코드는 서버에 적용하지 않았다.
