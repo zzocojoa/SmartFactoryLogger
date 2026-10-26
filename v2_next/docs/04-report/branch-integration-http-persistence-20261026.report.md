@@ -7,13 +7,13 @@
 
 | 번호 | 완료 조건 | 현재 상태 / 근거 |
 |---|---|---|
-| 1 | 현재 브랜치에 운영 태그의 후속 10개 커밋 통합 | `685dde94`에서 `cd46692a`로 fast-forward 완료. 로컬 후속 작업 재적용·검증 중 |
-| 2 | 운영본의 백엔드·회귀 시험 누락 보완 | `spot_api.py`, `repository.py`, CSV 시작 회귀 시험 등 운영 태그 파일 복원. 통합 검증 중 |
+| 1 | 현재 브랜치에 운영 태그의 후속 10개 커밋 통합 | `685dde94`에서 `cd46692a`로 fast-forward 완료. 로컬 후속 작업 재적용·현재 전체 health 검증 완료 |
+| 2 | 운영본의 백엔드·회귀 시험 누락 보완 | `spot_api.py`, `repository.py`, CSV 시작 회귀 시험 등 운영 태그 파일 복원. 후속 개선을 포함한 현재 전체 health 검증 완료 |
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
-| 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 HEAD에 추적됨. 도구 충돌 15파일/29블록 통합·커밋. 원본 4문서의 혼합 줄바꿈 SHA256 복원은 미완료이며 보호 stash 유지 |
+| 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | lock 수정 상태 전체 health exit0. 이후 CSV 호출부 변경은 관련 45시험·Ruff·mypy exit0. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `f8ad11d8` 전체 health exit0: backend 985개 중 984통과·기존 F01 1skip, frontend 442통과, 기본 정적 검사 통과. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -232,3 +232,34 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_capture_during_config_apply_uses_complete_previous_settings`: 실제 ConfigManager의 경로 변경과 이미지 모드 해석 사이를 지연하고 이미지를 접수했다. 기존 동작은 새 log/옛 상대 image 경로를 섞어 이전 폴더1개/기대2개로 실패했다. 실패 시에도 설정 thread를 join한 뒤 fixture를 복원하도록 정리한 `image-config-atomic-red-r2`에서 동일 실패(exit1)를 다시 확인했다.
 - 수정한 `image-config-atomic-green`: 이미지·SPOT·retention·CSV 시작·설정 서비스251시험 통과(exit0). 설정 준비 중 이전 폴더2개, 게시 후 새 폴더1개와 각 원장 수를 대조했다. backend Ruff·기본 mypy10파일도 exit0.
 - 잠금 범위는 이 저장 설정 게시와 이미지 접수다. 다른 설정·소비자의 전체 트랜잭션 또는 명시적 generation/required-sink/trace 계약 완료를 주장하지 않는다. 설정 세대 식별·복구·합산 임시 예산과 전체17명세는 계속 남아 있다.
+
+## 2026-10-27 현재 상태의 전체 검사와 원문 복원
+
+이미지 저장 목적지 고정·설정 게시 변경 후 `f8ad11d8`에서 `npm run health`를 실행했다.
+2026-10-27 03:27:06~03:33:29 KST, exit0이며 실행 전후 HEAD가 같고 작업 트리가 깨끗했다.
+개발 PC의 격리 AppData/설정과 기존 fixture를 사용했다. 서버에 설치하거나 장비 설정을 바꾸지 않았다.
+
+- 의존성 계약 15개, Electron 103개, frontend Node 9개와 Vitest 442개 통과.
+- frontend 타입/린트, backend Ruff, 기본 mypy 10파일, QA self-test 모두 exit0.
+- backend 985개 중 984개 통과. `TEMPERATURE_GOAL_PACKAGE`가 없는 기존 private F01 fixture 1개는 skip이며 통과 수에 넣지 않는다.
+- 로그의 의도된 잘못된 CSV/종료 실패 출력은 부정 입력 회귀 시험의 결과다. 최종 unittest 결과는 `OK (skipped=1)`이다. Starlette의 httpx 사용 중단 예정 경고는 남아 있다.
+- 원시 명령/시각/종료 코드: `BRANCH_SYNC_20261026_4d2950c6/image-config-health-result.json`, 전체 stdout/stderr는 같은 접두사의 `.log` 파일이다.
+
+설계·분석·comparator-readiness·PDCA 진행 문서의 원래 혼합 줄바꿈을 편집 기록에서
+추적해 복원했다. 네 문서 모두 감사 당시 기대 SHA256과 정확히 일치하고,
+줄바꿈을 정규화한 본문은 기존 HEAD와 같다. 기대 해시를 수정하거나 새 해시로 대체하지 않았다.
+
+| 문서 | 복원 bytes | 원래 SHA256 |
+|---|---:|---|
+| 설계 | 276,343 | `fc234df296d0564259cb4f7573161141cc6564594f4b29a008b3a4430d76152e` |
+| 분석 | 578,747 | `b7d723008e342858060743a8b6bc2a7b7b85af09b540a87e7b85f5966369c426` |
+| comparator-readiness | 183,357 | `7696910e1fbee91c6d97765509ff98d4580a9acde72d3e24a859c96bb1c7e4bb` |
+| PDCA 진행 | 60,032 | `de044aa4f2292f12db8eea7cb59a25bff5b148249e16cbe9bb2f85dcbb677db6` |
+
+근거는 같은 실행 폴더의 `raw-documents-restored.json`이다. 아래/앞의 과거 미복원 기록과
+실패한 복원 후보는 당시 이력으로 유지하며, 현재 네 문서의 바이트 복원 미완료 조건은 해소됐다.
+보호 stash는 삭제하지 않는다. `.gitattributes`의 `-text`로 원문 줄바꿈을 Git에 보존한다.
+
+`CHANGELOG.md`에는 승인된 1.0.32와 이전 1.0.30/1.0.31 후보 이력, 미출시 후속 개선을
+구분해 추가했다. 현재 package의 1.0.32 표기가 이 후속 소스의 운영 승인까지 뜻하지 않는다.
+남은 완료 조건은 HTTP 계획 전체 구현·17개 시나리오, 최종 빌드/검증, master 통합이다.
