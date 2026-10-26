@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterator, Literal, Mapping
 
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded as _PayloadBudgetExceeded, prepare_json_payload as _prepare_json_payload,
+    decoded_string_bytes as _decoded_string_bytes,
 )
 from backend.FacilityData.spot_observation_fact import (
     FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
@@ -52,29 +53,6 @@ class _FactEvent:
     text_storage_bytes: int
     observation_key: str
     enqueued_at: float
-
-
-def _decoded_string_bytes(value: Any, seen: set[int] | None = None) -> int:
-    """Count owned JSON string contents, sharing repeated references once.
-
-    Container/scalar object overhead is outside the payload budget. The JSON
-    decoder can share object-key strings between nested dictionaries.
-    """
-    seen = set() if seen is None else seen
-    if isinstance(value, str):
-        identity = id(value)
-        if identity in seen:
-            return 0
-        seen.add(identity)
-        highest = 0 if value.isascii() else ord(max(value))
-        width = 4 if highest > 0xFFFF else 2 if highest > 0xFF else 1
-        return len(value) * width
-    if isinstance(value, dict):
-        return sum(_decoded_string_bytes(key, seen) + _decoded_string_bytes(item, seen)
-                   for key, item in value.items())
-    if isinstance(value, list):
-        return sum(_decoded_string_bytes(item, seen) for item in value)
-    return 0
 
 
 class SpotObservationQueue:

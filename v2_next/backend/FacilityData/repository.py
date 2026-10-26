@@ -22,7 +22,9 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
     build_process_phase_event_fact_manifest,
 )
 from backend.FacilityData.schemas import FactoryData
-from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, prepare_json_payload
+from backend.FacilityData.persistence_payload import (
+    PayloadBudgetExceeded, decoded_string_bytes, prepare_json_payload,
+)
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
     SPOT_INVALID_SENTINEL_VALUES,
@@ -347,6 +349,7 @@ class CSVEventEnvelope:
     payload: bytes
     source_payload_hash: str
     write_config: CSVWriteConfig
+    text_storage_bytes: int
 
 
 class CSVLoggerService:
@@ -358,6 +361,11 @@ class CSVLoggerService:
         self._pending_row_events: dict[int, tuple[list, int]] = {}
         self._pending_source_payload_bytes = 0
         self._pending_processing_payload_bytes = 0
+        self._pending_decoded_payloads: dict[int, tuple[int, set[int]]] = {}
+        self._completed_event_sequences: set[int] = set()
+        self._processing_failure_count = 0
+        self._last_processing_failure_seq: Optional[int] = None
+        self._last_processing_failure_reason: Optional[str] = None
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
@@ -553,8 +561,9 @@ class CSVLoggerService:
                     return {**result, "status": "INVALID", "reason": "snapshot_serialization_failed"}
                 result["source_payload_hash"] = hashlib.sha256(payload).hexdigest()
                 envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
-                                            payload, result["source_payload_hash"], write_config)
+                                            payload, result["source_payload_hash"], write_config, characters * width)
                 payload_bytes = self._estimate_factory_data_bytes(data)
+                snapshot = None
                 with self._runtime_lock:
                     queue_limit = self.queue.maxsize
                     pending_limit = min(queue_limit, CSV_PENDING_EVENT_LIMIT) if queue_limit > 0 else CSV_PENDING_EVENT_LIMIT
@@ -566,6 +575,10 @@ class CSVLoggerService:
                         self._drop_count += 1
                         self._last_drop_at = now
                         return {**result, "status": "REJECTED_LIMIT", "reason": "pending_item_limit"}
+                    # Serialization has finished. Release scratch before
+                    # publishing so the worker can reserve decoding space.
+                    self._pending_processing_payload_bytes -= reserved_bytes - len(payload)
+                    reserved_bytes = len(payload)
                     try:
                         self.queue.put_nowait(envelope)
                     except queue.Full:
@@ -612,8 +625,70 @@ class CSVLoggerService:
                 if pending is not None:
                     pending[1].discard(sink)
                     if not pending[1]:
-                        self._pending_source_payload_bytes -= len(pending[0].payload)
-                        del self._pending_events[sequence]
+                        # Caller buffers and the current decoded item may still
+                        # refer to the payload until this iteration finishes.
+                        self._completed_event_sequences.add(sequence)
+
+    def _decode_csv_event(self, envelope: CSVEventEnvelope) -> Optional[FactoryData]:
+        sequence = envelope.producer_seq
+        reservation = 2 * envelope.text_storage_bytes
+        with self._runtime_lock:
+            available = (CSV_PENDING_PAYLOAD_BYTE_LIMIT - self._pending_source_payload_bytes
+                         - self._pending_processing_payload_bytes)
+            if reservation > available:
+                self._processing_failure_count += 1
+                self._last_processing_failure_seq = sequence
+                self._last_processing_failure_reason = "decode_byte_limit"
+                self._runtime_write_failure_observed = True
+                self._pending_events[sequence][1].clear()
+                self._completed_event_sequences.add(sequence)
+                failed = True
+            else:
+                self._pending_processing_payload_bytes += reservation
+                self._pending_decoded_payloads[sequence] = (reservation, set())
+                failed = False
+        if failed:
+            self.logger.error("CSV processing failed", extra={
+                "producer_instance_id": envelope.producer_instance_id,
+                "producer_seq": sequence,
+                "source_payload_hash": envelope.source_payload_hash,
+                "reason": "decode_byte_limit",
+            })
+            return None
+        data = FactoryData.model_validate_json(envelope.payload)
+        identities: set[int] = set()
+        retained = decoded_string_bytes(data.__dict__, identities)
+        if retained > reservation:
+            raise RuntimeError("CSV decoded strings exceeded their reserved bound")
+        with self._runtime_lock:
+            self._pending_processing_payload_bytes -= reservation - retained
+            self._pending_decoded_payloads[sequence] = (retained, identities)
+        return data
+
+    def _finish_csv_decode(self, sequence: Optional[int]) -> None:
+        """Call only after dropping decoded-item and local row references."""
+        with self._runtime_lock:
+            reservation = self._pending_decoded_payloads.get(sequence) if sequence is not None else None
+            if reservation is not None:
+                rows = [binding[0] for binding in self._pending_row_events.values() if binding[1] == sequence]
+                row_ids: set[int] = set()
+                decoded_string_bytes(rows, row_ids)
+                # New row-rendering strings have a separate output reservation
+                # contract; keep only original decoded strings referenced here.
+                retained = decoded_string_bytes(rows, row_ids - reservation[1])
+                self._pending_processing_payload_bytes -= reservation[0] - retained
+                assert sequence is not None
+                if retained:
+                    self._pending_decoded_payloads[sequence] = (retained, row_ids & reservation[1])
+                else:
+                    del self._pending_decoded_payloads[sequence]
+            for completed in self._completed_event_sequences:
+                pending = self._pending_events.pop(completed)
+                source_size = len(pending[0].payload)
+                del pending
+                self._pending_source_payload_bytes -= source_size
+                self._pending_processing_payload_bytes -= self._pending_decoded_payloads.pop(completed, (0, set()))[0]
+            self._completed_event_sequences.clear()
 
     def _capture_write_config_locked(self) -> CSVWriteConfig:
         return CSVWriteConfig(
@@ -2907,6 +2982,9 @@ class CSVLoggerService:
             pending_event_count = len(self._pending_events)
             pending_source_payload_bytes = self._pending_source_payload_bytes
             pending_processing_payload_bytes = self._pending_processing_payload_bytes
+            processing_failure_count = self._processing_failure_count
+            last_processing_failure_seq = self._last_processing_failure_seq
+            last_processing_failure_reason = self._last_processing_failure_reason
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -2928,6 +3006,9 @@ class CSVLoggerService:
             "pending_source_payload_bytes": pending_source_payload_bytes,
             "pending_processing_payload_bytes": pending_processing_payload_bytes,
             "pending_payload_bytes": pending_source_payload_bytes + pending_processing_payload_bytes,
+            "processing_failure_count": processing_failure_count,
+            "last_processing_failure_seq": last_processing_failure_seq,
+            "last_processing_failure_reason": last_processing_failure_reason,
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
@@ -2962,6 +3043,9 @@ class CSVLoggerService:
         auto_save, csv_v1_enabled, csv_v2_enabled = settings.auto_save, settings.v1_enabled, settings.v2_enabled
 
         while True:
+            decoded_sequence: Optional[int] = None
+            row = None
+            v2_row = None
             try:
                 item: Optional[FactoryData] = None
                 envelope: Optional[CSVEventEnvelope] = None
@@ -3023,7 +3107,10 @@ class CSVLoggerService:
                     csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
 
                 if envelope is not None:
-                    item = FactoryData.model_validate_json(envelope.payload)
+                    decoded_sequence = envelope.producer_seq
+                    item = self._decode_csv_event(envelope)
+                    if item is None:
+                        continue  # Explicit failure; drain later events even during stop.
 
                 if item is None:
                     if not self.running:
@@ -3186,8 +3273,11 @@ class CSVLoggerService:
                 else:
                     current_file_date = None
                 time.sleep(0.5)
+            finally:
+                item = envelope = row = v2_row = None
+                self._finish_csv_decode(decoded_sequence)
 
-        shutdown_flush_succeeded = not self._runtime_write_failure_observed
+        shutdown_flush_succeeded = not self._runtime_write_failure_observed and self._processing_failure_count == 0
         if buffer:
             try:
                 if auto_save and (f_handle is None or writer is None):
@@ -3234,11 +3324,15 @@ class CSVLoggerService:
                     shutdown_flush_succeeded = False
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
+                deferred_data = None
+                deferred_sequence = deferred_item.producer_seq
                 try:
                     settings = deferred_item.write_config
                     self._writer_context.settings = settings
                     csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
-                    deferred_data = FactoryData.model_validate_json(deferred_item.payload)
+                    deferred_data = self._decode_csv_event(deferred_item)
+                    if deferred_data is None:
+                        raise RuntimeError("CSV deferred decode failed")
                     timestamp = self._parse_timestamp(deferred_data)
                     row = self._build_row(deferred_data, timestamp)
                     if csv_v1_enabled:
@@ -3274,6 +3368,10 @@ class CSVLoggerService:
                 except Exception as exc:
                     shutdown_flush_succeeded = False
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
+                finally:
+                    deferred_data = deferred_item = row = v2_row = None
+                    self._finish_csv_decode(deferred_sequence)
+        self._finish_csv_decode(None)
         self._buffer_size = 0
         with self._runtime_lock:
             if self._pending_events:
