@@ -2,6 +2,57 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [Unreleased]
+
+- Begin the HTTP persistence-integrity plan: bounded queued/in-flight payloads,
+  immutable CSV inputs and admitted settings, explicit fact/CSV rejection results,
+  and image destination binding across runtime configuration changes.
+- Publish prepared image storage settings atomically with capture admission while
+  keeping path preparation and reconnect work outside the admission lock.
+- These changes are development work after the approved `cd46692a` build. The
+  seven-stage plan, full additional scenario matrix, new installer validation,
+  and deployment are incomplete. The package version alone does not identify
+  the approved operating bytes.
+
+## [1.0.32] - Internal operation approved with limitations, 2026-10-26
+
+- Allocate guarded SPOT ports before rebind queries. The approved build is
+  `cd46692ac9c551080c57d8168fa9ea5abd530206`; its installer and remote `v1.0.32`
+  tag were verified and registered as the next-change rollback baseline.
+- Complete the approved scope using verified installation/recovery, normal
+  shutdown, closed CSV/image records, 120-minute HTTP observations and three-PC
+  display evidence. Promotion reused the already installed exact build.
+- Preserve the historical unresolved timeout, the one-run initial health-latency
+  limitation, and the PC_2 occlusion exception with their original FAIL/INCOMPLETE
+  records. Consolidated retained-evidence QA does not claim a new one-command
+  live QA run. The three display captures were not the same instrumented window.
+- Scope: unsigned internal collection, storage and viewing on three PCs,
+  including the server. Low Signal remains OFF and physically NOT_TESTED;
+  damaged historical material remains excluded from training/quality use.
+- Exact installer identity, evidence, exceptions and rollback references:
+  [final release report](docs/04-report/production-release-risk-validation.report.md).
+  This approval does not cover the subsequent Unreleased source changes.
+
+## [1.0.31] - Historical internal candidate, 2026-10-22
+
+- Reserve dashboard card space while loading to avoid transient layout collapse.
+  Build: `a7e5149b718f56d7dfa75df73bfba4a21d16a758`.
+- Retain its installation, recovery and field evidence separately from 1.0.32.
+  It is the candidate installed immediately before C32, not the current operating
+  baseline. See the [C31 field report](docs/04-report/production-release-risk-validation-c31-field-preparation-20261022.report.md).
+
+## [1.0.30] - Historical internal candidates, 2026-10-16 through 2026-10-19
+
+- Store bounded dashboard history as immutable JSON records and prepare HTTP
+  history responses off the event loop while retaining cursor and clock contracts.
+- Bound image retention work between captures and preserve operator inputs when
+  dashboard surfaces change. The renderer-loss recovery build `8de06431` adds
+  safe backend shutdown when the renderer process has been lost.
+- Multiple exact builds shared this version label. Retain each original build,
+  installer and result separately; the early 120-minute failure is not rewritten
+  by later fixes. See the [history candidate report](docs/04-report/production-release-risk-validation-history-candidate-20261016.report.md)
+  and the [C31 close-readiness report](docs/04-report/production-release-risk-validation-c31-close-readiness-20261022.report.md).
+
 ## [1.0.29] - Candidate, 2026-10-15
 
 ### Changed
