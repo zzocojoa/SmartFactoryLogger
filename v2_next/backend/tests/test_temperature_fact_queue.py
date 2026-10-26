@@ -481,6 +481,61 @@ class FactQueueTests(unittest.TestCase):
                 self.assertFalse(owner.snapshot()["writer_alive"])
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["2", "3"])
 
+    def test_processing_and_disk_failures_are_counted_separately(self):
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            failed_once = False
+
+            def fail_first_append(target, mode="r", *args, **kwargs):
+                nonlocal failed_once
+                if target == path and mode == "a" and not failed_once:
+                    failed_once = True
+                    raise OSError("synthetic one-time append failure")
+                return original_open(target, mode, *args, **kwargs)
+
+            def factory():
+                started.set()
+                if not release.wait(10):
+                    raise TimeoutError("test initialization not released")
+                return writer
+
+            with patch.object(Path, "open", fail_first_append), self.assertLogs(
+                "backend.FacilityData.spot_observation_queue", "ERROR"
+            ) as logs:
+                owner = SpotObservationQueue(factory)
+                try:
+                    self.assertTrue(started.wait(2))
+                    for sequence, size in [(1, 6), (2, 4), (3, 2)]:
+                        snapshot = observation(sequence)
+                        snapshot["source_payload_for_budget"] = "x" * (size * 1024**2)
+                        self.assertTrue(owner.enqueue(snapshot))
+                    release.set()
+                    self.assertFalse(owner.close(10))
+                    state = owner.snapshot()
+                    self.assertEqual(state["write_failure_count"], 2)
+                    self.assertEqual(state["last_failed_observation_key"], "synthetic-A:2")
+                    self.assertEqual(state["last_error_code"], "fact_or_spool_write_failed")
+                    self.assertEqual(state["pending_payload_bytes"], 0)
+                    self.assertEqual(state["processing_payload_bytes"], 0)
+                    self.assertEqual(state["spool_pending_count"], 0)
+                    self.assertEqual(state["completed_count"], 3)
+                    self.assertFalse(state["writes_drained"])
+                finally:
+                    release.set()
+                    owner.close(10)
+                    self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertTrue(failed_once)
+            self.assertEqual(writer.failure_count, 1)
+            self.assertEqual([(r.observation_key, r.reason) for r in logs.records], [
+                ("synthetic-A:1", "decode_byte_limit"),
+                ("synthetic-A:2", "fact_or_spool_write_failed"),
+            ])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["2", "3"])
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

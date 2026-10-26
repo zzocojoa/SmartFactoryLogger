@@ -167,6 +167,7 @@ class SpotObservationQueue:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._writer: SpotObservationFactWriter | None = None
+        self._worker_failure_count = 0
         self._summary: dict[str, Any] | None = None
         self._file_stamp: tuple[int, int] | None = None
         self._state: dict[str, Any] = {
@@ -262,6 +263,19 @@ class SpotObservationQueue:
         )
         return state
 
+    def _record_failure(self, code: str, observation_key: str, *, worker_failure: bool) -> None:
+        with self._lock:
+            if worker_failure:
+                self._worker_failure_count += 1
+            self._state["write_failure_count"] = self._worker_failure_count + (
+                self._writer.failure_count if self._writer is not None else 0
+            )
+            self._state["last_error_code"] = code
+            self._state["last_failed_observation_key"] = observation_key
+        _logger.error("SPOT fact processing failed", extra={
+            "observation_key": observation_key, "reason": code,
+        })
+
     def manifest_summary(self, *, realtime_rows=None) -> dict[str, Any]:
         before = self.snapshot()
         if not before["writes_drained"]:
@@ -307,7 +321,7 @@ class SpotObservationQueue:
         with self._lock:
             self._summary = summary
             self._file_stamp = (stat.st_size, stat.st_mtime_ns)
-            self._state["write_failure_count"] = max(self._state["write_failure_count"], writer.failure_count)
+            self._state["write_failure_count"] = self._worker_failure_count + writer.failure_count
             self._state["spool_failure_count"] = writer.spool_failure_count
             self._state["spool_last_error_code"] = writer.spool_last_error_code
             self._state["spool_pending_count"] = pending
@@ -361,26 +375,18 @@ class SpotObservationQueue:
                     self._state["pending_payload_bytes"] -= processing_bytes - decoded_bytes
                     self._state["processing_payload_bytes"] -= processing_bytes - decoded_bytes
                     processing_bytes = decoded_bytes
+                failures_before = writer.failure_count
                 writer.write_fact(decoded)
+                if writer.failure_count > failures_before:
+                    self._record_failure("fact_or_spool_write_failed", event.observation_key, worker_failure=False)
                 self._refresh_state(writer)
                 with self._lock:
-                    if writer.failure_count:
-                        self._state["last_error_code"] = "fact_or_spool_write_failed"
-                    else:
+                    if writer.failure_count == failures_before:
                         self._state["last_success_at"] = time.time()
             except _PayloadBudgetExceeded:
-                with self._lock:
-                    self._state["write_failure_count"] += 1
-                    self._state["last_error_code"] = "decode_byte_limit"
-                    self._state["last_failed_observation_key"] = event.observation_key
-                _logger.error("SPOT fact processing failed", extra={
-                    "observation_key": event.observation_key, "reason": "decode_byte_limit",
-                })
+                self._record_failure("decode_byte_limit", event.observation_key, worker_failure=True)
             except Exception:
-                with self._lock:
-                    self._state["write_failure_count"] += 1
-                    self._state["last_error_code"] = "writer_state_unavailable"
-                    self._state["last_failed_observation_key"] = event.observation_key
+                self._record_failure("writer_state_unavailable", event.observation_key, worker_failure=True)
             finally:
                 payload_size = len(event.payload)
                 # Release the actual references before returning their budget.

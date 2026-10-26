@@ -452,3 +452,11 @@ fact owner에서 JSON 컨테이너를 분리하고 인코딩 길이를 먼저 �
 - 기존 직렬화 시험의 첫 입력은 해석까지 정상 수용할 수 있는5MiB로 변경했다. 두 번째6MiB 거절·첫째/셋째 실제 저장을 유지했다. 기존 bytes 시험은 source와 processing을 분리해 검산하고 합산16MiB 제한을 확인한다.
 - `fact-decode-budget-green`: 관련21시험 중20통과·기존 private F01자료 미제공1skip,6.845초,exit0. backend Ruff·기본 mypy10파일도 exit0이다.
 - 이 구현은 fact JSON 해석 경계다. writer 출력·스풀 사본 및 CSV/이미지 선예약, 영속 실패 추적·복구/압력 제어·전체17명세는 계속 남아 있다. 직전 전체 회귀를 이 변경 후의 전체 검증으로 표시하지 않는다.
+
+## HTTP 1단계 — 처리 실패와 디스크 실패의 합산
+
+worker 처리 실패와 실제 writer 실패를 별도 누적한 뒤 합산한다. 두 값의 최댓값으로 덮어써 서로 다른 실패가1건으로 줄어드는 문제를 수정했다. 실제 실패 발생 때만 원래 관측 ID/사유를 갱신하고, 다음 정상 쓰기나 스풀 복구로 과거 실패를 지우지 않는다.
+
+- `test_processing_and_disk_failures_are_counted_separately`: 메모리 부족 뒤 실제 append1회 실패를 주입했다. 기존1건/기대2건의 RED(`fact-failure-accounting-red`,exit1)를 확인했다. 수정 후 실패2건·각 ID/사유의 구조화 로그·뒤2개 실제 CSV 저장·스풀/메모리 잔량0·close 실패 유지가 일치했다.
+- `fact-failure-accounting-green`: 관련22시험 중21통과·기존 private F01자료 미제공1skip,6.979초,exit0. backend Ruff·기본 mypy10파일 exit0.
+- 이는 오류 집계와 원래 ID 기록 보완이다. 정상 복구가 과거 실패를 면제하지 않으며, 영속 data-trace/최종 출력별 판정이나 전체17시나리오 완료를 대신하지 않는다.
