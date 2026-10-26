@@ -7,13 +7,13 @@
 
 | 번호 | 완료 조건 | 현재 상태 / 근거 |
 |---|---|---|
-| 1 | 현재 브랜치에 운영 태그의 후속 10개 커밋 통합 | `685dde94`에서 `cd46692a`로 fast-forward 완료. 로컬 후속 작업 재적용·현재 전체 health 검증 완료 |
-| 2 | 운영본의 백엔드·회귀 시험 누락 보완 | `spot_api.py`, `repository.py`, CSV 시작 회귀 시험 등 운영 태그 파일 복원. 후속 개선을 포함한 현재 전체 health 검증 완료 |
+| 1 | 현재 브랜치에 운영 태그의 후속 10개 커밋 통합 | `685dde94`에서 `cd46692a`로 fast-forward 완료. 로컬 후속 작업 재적용·동기화 시점의 전체 health 검증 완료 |
+| 2 | 운영본의 백엔드·회귀 시험 누락 보완 | `spot_api.py`, `repository.py`, CSV 시작 회귀 시험 등 운영 태그 파일 복원. 당시 후속 개선을 포함한 `f8ad11d8` 전체 health 검증 완료 |
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `f8ad11d8` 전체 health exit0: backend 985개 중 984통과·기존 F01 1skip, frontend 442통과, 기본 정적 검사 통과. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `6daf4fdb` 전체 backend 1,004개 중1,003통과·기존 F01 1skip, 기본 정적 검사 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -460,3 +460,13 @@ worker 처리 실패와 실제 writer 실패를 별도 누적한 뒤 합산한�
 - `test_processing_and_disk_failures_are_counted_separately`: 메모리 부족 뒤 실제 append1회 실패를 주입했다. 기존1건/기대2건의 RED(`fact-failure-accounting-red`,exit1)를 확인했다. 수정 후 실패2건·각 ID/사유의 구조화 로그·뒤2개 실제 CSV 저장·스풀/메모리 잔량0·close 실패 유지가 일치했다.
 - `fact-failure-accounting-green`: 관련22시험 중21통과·기존 private F01자료 미제공1skip,6.979초,exit0. backend Ruff·기본 mypy10파일 exit0.
 - 이는 오류 집계와 원래 ID 기록 보완이다. 정상 복구가 과거 실패를 면제하지 않으며, 영속 data-trace/최종 출력별 판정이나 전체17시나리오 완료를 대신하지 않는다.
+
+## 2026-10-27 fact 해석·실패 집계 후 전체 백엔드 회귀
+
+제품 commit `6daf4fdb2f5c45caede5f61e580969410755fe98`에서 격리 AppData/설정의 `python -m unittest discover -s backend/tests`를 실행했다. `fact-decode-accounting-full-backend`는 **1,004개 중1,003통과·기존 private F01자료 미제공1skip**,319.785초,exit0이다. 원시 로그·결과·전체 로그 대조는 `BRANCH_SYNC_20261026_4d2950c6/tdd/fact-decode-accounting-full-backend`에 있다.
+
+- stdout150,036bytes SHA256 `5259e9df9094dd341168727d7f59894018e90323b8a1dc263efbc4d8a334d8f3`, stderr46,609bytes SHA256 `ab4740a475482fec6d410cdc9d67bb35a66162545718f2081a0d808bff97331f`.
+- `log-review.json`에서 unittest FAIL/ERROR0을 확인했다. 기존 전체 실행과 정규화 비교 시 새 오류 문구는 새 실패 시험의 `SPOT fact processing failed`뿐이다. traceback1개는 `test_csv_image_startup.py`의 `injected manifest read failure` 주입과 대조했다. 기존 경고는 유지한다.
+- backend Ruff·기본 mypy10파일은 이번 제품 변경에서 exit0이다. 이후에는 보고서/CHANGELOG만 편집했다. frontend/Electron/설치본/현장 검사를 새로 수행했다는 뜻은 아니다.
+- 독립 대조 `fact-decode-accounting/decoded-payload-verification.json`은261자료의 해석 문자열 내용 크기·접수 시 상한·공유 JSON key의 중복 청구 방지를 확인했다. 현재 queue SHA256 `06e775f16e442d8f6e502d1c83209898fa4ff37df6d75096af5a024272178812`에 결합됐다. R1 검증 스크립트의 getsizeof 기준 문자열에는 선택적 UTF-8 cache까지 포함돼 비교가 실패했으며, 원문/로그를 보존하고 R2에서는 독립 고정폭 인코더로 문자 내용만 대조했다. 제품 코드의 변경은 없었다. 이 검사는 선택적 cache·객체 overhead·전체 RSS 보장이 아니다.
+- 이번 제품 변경은 `ab0da354`, `6daf4fdb`다. writer/스풀 및 CSV/이미지 임시 메모리, 영속 추적·부분 쓰기 복구·압력 제어·전체7단계/17명세·최종 설치본과 master 통합은 계속 미완료다. 운영 서버에는 적용하지 않았다.
