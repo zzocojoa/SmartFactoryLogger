@@ -1,6 +1,7 @@
 """Production image worker and shutdown evidence regressions; no device I/O."""
 import asyncio
 import copy
+import csv
 from contextlib import ExitStack
 import hashlib
 import io
@@ -184,6 +185,64 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 3)
         self.assertEqual(spot.get_spot_image_capture_health()['fact_row_count'], 3)
         self.assertTrue(finished['accounting_consistent'])
+
+    def test_capture_payload_budget_includes_inflight_and_linked_snapshot(self):
+        limit = 5 * 1024**2
+        self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', limit))
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
+        self.stack.enter_context(patch.object(spot, '_spot_temperature_snapshot', None))
+        entered, release = self.block_write()
+        accepted_hashes = []
+        payload_sizes = []
+
+        def capture(number):
+            data = io.BytesIO()
+            Image.new('RGB', (2, 2), (number, 2, 3)).save(data, format='JPEG')
+            jpeg = data.getvalue()
+            # Valid JPEG comment segments make a permitted >1 MiB capture.
+            comment = b'\xff\xfe\xff\xff' + bytes([65 + number]) * 65533
+            image = jpeg[:2] + comment * 24 + jpeg[2:]
+            snapshot = {'spot_service_instance_id': 'budget-fixture', 'spot_poll_seq': number,
+                        'spot_last_poll_completed_at': f'2026-09-29T00:00:0{number}Z',
+                        'diagnostic_text': 'x' * (768 * 1024)}
+            spot._spot_temperature_snapshot = snapshot
+            snapshot_bytes = json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
+                                        separators=(',', ':'), sort_keys=True).encode('utf-8')
+            payload_sizes.append(len(image) + len(snapshot_bytes))
+            spot._maybe_enqueue_spot_image_capture(
+                image_bytes=image, captured_at=1790640000. + number,
+                image_url='http://synthetic.invalid/image.jpg', source='test', image_age_ms=0,
+            )
+            if number != 3:
+                accepted_hashes.append(hashlib.sha256(image).hexdigest())
+
+        capture(1)
+        self.assertTrue(entered.wait(3))
+        capture(2)
+        capture(3)
+        pending = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(pending['enqueued_count'], 2)
+        self.assertEqual(pending['unfinished_tasks'], 2)
+        self.assertEqual(pending['pending_payload_bytes'], sum(payload_sizes[:2]))
+        self.assertLessEqual(pending['pending_payload_bytes'], limit)
+        self.assertEqual(pending['dropped_payload_limit_count'], 1)
+        self.assertEqual(pending['dropped_oversize_count'], 0)
+        release.set()
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        self.assertEqual(spot.get_spot_image_capture_health()['pending_payload_bytes'], 0)
+        capture(4)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertEqual(final['written_count'], 3)
+        self.assertTrue(final['accounting_consistent'])
+        files = list((self.root / 'images').rglob('*.jpg'))
+        self.assertEqual(sorted(hashlib.sha256(path.read_bytes()).hexdigest() for path in files),
+                         sorted(accepted_hashes))
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([row['spot_image_linked_observation_key'] for row in rows],
+                         ['budget-fixture:1', 'budget-fixture:2', 'budget-fixture:4'])
 
     def test_concurrent_begin_and_stop_keep_first_baseline(self):
         self.history()

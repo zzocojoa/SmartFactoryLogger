@@ -199,3 +199,12 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - `test_capture_pending_limit_includes_inflight`: 실제 JPEG 파일 쓰기를 지연하고2건 상한에서 세 번째 접수 거절, 해제 후 다음 이미지 접수·실제3파일/3fact·종료 대조를 확인한다. `image-items-red`는 unfinished3/기대2의 행동 실패(exit1)였다.
 - `image-items-green`: 이미지 종료 증거·SPOT API·retention·CSV 이미지 시작237시험 통과(exit0). backend Ruff 및 기본 mypy10파일도 exit0.
 - 아직 이미지 원본/연결 snapshot/임시 출력의 합산 bytes 예산, 고정 설정·목적지 및 상세 접수 결과는 후속 경계다. 단순 건수 제한을 RV02/RR03 전체 완료로 표시하지 않는다.
+
+## HTTP 1단계 — 이미지 원본·연결 snapshot 예약
+
+접수하는 이미지 bytes와 canonical JSON으로 고정한 연결 snapshot의 합계를128MiB 내로 예약한다. queue에서 꺼내도 예약을 유지하며, 쓰기 완료 또는 명시적 실패 이후 원본과 예외 traceback 참조를 놓고 예약·완료 집계를 함께 갱신한다. queue/개별 이미지 크기/pending 건수/합산 bytes 거절을 별도 집계한다.
+
+- `test_capture_payload_budget_includes_inflight_and_linked_snapshot`: 유효한 JPEG comment segment로1MiB가 넘는 이미지를 만들고, 연결 snapshot까지 포함할 때만 상한을 넘는 세 번째 접수를 검사한다. 저장된3개 이미지의 SHA256과 fact의 관측 키1·2·4를 대조하고 종료 후 예약0을 확인한다.
+- `image-bytes-red`: 접수3/기대2로 exit1. 첫 회귀의238시험 중 이 새 시험만 연결 키가 비어 실패했다. fixture에 필수 조회 완료 시각이 빠진 원인을 확인하고 입력을 보완했다. 제품 동작은 추가 변경하지 않았다.
+- `image-bytes-green-r2`: 수정 fixture가 포함된 이미지 종료33시험 통과(exit0). 앞 실행의 나머지205시험도 통과했고 해당 제품 상태의 backend Ruff/mypy10파일은 exit0이다.
+- 이 예약은 보존 중인 원본 payload 범위다. 직렬화·decode·출력 임시 사본과 공유 참조의 중복 예약 방지, 스풀/복구 예산은 계속 구현할 필수 범위이며 R02/RR03 전체 완료가 아니다. 새 JSON snapshot 경로의 입력 오류가 감시로 전파되지 않도록 하는 경계도 다음 시험으로 확인한다.

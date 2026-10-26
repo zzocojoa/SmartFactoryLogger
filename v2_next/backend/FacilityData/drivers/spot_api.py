@@ -251,10 +251,12 @@ class _SpotImageCaptureEvent:
     source: str
     image_age_ms: Optional[float]
     link_checked_at: Optional[float]
-    observation_snapshot: Optional[Dict[str, Any]]
+    observation_snapshot: Optional[Dict[str, Any] | bytes]
+    reserved_payload_bytes: int = 0
 
 
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
+_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT = 128 * 1024**2
 _SPOT_IMAGE_CAPTURE_QUEUE: queue.Queue[_SpotImageCaptureEvent] = queue.Queue(maxsize=_SPOT_IMAGE_CAPTURE_QUEUE_MAX)
 _SPOT_IMAGE_CAPTURE_STOP = threading.Event()
 _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED = threading.Event()
@@ -278,6 +280,8 @@ _spot_image_capture_dropped_count = 0
 _spot_image_capture_dropped_oversize_count = 0
 _spot_image_capture_dropped_queue_full_count = 0
 _spot_image_capture_dropped_pending_limit_count = 0
+_spot_image_capture_dropped_payload_limit_count = 0
+_spot_image_capture_pending_payload_bytes = 0
 _spot_image_capture_failure_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 _spot_image_shutdown_baseline: Optional[Dict[str, Any]] = None
@@ -654,6 +658,7 @@ def _spot_image_capture_worker() -> None:
     global _spot_image_capture_failure_count, _spot_image_capture_last_fact
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_write_at, _spot_image_capture_written_count
+    global _spot_image_capture_pending_payload_bytes
     writer: Optional[SpotImageCaptureWriter] = None
     try:
         while (not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty()
@@ -685,8 +690,7 @@ def _spot_image_capture_worker() -> None:
             fact: Optional[Dict[str, str]] = None
             capture_error: Optional[Exception] = None
             failure_stage = "writer_initialization"
-            failure_at = 0.0
-            failure_count = 0
+            failure_evidence = None
             try:
                 current_writer = _get_spot_image_capture_writer()
                 if writer is not None and writer is not current_writer:
@@ -700,42 +704,51 @@ def _spot_image_capture_worker() -> None:
                     source=event.source,
                     image_age_ms=event.image_age_ms,
                     link_checked_at=event.link_checked_at,
-                    observation_snapshot=event.observation_snapshot,
+                    observation_snapshot=(json.loads(event.observation_snapshot)
+                                          if isinstance(event.observation_snapshot, bytes)
+                                          else event.observation_snapshot),
                 )
             except Exception as exc:  # pragma: no cover - exercised through integration-style tests
                 capture_error = exc
             finally:
                 if capture_error is None and fact is None:
                     capture_error = RuntimeError("capture writer returned no fact")
+                if capture_error is not None:
+                    failure_evidence = _spot_image_capture_failure_evidence(
+                        event, capture_error, stage=failure_stage, error_at=time.time(),
+                        failure_count=_spot_image_capture_failure_count + 1,
+                    )
+                reserved_bytes = event.reserved_payload_bytes
+                # Release the payload and any exception traceback owning it
+                # before returning the reservation to another producer.
+                del event
+                capture_error = None
                 # Outcome accounting and Queue.task_done() are one atomic state
                 # transition. Shutdown can therefore never observe a recorded
                 # failure while the same capture still appears unfinished.
                 with _spot_image_capture_lock:
-                    if capture_error is None and fact is not None:
+                    if failure_evidence is None and fact is not None:
                         _spot_image_capture_written_count += 1
                         _spot_image_capture_last_write_at = time.time()
                         _spot_image_capture_last_fact = dict(fact)
                         _spot_image_capture_last_error_code = None
                         _spot_image_capture_last_error_message = None
                     else:
-                        assert capture_error is not None
+                        assert failure_evidence is not None
                         _spot_image_capture_failure_count += 1
-                        _spot_image_capture_last_error_at = time.time()
-                        failure_at = _spot_image_capture_last_error_at
-                        failure_count = _spot_image_capture_failure_count
-                        _spot_image_capture_last_error_code = capture_error.__class__.__name__
+                        _spot_image_capture_last_error_at = failure_evidence["error_at"]
+                        _spot_image_capture_last_error_code = failure_evidence["error_type"]
                         _spot_image_capture_last_error_message = "capture writer failed"
+                    _spot_image_capture_pending_payload_bytes -= reserved_bytes
                     _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
-            if capture_error is not None:
+            if failure_evidence is not None:
                 # Default stderr formatting drops LogRecord.extra. Keep the safe
                 # capture identity in the message even after later writes recover.
                 _logger.warning(
                     "SPOT image capture writer failed %s",
-                    json.dumps(_spot_image_capture_failure_evidence(
-                        event, capture_error, stage=failure_stage, error_at=failure_at, failure_count=failure_count,
-                    ), ensure_ascii=True, allow_nan=False, separators=(",", ":")),
+                    json.dumps(failure_evidence, ensure_ascii=True, allow_nan=False, separators=(",", ":")),
                     extra={
-                        "error_type": capture_error.__class__.__name__,
+                        "error_type": failure_evidence["error_type"],
                     },
                 )
 
@@ -809,6 +822,9 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
         "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
         "dropped_pending_limit_count": _spot_image_capture_dropped_pending_limit_count,
+        "dropped_payload_limit_count": _spot_image_capture_dropped_payload_limit_count,
+        "pending_payload_bytes": _spot_image_capture_pending_payload_bytes,
+        "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
         "manifest_initialization_requested": initialization_pending,
@@ -868,6 +884,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     global _spot_image_capture_dropped_pending_limit_count
+    global _spot_image_capture_dropped_payload_limit_count, _spot_image_capture_pending_payload_bytes
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
@@ -889,6 +906,8 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_dropped_oversize_count = 0
         _spot_image_capture_dropped_queue_full_count = 0
         _spot_image_capture_dropped_pending_limit_count = 0
+        _spot_image_capture_dropped_payload_limit_count = 0
+        _spot_image_capture_pending_payload_bytes = 0
         _spot_image_capture_failure_count = 0
         _spot_image_capture_last_enqueue_at = 0.0
         _spot_image_capture_last_write_at = 0.0
@@ -1020,6 +1039,9 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
             "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
             "dropped_pending_limit_count": _spot_image_capture_dropped_pending_limit_count,
+            "dropped_payload_limit_count": _spot_image_capture_dropped_payload_limit_count,
+            "pending_payload_bytes": _spot_image_capture_pending_payload_bytes,
+            "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
             "failure_count": _spot_image_capture_failure_count,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
             "last_write_at": _spot_image_capture_last_write_at or None,
@@ -1186,6 +1208,7 @@ def _maybe_enqueue_spot_image_capture(
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     global _spot_image_capture_dropped_pending_limit_count
+    global _spot_image_capture_dropped_payload_limit_count, _spot_image_capture_pending_payload_bytes
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
         return
     mode = _spot_image_capture_mode()
@@ -1204,6 +1227,10 @@ def _maybe_enqueue_spot_image_capture(
         snapshot = get_spot_temperature_poll_snapshot()
     if not _should_enqueue_spot_image_capture(mode, snapshot):
         return
+    snapshot_payload = (json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
+                                   separators=(",", ":"), sort_keys=True).encode("utf-8")
+                        if snapshot is not None else None)
+    payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
     now = time.time()
     with _spot_image_capture_lock:
@@ -1223,6 +1250,10 @@ def _maybe_enqueue_spot_image_capture(
             else:
                 _spot_image_capture_dropped_pending_limit_count += 1
             return
+        if _spot_image_capture_pending_payload_bytes + payload_size > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
+            _spot_image_capture_dropped_count += 1
+            _spot_image_capture_dropped_payload_limit_count += 1
+            return
         event = _SpotImageCaptureEvent(
             image_bytes=bytes(image_bytes),
             captured_at=captured_at,
@@ -1230,7 +1261,8 @@ def _maybe_enqueue_spot_image_capture(
             source=source,
             image_age_ms=image_age_ms,
             link_checked_at=link_checked_at,
-            observation_snapshot=dict(snapshot) if snapshot is not None else None,
+            observation_snapshot=snapshot_payload,
+            reserved_payload_bytes=payload_size,
         )
         try:
             _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
@@ -1239,6 +1271,7 @@ def _maybe_enqueue_spot_image_capture(
             _spot_image_capture_dropped_queue_full_count += 1
             return
         _spot_image_capture_enqueued_count += 1
+        _spot_image_capture_pending_payload_bytes += payload_size
         _spot_image_capture_last_enqueue_at = now
     _start_spot_image_capture_worker()
 
