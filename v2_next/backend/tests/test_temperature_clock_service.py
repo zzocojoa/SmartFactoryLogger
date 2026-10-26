@@ -132,7 +132,9 @@ class ServiceClockTests(unittest.TestCase):
         # read advances .01 but wall resets by -.21 from the previous .2 cycle.
         # Equal public UTC must not mean the new acquisition is the old sample.
         _, _, stamps = self.produce([0, -.2, -60, 60], consume=True)
-        rows = [self.logger.queue.get_nowait() for _ in range(self.logger.queue.qsize())]
+        envelopes = [self.logger.queue.get_nowait() for _ in range(self.logger.queue.qsize())]
+        self.assertEqual([item.producer_seq for item in envelopes], [1, 2, 3, 4])
+        rows = [FactoryData.model_validate_json(item.payload) for item in envelopes]
         self.assertEqual([row.Count for row in rows], [1, 2, 3, 4])
         self.assertEqual([row.Time for row in rows], [str(value) for value in stamps])
         self.assertEqual(self.service.last_update, stamps[-1])
@@ -151,7 +153,9 @@ class ServiceClockTests(unittest.TestCase):
         self.assertEqual(waits[0], 1.0)
         self.assertAlmostEqual(starts[1]-starts[0], 1.01, places=6)
         self.assertAlmostEqual(waits[1], .19, places=6)
-        self.assertEqual([self.logger.queue.get_nowait().Count for _ in range(self.logger.queue.qsize())], [2, 3])
+        envelopes = [self.logger.queue.get_nowait() for _ in range(self.logger.queue.qsize())]
+        self.assertEqual([item.producer_seq for item in envelopes], [1, 2])
+        self.assertEqual([FactoryData.model_validate_json(item.payload).Count for item in envelopes], [2, 3])
         self.assertIsNone(self.service.driver_last_error)
 
     def test_stop_interrupts_normal_and_retry_wait_and_restart(self):

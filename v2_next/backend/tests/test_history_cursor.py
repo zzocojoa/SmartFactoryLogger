@@ -276,7 +276,9 @@ class HistoryCursorTests(unittest.TestCase):
         self.assertEqual([r['timestamp_ms'] for r in history['samples']], [int(t*1000) for t in stamps])
         self.assertEqual(latest['history_sequence'], 4)
         self.assertEqual(latest['history_instance_id'], history['history_instance_id'])
-        rows = [harness.logger.queue.get_nowait() for _ in range(harness.logger.queue.qsize())]
+        envelopes = [harness.logger.queue.get_nowait() for _ in range(harness.logger.queue.qsize())]
+        self.assertEqual([item.producer_seq for item in envelopes], [1, 2, 3, 4])
+        rows = [FactoryData.model_validate_json(item.payload) for item in envelopes]
         self.assertEqual([r.Count for r in rows], [1, 2, 3, 4])
         self.assertTrue(all(r.history_sequence is None for r in rows))
 

@@ -85,7 +85,9 @@ class PlcSourceClockTests(PlcFixture):
         self.assertEqual([getattr(composed, key) for key in PROOF_FIELDS], original_proof)
         self.logger.running = True
         self.logger.enqueue(composed)
-        queued = self.logger.queue.get_nowait()
+        envelope = self.logger.queue.get_nowait()
+        self.assertEqual(envelope.producer_seq, 1)
+        queued = FactoryData.model_validate_json(envelope.payload)
         self.clock.advance(1000, 60)
         self.assertEqual([getattr(queued, key) for key in PROOF_FIELDS], original_proof)
         phase = self.logger._derive_process_phase_decision(queued, datetime.now(timezone.utc), 1)

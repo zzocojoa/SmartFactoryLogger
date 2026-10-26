@@ -499,25 +499,29 @@ class CSVLoggerService:
             return self._shutdown_flush_succeeded is True
 
     def enqueue_detailed(self, data: FactoryData) -> dict[str, Any]:
-        # Internal clock/provenance fields excluded from API JSON still belong
-        # to the persistence snapshot and must survive the worker handoff.
-        payload = json.dumps(dict(data), ensure_ascii=False, allow_nan=False,
-                             sort_keys=True, separators=(",", ":")).encode("utf-8")
-        payload_bytes = self._estimate_factory_data_bytes(data)
         now = time.time()
         with self._lifecycle_lock, self._config_lock:
             self._producer_seq += 1
             write_config = self._capture_write_config_locked()
-            envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
-                                        payload, hashlib.sha256(payload).hexdigest(), write_config)
             result: dict[str, Any] = {
                 "status": "ACCEPTED", "reason": None,
-                "producer_instance_id": envelope.producer_instance_id,
-                "producer_seq": envelope.producer_seq,
-                "source_payload_hash": envelope.source_payload_hash,
+                "producer_instance_id": self.logger_service_instance_id,
+                "producer_seq": self._producer_seq,
+                "source_payload_hash": None,
                 "config_generation": write_config.generation,
                 "required_sinks": write_config.required_sinks,
             }
+            try:
+                # API-excluded clock/provenance fields still belong to the
+                # persistence snapshot. Allocate identity even for invalid input.
+                payload = json.dumps(dict(data), ensure_ascii=False, allow_nan=False,
+                                     sort_keys=True, separators=(",", ":")).encode("utf-8")
+            except (TypeError, ValueError, OverflowError):
+                return {**result, "status": "INVALID", "reason": "snapshot_serialization_failed"}
+            result["source_payload_hash"] = hashlib.sha256(payload).hexdigest()
+            envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
+                                        payload, result["source_payload_hash"], write_config)
+            payload_bytes = self._estimate_factory_data_bytes(data)
             if not self.running:
                 return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
             if not write_config.auto_save:

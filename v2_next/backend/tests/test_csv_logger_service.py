@@ -349,6 +349,29 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(len(rows) - 1, accepted)
             self.assertEqual(service.get_runtime_state()["pending_source_payload_bytes"], 0)
 
+    def test_invalid_csv_payload_keeps_producer_identity(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            invalid = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            invalid.Press = float("nan")  # Mutation after initial Pydantic validation.
+            service.start()
+            try:
+                rejected = service.enqueue_detailed(invalid)
+                self.assertEqual(rejected["status"], "INVALID")
+                self.assertEqual(rejected["reason"], "snapshot_serialization_failed")
+                self.assertEqual(rejected["producer_instance_id"], service.logger_service_instance_id)
+                self.assertEqual(rejected["producer_seq"], 1)
+                self.assertIsNone(rejected["source_payload_hash"])
+                self.assertEqual(service.get_runtime_state()["pending_event_count"], 0)
+                self.assertEqual(service.get_runtime_state()["pending_source_payload_bytes"], 0)
+                accepted = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                self.assertEqual(accepted["status"], "ACCEPTED")
+                self.assertEqual(accepted["producer_seq"], 2)
+            finally:
+                service.stop(timeout_sec=5)
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual([float(row[3]) for row in rows[1:]], [31.0])
+
     def test_same_date_rows_stay_in_one_file(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             log_dir = tmp_dir

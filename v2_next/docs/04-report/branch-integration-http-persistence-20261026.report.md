@@ -145,3 +145,11 @@ CSV 접수에서 queue 슬롯과 별개로 원본 이벤트를 예약하고 v1/v
 - `test_csv_source_budget_includes_inflight_payloads`: 실제 writer를 지연하고128KiB Status가 있는 여러 원본을 접수했다. 상한 초과를 `REJECTED_LIMIT/pending_byte_limit`로 거절하고 접수분만 실제 CSV 행으로 저장, 종료 후 예약0을 확인한다.
 - `tdd/csv-source-bytes-red`는 예상한 초과 ACCEPTED로 exit1. `csv-source-bytes-green`의 CSV service/runtime60시험, 변경 Ruff·프로젝트 mypy 모두 exit0.
 - 아직 원본 직렬화 전에 발생하는 임시 사본과 출력 렌더링 사본은 이 counter에 포함하지 않는다. 이를 전체 R02 합산64MiB 구현으로 표시하지 않으며 같은1단계의 다음 필수 경계로 유지한다.
+
+## HTTP 1단계 — CSV 직렬화 거절과 기존 소비 시험
+
+생산 순번·접수 설정을 먼저 잡고, 직렬화 불가능한 원본에는 `INVALID/snapshot_serialization_failed`와 같은 순번을 반환한다. 존재하지 않는 원본 hash를 만들지 않는다. 수집 호출부로 예외가 전파되는 대신 다음 정상 이벤트를 다음 순번으로 저장한다.
+
+- `test_invalid_csv_payload_keeps_producer_identity`: 생성 후 NaN으로 변한 압력의 실제 JSON ValueError를 RED로 확인(`csv-invalid-red`, exit1). 수정 후 CSV service/runtime61시험·Ruff·프로젝트 mypy exit0.
+- 추가 소비 경로 검사 `csv-envelope-consumer-check`에서 기존 시험3개가 queue 항목을 FactoryData로 직접 읽어 AttributeError를 냈다. 제품의 승인된 immutable envelope 계약에 맞춰 fixture 읽기만 payload decode로 변경했다. 원래 값·시각·내부 PLC 시계·이력 ID 검사와 생산 순번을 유지/추가했다.
+- `csv-envelope-consumer-green`: 실제 생산/소비·clock source·history31시험 통과, backend Ruff exit0. 전체 backend 또는 17개 추가 시나리오 완료 주장은 아니다.
