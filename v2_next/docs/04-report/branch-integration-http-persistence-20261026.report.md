@@ -295,3 +295,13 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_rejected_live_capture_keeps_image_and_reports_identity`: 실제 refresh/접수와1byte 저장 예산에서 경고 누락을 RED(`image-producer-red`, exit1)로 확인했다. 수정 후 반환/캐시 이미지 유지·LIMIT 사유·같은 capture ID·저장0·거절1·쓰기 실패0을 대조했다.
 - `image-producer-green`: 관련244시험 통과(exit0). backend Ruff·기본 mypy10파일 exit0.
 - 이 구조화 로그는 영속 data-trace나 출력별 정상 종료 대조의 대체물이 아니다. 해당 전체 계약은 미완료다.
+
+## HTTP 이미지 저장 간격 — 시스템 시각 변경과 분리
+
+이미지의 최소 저장 간격은 마지막 접수 성공부터 단조 시계로 계산한다. Windows 시각이
+앞뒤로 바뀌어도 간격을 우회하거나 오래 저장을 건너뛰지 않는다. 원래 취득 시각과
+운영 상태의 벽시계 시각은 그대로 보존하며, 거절된 시도는 다음 접수 기준을 이동시키지 않는다.
+
+- `test_capture_interval_ignores_wall_clock_changes`: 벽시계가 앞으로 이동했을 때 기존 구현이 간격 전 이미지를 ACCEPTED로 처리하는 RED(`image-monotonic-red`, exit1)를 확인했다. 수정 후 간격 전 정책 제외, 크기 초과 거절, 벽시계 후퇴 뒤 다음 정상 접수와 실제 JPEG/원장 2개·미저장 0을 대조했다.
+- `image-monotonic-green`: 이미지 종료·SPOT API·retention·CSV 시작 245시험 모두 통과(48.689초, exit0). backend Ruff와 기본 mypy 10파일도 exit0이다.
+- 이 결과는 이미지 간격의 해당 경계 검증이다. 영속 추적·전체 저장 결과 계측·7단계 전체 구현과 최종 설치본 검증은 계속 미완료다. 기존 전체 health 실행 이후 추가된 제품 변경에는 이번 관련 회귀 결과를 적용하며, 이전 전체 health를 최신 소스 전체의 검사로 표현하지 않는다.

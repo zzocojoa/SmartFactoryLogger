@@ -84,7 +84,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.sequence += 1
         data = io.BytesIO()
         Image.new('RGB', (2, 2), (self.sequence % 255, 2, 3)).save(data, format='JPEG')
-        spot._maybe_enqueue_spot_image_capture(
+        return spot._maybe_enqueue_spot_image_capture(
             image_bytes=data.getvalue(), captured_at=1790640000. + self.sequence,
             image_url='http://synthetic.invalid/image.jpg', source='test', image_age_ms=0,
         )
@@ -292,6 +292,37 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(final['dropped_pending_limit_count'], 1)
         self.assertEqual(final['pending_payload_bytes'], 0)
         self.assertTrue(final['accounting_consistent'])
+
+    def test_capture_interval_ignores_wall_clock_changes(self):
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC', 1.))
+
+        def submit(wall, monotonic):
+            with patch.object(spot.time, 'time', return_value=wall), \
+                 patch.object(spot.time, 'monotonic', return_value=monotonic):
+                return self.enqueue()
+
+        self.assertTrue(submit(10000., 100.).accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        skipped = submit(100000., 100.5)
+        self.assertEqual(skipped.status, 'DISABLED')
+        self.assertEqual(skipped.reason, 'policy_skipped_interval')
+        # A rejected attempt after the interval must not move its next deadline.
+        with patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MAX_BYTES', 1):
+            rejected = submit(8000., 101.)
+        self.assertEqual(rejected.reason, 'image_too_large')
+        self.assertTrue(submit(7000., 101.1).accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['enqueued_count'], 2)
+        self.assertEqual(final['written_count'], 2)
+        self.assertEqual(final['dropped_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([row['spot_image_captured_at'] for row in rows],
+                         ['2026-09-29T00:00:01Z', '2026-09-29T00:00:04Z'])
+        self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 2)
 
     def test_rejected_live_capture_keeps_image_and_reports_identity(self):
         import httpx

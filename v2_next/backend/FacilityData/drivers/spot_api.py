@@ -287,6 +287,7 @@ _spot_image_capture_thread: Optional[threading.Thread] = None
 _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
 _spot_image_capture_writer_signature: Optional[tuple[Path, Path, int, float]] = None
 _spot_image_capture_last_enqueue_at = 0.0
+_spot_image_capture_last_enqueue_monotonic: Optional[float] = None
 _spot_image_capture_last_write_at = 0.0
 _spot_image_capture_last_error_at = 0.0
 _spot_image_capture_last_error_code: Optional[str] = None
@@ -914,6 +915,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
+    global _spot_image_capture_last_enqueue_monotonic
     stop_spot_image_capture_writer(timeout_sec=0.5)
     while True:
         try:
@@ -937,6 +939,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_pending_payload_bytes = 0
         _spot_image_capture_failure_count = 0
         _spot_image_capture_last_enqueue_at = 0.0
+        _spot_image_capture_last_enqueue_monotonic = None
         _spot_image_capture_last_write_at = 0.0
         _spot_image_capture_last_error_at = 0.0
         _spot_image_capture_last_error_code = None
@@ -1259,6 +1262,7 @@ def _enqueue_spot_image_capture_locked(
     global _spot_image_capture_dropped_payload_limit_count, _spot_image_capture_pending_payload_bytes
     global _spot_image_capture_dropped_invalid_count
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
+    global _spot_image_capture_last_enqueue_monotonic
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
         return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
     mode = _spot_image_capture_mode()
@@ -1293,10 +1297,12 @@ def _enqueue_spot_image_capture_locked(
     payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
     now = time.time()
+    monotonic_now = time.monotonic()
     with _spot_image_capture_lock:
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
             return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
-        if min_interval_sec > 0.0 and now - _spot_image_capture_last_enqueue_at < min_interval_sec:
+        if (min_interval_sec > 0.0 and _spot_image_capture_last_enqueue_monotonic is not None
+                and monotonic_now - _spot_image_capture_last_enqueue_monotonic < min_interval_sec):
             return ImageCaptureAdmissionResult("DISABLED", "policy_skipped_interval", capture_id)
         # The single writer owns a dequeued capture until task_done. Include it
         # in admission rather than freeing its reservation at queue.get().
@@ -1335,6 +1341,7 @@ def _enqueue_spot_image_capture_locked(
         _spot_image_capture_enqueued_count += 1
         _spot_image_capture_pending_payload_bytes += payload_size
         _spot_image_capture_last_enqueue_at = now
+        _spot_image_capture_last_enqueue_monotonic = monotonic_now
     _start_spot_image_capture_worker()
     return ImageCaptureAdmissionResult("ACCEPTED", None, capture_id)
 
