@@ -12,7 +12,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Bound fact spool recovery to 20 rows / 1 MiB per call and count pending rows
   without reading an unlimited line. Report oversized rows with their original
   location, and reject new spool writes above the 64 MiB unresolved-byte budget.
-  Segment rotation and read-only preservation of legacy spools remain pending.
+  Rotate new writes into segments of at most 4 MiB while preserving legacy spool
+  files unchanged. Reject new rows larger than the 1 MiB recovery limit.
+- Keep partial writes and close failures uncertain: preserve the bytes and stop
+  further writes or automatic recovery by that writer. Offline manifests include
+  unresolved archived spools and propagate read failures instead of reporting zero.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify

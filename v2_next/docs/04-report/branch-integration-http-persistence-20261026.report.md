@@ -416,3 +416,12 @@ runtime writer와 독립 manifest가 같은 파일 목록으로 잔여를 계산
 - `test_manifest_counts_unresolved_spool_archives`: 실제 세 종류 파일에서 독립 manifest2건/기대3건의 RED(`fact-spool-archive-count-red`, exit1)를 확인했다. 수정 후 양쪽3건·보존 파일 읽기 오류 전달·원본 불변을 대조했다.
 - 기존 bounded-read 시험의 독립 집계 기대값도 포함된 보존1행을 더한3건으로 맞췄다. 읽기 크기 제한과 runtime cache 검사는 유지했다.
 - `fact-spool-archive-count-green`: fact 모듈41시험 통과(0.834초, exit0), backend Ruff·기본 mypy10파일 exit0. 전체 백엔드 검사를 이어간다.
+
+## 2026-10-27 스풀 분할·실패 처리의 전체 백엔드 회귀
+
+제품 코드 `58fd675f`에서 `python -m unittest discover -s backend/tests`를 격리 AppData/설정으로 실행했다. `fact-spool-integrity-full-backend` 결과는 **1,000시험 중999통과·기존 private F01자료 미제공1skip**,315.091초,exit0이다. 분할/기존 원본 보존, close·짧은 쓰기, 독립 집계 읽기 오류,1MiB 행 제한과 과거 미해결 파일 집계 변경을 포함한다.
+
+- stdout150,036bytes SHA256 `6c718cbe034b5791453b4abadbdb23b7546124cd9813e4e27eeb2b5c582fb39c`, stderr45,964bytes SHA256 `bb4dbc0e3c2f07bd64272790924421c5b88df59a4cd094254d9693e46af1cc86`.
+- `log-review-r2.json`에서 전체 로그와 unittest 결과를 대조했다. 이미지 manifest 초기화 Traceback1개는 `test_csv_image_startup.py`의 의도된 읽기 오류이며, 첫 로그 검사기의 포괄적인 Traceback 분류를 바로잡았다. 제품 검사를 반복하거나 실패 원문을 삭제하지 않았다. unittest FAIL/ERROR는 없고 Starlette/httpx deprecation 경고는 남아 있다.
+- 최종 제품 변경의 backend Ruff·기본 mypy10파일은 exit0이다. 전체 회귀 이후에는 보고서와 CHANGELOG만 편집했다.
+- 이번 묶음의 코드 commit은 f5ae671b·272bbb52·d20fea81·facaff71·e6656ce0·58fd675f이다. 임시 메모리 선예약, 생산/출력 영속 대조, 부분 CSV/JPEG 복구, 압력 제어 및 전체7단계/17명세·최종 설치본·master 통합은 미완료다. 이번 결과를 frontend/Electron/설치본/현장 전체 통과로 확대하지 않는다.
