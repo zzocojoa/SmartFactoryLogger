@@ -471,6 +471,13 @@ class SpotObservationFactWriter:
                                     != SPOT_OBSERVATION_FACT_SCHEMA_VERSION
                                     or not set(SPOT_OBSERVATION_FACT_COLUMNS).issubset(raw)):
                                 self._reject_invalid_spool(spool_path, "schema-mismatch")
+                            if any(isinstance(raw.get(column), (dict, list))
+                                   for column in SPOT_OBSERVATION_FACT_COLUMNS):
+                                # Legacy non-scalar fields use repr via str().
+                                # Escaped quotes can double their characters;
+                                # reserve that additional retained copy first.
+                                recovered_payloads.enter_context(
+                                    self._reserve_recovery_payload(4 * len(line)))
                             pending.append(({column: _text(raw.get(column))
                                              for column in SPOT_OBSERVATION_FACT_COLUMNS}, row_end))
                         finally:

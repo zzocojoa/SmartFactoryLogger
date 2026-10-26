@@ -3,6 +3,7 @@ import json
 import tempfile
 import tracemalloc
 import unittest
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -506,6 +507,49 @@ class SpotObservationFactTests(unittest.TestCase):
             with output.open(encoding="utf-8-sig", newline="") as handle:
                 rows = list(csv.DictReader(handle))
             self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1", "svc-1:3"])
+
+    def test_recovery_reserves_expanded_container_text(self) -> None:
+        reserved = 0
+
+        @contextmanager
+        def reserve(size, reason):
+            nonlocal reserved
+            self.assertEqual(reason, "spool_recovery_byte_limit")
+            reserved += size
+            try:
+                yield
+            finally:
+                reserved -= size
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            fact = build_spot_observation_fact({"spot_service_instance_id": "legacy",
+                                                "spot_poll_seq": 1, "spot_poll_status": "success"})
+            value = {"nested": "'" * 40000 + '\"\U0001f600'}
+            fact["instrument_info"] = value
+            writer._spool_fact(fact)
+            spool = writer._active_spool_segment
+            self.assertIsNotNone(spool)
+            writer.payload_reservation = reserve
+            with ExitStack() as retained:
+                rows, end = writer._read_spool_batch(spool, retained)
+                self.assertEqual(len(rows), 1)
+                text = rows[0][0]["instrument_info"]
+                self.assertEqual(text, str(value))
+                self.assertEqual(end, spool.stat().st_size)
+                self.assertGreaterEqual(reserved, len(text.encode("utf-32-le")),
+                                        "recovered text exceeds retained payload reservation")
+                rows.clear()
+                text = None
+            self.assertEqual(reserved, 0)
+            writer.payload_reservation = None
+            writer._flush_spool()
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                stored = list(csv.DictReader(handle))
+            self.assertEqual([row["instrument_info"] for row in stored], [str(value)])
+            self.assertEqual(writer.spool_pending_count(), 0)
 
     def test_segmented_spool_rotates_and_preserves_legacy_source(self) -> None:
         from backend.FacilityData.spot_observation_fact import _spool_pending_count
