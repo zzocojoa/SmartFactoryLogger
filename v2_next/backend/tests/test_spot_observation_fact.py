@@ -363,6 +363,27 @@ class SpotObservationFactTests(unittest.TestCase):
             with patch.object(Path, "open", side_effect=AssertionError("cached count performed I/O")):
                 self.assertEqual(writer.spool_pending_count(), 3)
 
+    def test_manifest_rejects_unreadable_spool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = output.with_name(output.name + ".failed.jsonl")
+            original = (json.dumps(self.current_fact_row(1)) + "\n").encode("utf-8")
+            spool.write_bytes(original)
+            original_open = Path.open
+
+            def unreadable_open(path, mode="r", *args, **kwargs):
+                if path == spool and mode == "rb":
+                    raise PermissionError("injected unreadable spool")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", unreadable_open):
+                with self.assertRaisesRegex(OSError, "unreadable spool"):
+                    build_spot_observation_fact_manifest(fact_path=output, enabled=True)
+            manifest = build_spot_observation_fact_manifest(fact_path=output, enabled=True)
+            self.assertEqual(manifest["spool_pending_count"], 1)
+            self.assertEqual(manifest["row_count"], 0)
+            self.assertEqual(spool.read_bytes(), original)
+
     def test_spool_byte_limit_preserves_existing_pending_files(self) -> None:
         from backend.FacilityData import spot_observation_fact as fact_module
 

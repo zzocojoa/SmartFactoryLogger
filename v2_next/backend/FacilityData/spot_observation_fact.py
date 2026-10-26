@@ -989,11 +989,8 @@ def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
 
 
 def _spool_pending_count(spool_path: Path) -> int:
-    try:
-        return sum(_count_spool_rows(path) for path in [spool_path, *_spool_segment_paths(spool_path)]
-                   if path.exists() and path.stat().st_size)
-    except OSError:
-        return 0
+    return sum(_count_spool_rows(path) for path in [spool_path, *_spool_segment_paths(spool_path)]
+               if path.exists() and path.stat().st_size)
 
 
 def _positive_int_or_none(value: Any) -> int | None:

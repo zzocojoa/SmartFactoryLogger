@@ -386,3 +386,11 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_spool_close_failure_blocks_later_segments`: 실제 파일 쓰기 후 close 오류를 주입했다. 기존 동작은 다음 접수에서 새 파일을 만들어 2파일/기대1파일로 RED(`fact-spool-close-red`, exit1)였다. 수정 후 원본 불변·추가 쓰기 거절·UNCERTAIN 복구 오류·실제 pending1을 확인했다.
 - `fact-spool-close-green`: fact/queue/종료 회귀95개 중94통과·기존 private F01자료 미제공1skip,46.405초,exit0. 현재 작업 폴더의 `branch-audit-current-ruff`와 `branch-audit-current-mypy`는 각각 exit0이며 기본 mypy 범위는10파일이다.
 - 동일 writer의 close 실패 처리 범위다. 짧은 쓰기 반환값, 읽기 실패의 독립 집계, 행 크기 계약 및 전체17명세는 계속 남아 있다. 강제 종료 복구용 영속 저널을 추가한 것은 아니다.
+
+## HTTP 1단계 — 읽을 수 없는 스풀의 거짓 0건 방지
+
+독립 manifest 생성에서 임시 기록을 읽지 못하면 OSError를 전달한다. 실제 미복구0건과 확인 불가를 구분하며, 정상 읽기가 돌아오면 원본을 그대로 집계한다.
+
+- `test_manifest_rejects_unreadable_spool`: 실제1행 파일의 읽기만 PermissionError로 막았을 때 기존 manifest가 정상 반환되는 RED(`fact-spool-read-error-red`, OSError not raised, exit1)를 확인했다. 수정 후 오류 전달·읽기 복구 뒤 pending1·원본 불변을 확인했다.
+- `fact-spool-read-error-green`: fact/queue/종료 회귀96개 중95통과·기존 private F01자료 미제공1skip,47.775초,exit0. backend Ruff·기본 mypy10파일도 exit0이다.
+- 명시적으로 전달된 runtime pending과 독립 재계산 경로는 구분한다. 이 수정은 독립 집계의 I/O 오류 은폐를 제거하며 전체 metadata/validator 계약 완료는 아니다.
