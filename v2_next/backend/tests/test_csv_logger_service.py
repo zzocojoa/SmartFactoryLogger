@@ -364,6 +364,39 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(service.get_runtime_state()["pending_processing_payload_bytes"], 0)
             self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
 
+    def test_csv_output_budget_failure_keeps_identity_and_later_rows(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+            large = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            large.Die_ID = "D" * (5 * 1024**2)
+            with self.assertLogs(service.logger, level="ERROR") as captured:
+                service.start()
+                try:
+                    first = service.enqueue_detailed(large)
+                    second = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                    self.assertEqual([first["status"], second["status"]], ["ACCEPTED", "ACCEPTED"])
+                    self.assertFalse(service.stop(timeout_sec=30))
+                    self.assertEqual(service.get_runtime_state()["processing_failure_count"], 1)
+                finally:
+                    service.stop(timeout_sec=30)
+            state = service.get_runtime_state()
+            self.assertEqual(state["processing_failure_count"], 1)
+            self.assertEqual(state["last_processing_failure_seq"], first["producer_seq"])
+            self.assertEqual(state["last_processing_failure_reason"], "csv_output_byte_limit")
+            self.assertEqual(state["pending_event_count"], 0)
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            failures = [record for record in captured.records if record.getMessage() == "CSV processing failed"]
+            self.assertEqual({record.sink_id for record in failures}, {"csv_v1", "csv_v2"})
+            for record in failures:
+                self.assertEqual(record.producer_instance_id, first["producer_instance_id"])
+                self.assertEqual(record.producer_seq, first["producer_seq"])
+                self.assertEqual(record.source_payload_hash, first["source_payload_hash"])
+            files = self.list_v1_files(tmp_dir) + self.list_v2_files(tmp_dir)
+            self.assertEqual(len(files), 2)
+            for path in files:
+                rows = self.read_rows(path)
+                self.assertEqual([float(row[rows[0].index("MainPress")]) for row in rows[1:]], [31.0])
+
     def test_csv_ema_workspace_reuses_serialization_reservation(self) -> None:
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

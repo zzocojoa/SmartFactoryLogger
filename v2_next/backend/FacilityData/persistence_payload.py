@@ -3,11 +3,34 @@ from __future__ import annotations
 
 import json
 from itertools import chain
-from typing import Any
+from typing import Any, Iterable
 
 
 class PayloadBudgetExceeded(ValueError):
     pass
+
+
+def csv_record_sizes(values: Iterable[str]) -> tuple[int, int, int]:
+    """Preflight the fixed excel dialect without allocating a rendered record."""
+    characters = encoded = 2  # CRLF
+    highest = 0
+    for index, value in enumerate(values):
+        characters += int(index > 0)
+        encoded += int(index > 0)
+        extra = value.count('"') + (2 if any(char in value for char in ',"\r\n') else 0)
+        characters += len(value) + extra
+        if value.isascii():
+            encoded += len(value) + extra
+        else:
+            highest = max(highest, ord(max(value)))
+            encoded += extra
+            for char in value:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise ValueError("Unpaired surrogate in fact CSV output")
+                encoded += 1 + (code > 0x7F) + (code > 0x7FF) + (code > 0xFFFF)
+    width = 4 if highest > 0xFFFF else 2 if highest > 0xFF else 1
+    return characters, encoded, width
 
 
 def encode_json_payload(value: Any, *, sort_keys: bool = False, compact: bool = False,

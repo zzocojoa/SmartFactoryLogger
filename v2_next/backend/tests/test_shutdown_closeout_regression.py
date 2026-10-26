@@ -2,6 +2,7 @@ import asyncio
 import csv
 from datetime import datetime
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -192,17 +193,18 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         contract = service._get_active_v2_contract()
         row = [""] * len(contract.columns)
         row[contract.columns.index("sample_seq")] = "41"
-        writer = MagicMock()
-        handle = MagicMock()
-        handle.flush.side_effect = OSError("simulated final flush failure")
+        handle = io.StringIO(newline="")
+        writer = csv.writer(handle)
 
-        with self.assertRaisesRegex(OSError, "simulated final flush failure"):
+        with patch.object(handle, "flush", side_effect=OSError("simulated final flush failure")), \
+                self.assertRaisesRegex(OSError, "simulated final flush failure"):
             service._flush_v2_buffer(
                 writer,
                 handle,
                 [(row, datetime.now().astimezone())],
             )
 
+        self.assertEqual(list(csv.reader(io.StringIO(handle.getvalue()))), [row])
         self.assertNotIn(
             str(csv_path),
             service._v2_persisted_sample_seq_by_path,
@@ -217,18 +219,19 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         contract = service._get_active_v2_contract()
         row = [""] * len(contract.columns)
         row[contract.columns.index("sample_seq")] = "41"
-        writer = MagicMock()
-        handle = MagicMock()
+        handle = io.StringIO(newline="")
+        writer = csv.writer(handle)
 
-        with self.assertRaisesRegex(RuntimeError, "did not advance"):
+        with patch.object(handle, "flush", wraps=handle.flush) as flush, \
+                self.assertRaisesRegex(RuntimeError, "did not advance"):
             service._flush_v2_buffer(
                 writer,
                 handle,
                 [(row, datetime.now().astimezone())],
             )
 
-        writer.writerows.assert_not_called()
-        handle.flush.assert_not_called()
+        self.assertEqual(handle.getvalue(), "")
+        flush.assert_not_called()
         self.assertEqual(
             service._v2_persisted_sample_seq_by_path[str(csv_path)],
             41,
@@ -244,14 +247,15 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             row = [""] * len(contract.columns)
             row[contract.columns.index("sample_seq")] = sample_seq
             rows.append((row, datetime.now().astimezone()))
-        writer = MagicMock()
-        handle = MagicMock()
+        handle = io.StringIO(newline="")
+        writer = csv.writer(handle)
 
-        with self.assertRaisesRegex(RuntimeError, "not strictly increasing"):
+        with patch.object(handle, "flush", wraps=handle.flush) as flush, \
+                self.assertRaisesRegex(RuntimeError, "not strictly increasing"):
             service._flush_v2_buffer(writer, handle, rows)
 
-        writer.writerows.assert_not_called()
-        handle.flush.assert_not_called()
+        self.assertEqual(handle.getvalue(), "")
+        flush.assert_not_called()
 
     def test_v2_persistence_commit_occurs_only_after_successful_flush(self) -> None:
         service = CSVLoggerService()
@@ -260,19 +264,26 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         contract = service._get_active_v2_contract()
         row = [""] * len(contract.columns)
         row[contract.columns.index("sample_seq")] = "42"
-        writer = MagicMock()
-        handle = MagicMock()
+        handle = io.StringIO(newline="")
+        writer = csv.writer(handle)
+        original_flush = handle.flush
 
-        self.assertTrue(
-            service._flush_v2_buffer(
-                writer,
-                handle,
-                [(row, datetime.now().astimezone())],
+        def flush_before_commit():
+            self.assertNotIn(str(csv_path), service._v2_persisted_sample_seq_by_path)
+            self.assertNotIn(str(csv_path), service._v2_persisted_at_by_path)
+            return original_flush()
+
+        with patch.object(handle, "flush", side_effect=flush_before_commit) as flush:
+            self.assertTrue(
+                service._flush_v2_buffer(
+                    writer,
+                    handle,
+                    [(row, datetime.now().astimezone())],
+                )
             )
-        )
+            flush.assert_called_once_with()
 
-        writer.writerows.assert_called_once_with([row])
-        handle.flush.assert_called_once_with()
+        self.assertEqual(list(csv.reader(io.StringIO(handle.getvalue()))), [row])
         self.assertEqual(
             service._v2_persisted_sample_seq_by_path[str(csv_path)],
             42,

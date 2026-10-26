@@ -1,7 +1,9 @@
 import csv
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
+import io
 import json
 import logging
 import math
@@ -10,7 +12,7 @@ import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Iterable, Protocol, TextIO, Tuple
+from typing import Any, Optional, Iterable, Iterator, Protocol, TextIO, Tuple
 from uuid import uuid4
 from pydantic import ValidationError
 
@@ -24,7 +26,7 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
 )
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
-    PayloadBudgetExceeded, decoded_string_bytes, encode_json_payload, prepare_json_payload,
+    PayloadBudgetExceeded, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
@@ -323,6 +325,42 @@ class _CSVWriter(Protocol):
     def writerows(self, rows: Iterable[Iterable[Any]], /) -> None: ...
 
 
+class CSVOutputBudgetExceeded(RuntimeError):
+    pass
+
+
+class _ReservedCSVWriter:
+    """Keep a file open without retaining an unaccounted C CSV record buffer."""
+
+    def __init__(self, owner: "CSVLoggerService", handle: TextIO):
+        self._owner = owner
+        self._handle = handle
+
+    def writerow(self, row: Iterable[Any], /) -> Any:
+        values = tuple("" if value is None else str(value) for value in row)
+        characters, encoded, width = csv_record_sizes(values)
+        # A single empty field is quoted by the excel dialect.
+        if values == ("",):
+            characters += 2
+            encoded += 2
+        record_buffer = (characters // 32768 + 1) * 32768 * 4
+        workspace = 2 * record_buffer + characters * width + 2 * encoded + 3 + io.DEFAULT_BUFFER_SIZE
+        with self._owner._reserve_csv_output(workspace):
+            writer = csv.writer(self._handle)
+            try:
+                result = writer.writerow(values)
+                self._handle.flush()
+                return result
+            finally:
+                # csv.writer retains its largest UCS4 record until destroyed.
+                # Drop it before releasing the reservation, including errors.
+                del writer
+
+    def writerows(self, rows: Iterable[Iterable[Any]], /) -> None:
+        for row in rows:
+            self.writerow(row)
+
+
 @dataclass(frozen=True)
 class CSVWriteConfig:
     generation: int
@@ -367,6 +405,7 @@ class CSVLoggerService:
         self._processing_failure_count = 0
         self._last_processing_failure_seq: Optional[int] = None
         self._last_processing_failure_reason: Optional[str] = None
+        self._failed_pending_sequences: set[int] = set()
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
@@ -671,19 +710,40 @@ class CSVLoggerService:
             self._pending_decoded_payloads[sequence] = (retained, identities)
         return data
 
-    def _record_csv_processing_failure(self, envelope: CSVEventEnvelope, reason: str) -> None:
+    @contextmanager
+    def _reserve_csv_output(self, size: int) -> Iterator[None]:
         with self._runtime_lock:
-            self._processing_failure_count += 1
+            if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
+                    + size > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                raise CSVOutputBudgetExceeded("csv_output_byte_limit")
+            self._pending_processing_payload_bytes += size
+        try:
+            yield
+        finally:
+            with self._runtime_lock:
+                self._pending_processing_payload_bytes -= size
+
+    def _record_csv_processing_failure(self, envelope: CSVEventEnvelope, reason: str,
+                                       sink: Optional[str] = None) -> None:
+        with self._runtime_lock:
+            if envelope.producer_seq not in self._failed_pending_sequences:
+                self._processing_failure_count += 1
+                self._failed_pending_sequences.add(envelope.producer_seq)
             self._last_processing_failure_seq = envelope.producer_seq
             self._last_processing_failure_reason = reason
             self._runtime_write_failure_observed = True
-            self._pending_events[envelope.producer_seq][1].clear()
-            self._completed_event_sequences.add(envelope.producer_seq)
+            pending = self._pending_events[envelope.producer_seq][1]
+            if sink is None:
+                pending.clear()
+            else:
+                pending.discard(sink)
+            if not pending:
+                self._completed_event_sequences.add(envelope.producer_seq)
         self.logger.error("CSV processing failed", extra={
             "producer_instance_id": envelope.producer_instance_id,
             "producer_seq": envelope.producer_seq,
             "source_payload_hash": envelope.source_payload_hash,
-            "reason": reason,
+            "reason": reason, "sink_id": sink,
         })
 
     def _finish_csv_decode(self, sequence: Optional[int]) -> None:
@@ -703,13 +763,17 @@ class CSVLoggerService:
                     self._pending_decoded_payloads[sequence] = (retained, row_ids & reservation[1])
                 else:
                     del self._pending_decoded_payloads[sequence]
-            for completed in self._completed_event_sequences:
+            bound_sequences = {binding[1] for binding in self._pending_row_events.values()}
+            for completed in tuple(self._completed_event_sequences):
+                if completed in bound_sequences:
+                    continue  # A failed flush can still retain its caller's rows.
                 pending = self._pending_events.pop(completed)
                 source_size = len(pending[0].payload)
                 del pending
                 self._pending_source_payload_bytes -= source_size
                 self._pending_processing_payload_bytes -= self._pending_decoded_payloads.pop(completed, (0, set()))[0]
-            self._completed_event_sequences.clear()
+                self._failed_pending_sequences.discard(completed)
+                self._completed_event_sequences.discard(completed)
 
     def _capture_write_config_locked(self) -> CSVWriteConfig:
         return CSVWriteConfig(
@@ -909,7 +973,7 @@ class CSVLoggerService:
         handle = None
         try:
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
-            writer = csv.writer(handle)
+            writer = _ReservedCSVWriter(self, handle)
             if handle.tell() == 0 and settings.v1_header:
                 writer.writerow(settings.v1_header)
                 handle.flush()
@@ -924,7 +988,7 @@ class CSVLoggerService:
                 try:
                     self._ensure_dir(settings.fallback_log_dir)
                     handle = fallback_path.open("a", newline="", encoding="utf-8-sig")
-                    writer = csv.writer(handle)
+                    writer = _ReservedCSVWriter(self, handle)
                     if handle.tell() == 0 and settings.v1_header:
                         writer.writerow(settings.v1_header)
                         handle.flush()
@@ -1016,7 +1080,7 @@ class CSVLoggerService:
                             return None, None
 
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
-            writer = csv.writer(handle)
+            writer = _ReservedCSVWriter(self, handle)
             if handle.tell() == 0:
                 writer.writerow(list(contract.columns))
                 handle.flush()
@@ -2753,6 +2817,27 @@ class CSVLoggerService:
     def _filename_timestamp(self, timestamp: datetime) -> str:
         return self._to_local_timestamp(timestamp).strftime("%Y%m%d_%H%M%S")
 
+    def _write_csv_rows(self, writer: _CSVWriter, rows: list[Tuple[list, datetime]],
+                        sink: str) -> list[Tuple[list, datetime]]:
+        written = []
+        for row, timestamp in rows:
+            with self._runtime_lock:
+                binding = self._pending_row_events.get(id(row))
+                if binding is not None and sink not in self._pending_events[binding[1]][1]:
+                    continue  # Already terminally failed during an earlier flush.
+            try:
+                writer.writerow(row)
+            except CSVOutputBudgetExceeded:
+                with self._runtime_lock:
+                    binding = self._pending_row_events.get(id(row))
+                    envelope = self._pending_events[binding[1]][0] if binding is not None else None
+                if envelope is None:
+                    raise  # Legacy direct callers have no admitted identity.
+                self._record_csv_processing_failure(envelope, "csv_output_byte_limit", sink)
+            else:
+                written.append((row, timestamp))
+        return written
+
     def _flush_buffer(
         self,
         writer: Optional[_CSVWriter],
@@ -2765,10 +2850,13 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
-        writer.writerows([row for row, _ in rows])
+        written = self._write_csv_rows(writer, rows, "csv_v1")
         handle.flush()
-        self._mark_write_completed()
+        if written:
+            self._mark_write_completed()
         self._complete_pending_rows(rows, "csv_v1")
+        # True means the buffer was consumed. Per-sink failures remain latched
+        # and prevent clean shutdown; they are never marked as completed writes.
         return True
 
     def _flush_v2_buffer(
@@ -2782,13 +2870,14 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
-        persistence = self._prepare_v2_rows_persisted(rows)
+        self._prepare_v2_rows_persisted(rows)  # Validate ordering before any write.
         flush_started = time.perf_counter()
-        writer.writerows([row for row, _ in rows])
+        written = self._write_csv_rows(writer, rows, "csv_v2")
         handle.flush()
         self._last_csv_flush_duration_ms = (time.perf_counter() - flush_started) * 1000.0
-        self._commit_v2_rows_persisted(persistence)
-        self._mark_write_completed()
+        if written:
+            self._commit_v2_rows_persisted(self._prepare_v2_rows_persisted(written))
+            self._mark_write_completed()
         self._complete_pending_rows(rows, "csv_v2")
         return True
 
@@ -3363,7 +3452,7 @@ class CSVLoggerService:
                             prefix=file_prefix,
                         )
                         if self._flush_buffer(writer, f_handle, [(row, timestamp)]):
-                            self.logger.info("CSV deferred shutdown v1 row written after final rollover flush.")
+                            self.logger.info("CSV deferred shutdown v1 row handled after final rollover flush.")
                         else:
                             shutdown_flush_succeeded = False
                             self.logger.warning("CSV deferred shutdown v1 row was not written.")
@@ -3382,7 +3471,7 @@ class CSVLoggerService:
                             prefix=v2_file_prefix,
                         )
                         if self._flush_v2_buffer(v2_writer, v2_handle, [(v2_row, timestamp)]):
-                            self.logger.info("CSV deferred shutdown v2 row written after final rollover flush.")
+                            self.logger.info("CSV deferred shutdown v2 row handled after final rollover flush.")
                         else:
                             shutdown_flush_succeeded = False
                             self.logger.warning("CSV deferred shutdown v2 row was not written.")
@@ -3395,7 +3484,7 @@ class CSVLoggerService:
         self._finish_csv_decode(None)
         self._buffer_size = 0
         with self._runtime_lock:
-            if self._pending_events:
+            if self._pending_events or self._processing_failure_count:
                 shutdown_flush_succeeded = False
         self._close_file(f_handle)
         if not self._close_v2_file(

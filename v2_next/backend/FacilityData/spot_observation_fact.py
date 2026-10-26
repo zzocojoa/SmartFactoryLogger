@@ -19,6 +19,7 @@ from typing import Any, Callable, ContextManager, NoReturn, Optional
 from uuid import uuid4
 
 from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
+from backend.FacilityData.persistence_payload import csv_record_sizes as _csv_record_sizes
 from backend.FacilityData.spot_low_signal import (
     LOW_SIGNAL_ALARM_BIT,
     LOW_SIGNAL_COMPARATORS,
@@ -49,29 +50,6 @@ class FactPayloadBudgetExceeded(RuntimeError):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
-
-
-def _csv_record_sizes(values: Iterable[str]) -> tuple[int, int, int]:
-    """Preflight the fixed excel dialect without allocating a rendered record."""
-    characters = encoded = 2  # CRLF
-    highest = 0
-    for index, value in enumerate(values):
-        characters += int(index > 0)
-        encoded += int(index > 0)
-        extra = value.count('"') + (2 if any(char in value for char in ',"\r\n') else 0)
-        characters += len(value) + extra
-        if value.isascii():
-            encoded += len(value) + extra
-        else:
-            highest = max(highest, ord(max(value)))
-            encoded += extra
-            for char in value:
-                code = ord(char)
-                if 0xD800 <= code <= 0xDFFF:
-                    raise ValueError("Unpaired surrogate in fact CSV output")
-                encoded += 1 + (code > 0x7F) + (code > 0x7FF) + (code > 0xFFFF)
-    width = 4 if highest > 0xFFFF else 2 if highest > 0xFF else 1
-    return characters, encoded, width
 
 
 def _csv_output_reservation(fact: Mapping[str, str]) -> int:
