@@ -589,6 +589,48 @@ class CSVLoggerServiceTests(unittest.TestCase):
             files = self.list_v1_files(log_dir)
             self.assertEqual(files, [])
 
+    def test_csv_inactive_admission_skips_large_payload_work(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, False)
+            large = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            large.Status = "x" * (40 * 1024**2)
+            service.start()
+            try:
+                tracemalloc.start()
+                try:
+                    disabled = service.enqueue_detailed(large)
+                    _, peak = tracemalloc.get_traced_memory()
+                finally:
+                    tracemalloc.stop()
+                self.assertEqual(disabled["status"], "DISABLED")
+                self.assertEqual(disabled["reason"], "auto_save_disabled")
+                self.assertEqual(disabled["required_sinks"], ())
+                self.assertIsNone(disabled["source_payload_hash"])
+                self.assertLess(peak, 1024**2)
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            closed = service.enqueue_detailed(large)
+            self.assertEqual(closed["status"], "REJECTED_CLOSED")
+            self.assertEqual(closed["reason"], "persistence_closed")
+            self.assertIsNone(closed["source_payload_hash"])
+            self.assertEqual([disabled["producer_seq"], closed["producer_seq"]], [1, 2])
+            state = service.get_runtime_state()
+            self.assertEqual(state["pending_event_count"], 0)
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            self.assertEqual(state["drop_count"], 0)
+            self.assertEqual(list(tmp_dir.iterdir()), [])
+            service.apply_config(auto_save=True)
+            service.start()
+            try:
+                accepted = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                self.assertEqual(accepted["status"], "ACCEPTED")
+                self.assertEqual(accepted["producer_seq"], 3)
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual([float(row[3]) for row in rows[1:]], [31.0])
+            self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
+
     def test_disabled_admission_has_no_pending_work(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, False)

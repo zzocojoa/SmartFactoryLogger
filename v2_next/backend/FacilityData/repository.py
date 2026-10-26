@@ -519,6 +519,10 @@ class CSVLoggerService:
                 "config_generation": write_config.generation,
                 "required_sinks": write_config.required_sinks,
             }
+            if not self.running:
+                return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
+            if not write_config.auto_save:
+                return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
             reserved_bytes = 0
             payload = None
             envelope = None
@@ -551,10 +555,6 @@ class CSVLoggerService:
                 envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
                                             payload, result["source_payload_hash"], write_config)
                 payload_bytes = self._estimate_factory_data_bytes(data)
-                if not self.running:
-                    return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
-                if not write_config.auto_save:
-                    return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
                 with self._runtime_lock:
                     queue_limit = self.queue.maxsize
                     pending_limit = min(queue_limit, CSV_PENDING_EVENT_LIMIT) if queue_limit > 0 else CSV_PENDING_EVENT_LIMIT
