@@ -309,11 +309,19 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
     ).hexdigest()
 
 
+@dataclass(frozen=True)
+class CSVEventEnvelope:
+    producer_instance_id: str
+    producer_seq: int
+    payload: bytes
+    source_payload_hash: str
+
+
 class CSVLoggerService:
     def __init__(self, *, require_runtime_manifest_state: bool = False) -> None:
         self.running = False
         self.thread: Optional[threading.Thread] = None
-        self.queue: queue.Queue[Optional[FactoryData]] = queue.Queue(maxsize=5000)
+        self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=5000)
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
@@ -350,6 +358,7 @@ class CSVLoggerService:
         self._runtime_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self._sample_seq = 0
+        self._producer_seq = 0
         self.logger_service_instance_id = str(uuid4())
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self._sidecar_paths_written: set[str] = set()
@@ -460,26 +469,44 @@ class CSVLoggerService:
                 return True
             return self._shutdown_flush_succeeded is True
 
-    def enqueue(self, data: FactoryData) -> None:
+    def enqueue_detailed(self, data: FactoryData) -> dict[str, Any]:
+        # Internal clock/provenance fields excluded from API JSON still belong
+        # to the persistence snapshot and must survive the worker handoff.
+        payload = json.dumps(dict(data), ensure_ascii=False, allow_nan=False,
+                             sort_keys=True, separators=(",", ":")).encode("utf-8")
         payload_bytes = self._estimate_factory_data_bytes(data)
         now = time.time()
         with self._lifecycle_lock:
+            self._producer_seq += 1
+            envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
+                                        payload, hashlib.sha256(payload).hexdigest())
+            result: dict[str, Any] = {
+                "status": "ACCEPTED", "reason": None,
+                "producer_instance_id": envelope.producer_instance_id,
+                "producer_seq": envelope.producer_seq,
+                "source_payload_hash": envelope.source_payload_hash,
+            }
             if not self.running:
-                return
+                return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
             try:
-                self.queue.put_nowait(data)
+                self.queue.put_nowait(envelope)
             except queue.Full:
                 with self._runtime_lock:
                     self._drop_count += 1
                     self._last_drop_at = time.time()
                 self.logger.warning("CSV log queue full. Dropping data.")
-                return
+                return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
             with self._runtime_lock:
                 self._last_enqueue_at = now
                 if self._payload_bytes_ema is None:
                     self._payload_bytes_ema = float(payload_bytes)
                 else:
                     self._payload_bytes_ema = (self._payload_bytes_ema * 0.8) + (float(payload_bytes) * 0.2)
+            return result
+
+    def enqueue(self, data: FactoryData) -> None:
+        """Compatibility entry point; production callers can inspect the receipt."""
+        self.enqueue_detailed(data)
 
     def _estimate_factory_data_bytes(self, data: FactoryData) -> int:
         try:
@@ -2839,7 +2866,8 @@ class CSVLoggerService:
                     deferred_item = None
                 else:
                     try:
-                        item = self.queue.get(timeout=0.2)
+                        envelope = self.queue.get(timeout=0.2)
+                        item = FactoryData.model_validate_json(envelope.payload) if envelope is not None else None
                     except queue.Empty:
                         item = None
 

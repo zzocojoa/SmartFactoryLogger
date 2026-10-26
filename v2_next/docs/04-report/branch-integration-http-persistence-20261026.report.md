@@ -96,3 +96,13 @@
 - `test_rejected_poll_keeps_display_and_identity`: 실제 HTTP 수집 함수와 capacity1 owner를 사용하고 외부 HTTP 응답만 대체했다. 두 번째 온도502가 캐시에 반영되고, 거절된 원래 poll2의 상세 결과가 로그에 남으며 실제 fact에는 poll1만 저장되는지 검사한다.
 - `tdd/fact-producer-red`: 상세 상태가 None인 예상 실패(exit1). `fact-producer-green`: 모듈18시험 중17통과·기존 F01 1skip, exit0. Ruff/mypy exit0.
 - 구조화 로그는 후속 data-trace 대조 계약의 대체물이 아니다. 생산–저장 전체 대조와 거절 범위 보존은 2단계에서 계속 구현한다.
+
+## HTTP 1단계 — CSV 원본 envelope와 생산 식별자
+
+CSV 접수 전에 canonical JSON bytes와 source payload hash를 만들고, `logger_service_instance_id + producer_seq`를 부여한 frozen envelope를 큐에 전달한다. API에서 제외하는 내부 단조 시각·PLC 출처 필드도 worker 전달 자료에는 보존한다. 기존 `enqueue`는 호환 진입점이며 상세 접수 영수증을 추가했다.
+
+- `test_admission_freezes_payload_and_identity`: 실제 파일 열기를 지연한 상태에서 접수 후 원본 압력을31→999로 변경했다. `tdd/csv-envelope-red`에서 실제 저장값999의 예상 실패(exit1), 수정 후 저장값31·생산 ID·원본 hash 대조 통과.
+- 첫 회귀 검사에서 기존 queue 객체 동일성 가정1건과 EMA 변경2건이 실패했다. EMA의 기존 추정 의미를 복원하고, 종료 sentinel 순서 시험은 immutable envelope의 전체 데이터(내부 필드 포함)·순번·뒤따르는 sentinel을 확인하도록 조정했다.
+- `tdd/csv-envelope-green`: CSV service/runtime/image-startup/fact 86시험 중85통과·기존 F01 1skip, exit0. 변경 파일 Ruff와 프로젝트 지정 mypy 9파일 exit0.
+- 추가로 repository.py를 명시 지정한 mypy는 기존 annotation 오류9개로 exit1이다. 변경 전 HEAD를 `--shadow-file`로 검사한 `csv-envelope-mypy-baseline`에서도 같은9개가 확인됐다. 현재 변경으로 새 오류는 없지만 이 추가 범위의 전체 정적 검사 통과를 주장하지 않는다.
+- 설정 세대·목적지 고정, 합산64MiB/5000 예약, 상세 결과의 통합 수집 호출부 연결 및 출력별 추적은 아직 후속 작업이다. 현재 envelope 추가만으로 CSV 저장 무결성 전체를 완료 처리하지 않는다.

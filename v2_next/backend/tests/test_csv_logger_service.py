@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import hashlib
 import json
 from contextlib import contextmanager
 import os
@@ -7,6 +8,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import threading
 import time
 from typing import Any
 import unittest
@@ -145,6 +147,42 @@ class CSVLoggerServiceTests(unittest.TestCase):
 
     def wait_for_processing(self) -> None:
         time.sleep(0.6)
+
+    def test_admission_freezes_payload_and_identity(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test did not release CSV file open")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                try:
+                    first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertTrue(started.wait(2))
+                    data = self.create_data("2026-03-09T07:20:25.100", 31.0)
+                    data.plc_source_age_ms = 42.0
+                    expected_payload = json.dumps(dict(data), ensure_ascii=False,
+                                                  sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    second = service.enqueue_detailed(data)
+                    data.Press = 999.0
+                finally:
+                    release.set()
+                    self.assertTrue(service.stop(timeout_sec=5))
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual([float(row[3]) for row in rows[1:]], [30.0, 31.0])
+            self.assertEqual(first["status"], "ACCEPTED")
+            self.assertEqual(second["status"], "ACCEPTED")
+            self.assertEqual(first["producer_instance_id"], service.logger_service_instance_id)
+            self.assertEqual(second["producer_instance_id"], first["producer_instance_id"])
+            self.assertEqual([first["producer_seq"], second["producer_seq"]], [1, 2])
+            self.assertEqual(second["source_payload_hash"], hashlib.sha256(expected_payload).hexdigest())
 
     def test_same_date_rows_stay_in_one_file(self) -> None:
         with self.create_temp_dir() as tmp_dir:

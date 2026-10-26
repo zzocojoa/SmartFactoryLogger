@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from pathlib import Path
 
 from backend import app as backend_app
-from backend.FacilityData.repository import CSVLoggerService
+from backend.FacilityData.repository import CSVEventEnvelope, CSVLoggerService
 from backend.FacilityData.schemas import FactoryData
 
 
@@ -238,8 +238,8 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         enqueue_entered = threading.Event()
         release_enqueue = threading.Event()
 
-        class BlockingQueue(queue.Queue[FactoryData | None]):
-            def put_nowait(self, item: FactoryData | None) -> None:
+        class BlockingQueue(queue.Queue[CSVEventEnvelope | None]):
+            def put_nowait(self, item: CSVEventEnvelope | None) -> None:
                 if item is not None:
                     enqueue_entered.set()
                     release_enqueue.wait(timeout=1.0)
@@ -249,6 +249,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         service.queue = BlockingQueue(maxsize=10)
         service.running = True
         data = create_factory_data()
+        data.plc_source_age_ms = 42.0
         stop_result: list[bool] = []
 
         enqueue_thread = threading.Thread(target=service.enqueue, args=(data,))
@@ -264,7 +265,10 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         stop_thread.join(timeout=1.0)
 
         self.assertEqual(stop_result, [True])
-        self.assertIs(service.queue.get_nowait(), data)
+        envelope = service.queue.get_nowait()
+        self.assertIsInstance(envelope, CSVEventEnvelope)
+        self.assertEqual(dict(FactoryData.model_validate_json(envelope.payload)), dict(data))
+        self.assertEqual(envelope.producer_seq, 1)
         self.assertIsNone(service.queue.get_nowait())
 
     def test_csv_logger_drop_count_increments_on_full_queue(self) -> None:
