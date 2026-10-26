@@ -329,6 +329,16 @@ class CSVOutputBudgetExceeded(RuntimeError):
     pass
 
 
+def _csv_output_workspace(values: tuple[str, ...]) -> int:
+    characters, encoded, width = csv_record_sizes(values)
+    # A single empty field is quoted by the excel dialect.
+    if values == ("",):
+        characters += 2
+        encoded += 2
+    record_buffer = (characters // 32768 + 1) * 32768 * 4
+    return 2 * record_buffer + characters * width + 2 * encoded + 3 + io.DEFAULT_BUFFER_SIZE
+
+
 class _ReservedCSVWriter:
     """Keep a file open without retaining an unaccounted C CSV record buffer."""
 
@@ -338,14 +348,7 @@ class _ReservedCSVWriter:
 
     def writerow(self, row: Iterable[Any], /) -> Any:
         values = tuple("" if value is None else str(value) for value in row)
-        characters, encoded, width = csv_record_sizes(values)
-        # A single empty field is quoted by the excel dialect.
-        if values == ("",):
-            characters += 2
-            encoded += 2
-        record_buffer = (characters // 32768 + 1) * 32768 * 4
-        workspace = 2 * record_buffer + characters * width + 2 * encoded + 3 + io.DEFAULT_BUFFER_SIZE
-        with self._owner._reserve_csv_output(workspace):
+        with self._owner._reserve_csv_output(_csv_output_workspace(values)):
             writer = csv.writer(self._handle)
             try:
                 result = writer.writerow(values)
@@ -379,6 +382,17 @@ class CSVWriteConfig:
             return ()
         return tuple(name for name, enabled in (("csv_v1", self.v1_enabled), ("csv_v2", self.v2_enabled))
                      if enabled)
+
+    @property
+    def header_workspace_bytes(self) -> int:
+        # Headers are written sequentially. Leave room for the larger one so
+        # accepted inputs cannot prevent an empty destination from being opened.
+        headers = []
+        if self.auto_save and self.v1_enabled and self.v1_header:
+            headers.append(_csv_output_workspace(self.v1_header))
+        if self.auto_save and self.v2_enabled:
+            headers.append(_csv_output_workspace(self.v2_contract.columns))
+        return max(headers, default=0)
 
 
 @dataclass(frozen=True)
@@ -577,9 +591,10 @@ class CSVLoggerService:
             snapshot = None
             try:
                 try:
+                    header_workspace = write_config.header_workspace_bytes
                     with self._runtime_lock:
                         available = (CSV_PENDING_PAYLOAD_BYTE_LIMIT - self._pending_source_payload_bytes
-                                     - self._pending_processing_payload_bytes)
+                                     - self._pending_processing_payload_bytes - header_workspace)
                     # Include internal clock/provenance fields. Default JSON
                     # separators give a conservative bound for compact output.
                     snapshot, encoded_size, characters, width = prepare_json_payload(dict(data), available)
@@ -590,7 +605,7 @@ class CSVLoggerService:
                     required_bytes = max(2 * text_bytes, encoded_size + text_bytes)
                     with self._runtime_lock:
                         if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
-                                + required_bytes > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                                + required_bytes + header_workspace > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
                             raise PayloadBudgetExceeded
                         self._pending_processing_payload_bytes += required_bytes
                         reserved_bytes = required_bytes
@@ -682,7 +697,7 @@ class CSVLoggerService:
         reservation = 2 * envelope.text_storage_bytes
         with self._runtime_lock:
             available = (CSV_PENDING_PAYLOAD_BYTE_LIMIT - self._pending_source_payload_bytes
-                         - self._pending_processing_payload_bytes)
+                         - self._pending_processing_payload_bytes - envelope.write_config.header_workspace_bytes)
             if reservation > available:
                 failed = True
             else:

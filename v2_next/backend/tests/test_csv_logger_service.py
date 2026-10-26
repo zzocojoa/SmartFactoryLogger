@@ -539,6 +539,71 @@ class CSVLoggerServiceTests(unittest.TestCase):
             rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
             self.assertEqual([float(row[3]) for row in rows[1:]], [31.0])
 
+    def test_csv_header_pressure_does_not_strand_admitted_rows(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            data = self.create_data("2026-03-09T07:20:25.000", 1.0)
+            data.Die_ID = "D" * (64 * 1024)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(30):
+                        raise TimeoutError("test did not release CSV header-pressure writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open), self.assertLogs(service.logger, level="ERROR") as captured:
+                service.start()
+                try:
+                    first = service.enqueue_detailed(data)
+                    self.assertEqual(first["status"], "ACCEPTED")
+                    admitted = {first["producer_seq"]: first}
+                    self.assertTrue(started.wait(5))
+                    for number in range(2, 2048):
+                        data.Press = float(number)
+                        receipt = service.enqueue_detailed(data)
+                        if receipt["status"] != "ACCEPTED":
+                            break
+                        admitted[receipt["producer_seq"]] = receipt
+                    self.assertEqual(receipt["status"], "REJECTED_LIMIT")
+                    self.assertEqual(receipt["reason"], "pending_byte_limit")
+                finally:
+                    release.set()
+                    stopped = service.stop(timeout_sec=30)
+            state = service.get_runtime_state()
+            self.assertFalse(state["pending_event_count"], "admitted CSV events remained after header budget exhaustion")
+            self.assertFalse(stopped)
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            failures = [record for record in captured.records if record.getMessage() == "CSV processing failed"]
+            failed = {record.producer_seq for record in failures}
+            self.assertTrue(failed)
+            for record in failures:
+                self.assertEqual(record.producer_instance_id, admitted[record.producer_seq]["producer_instance_id"])
+                self.assertEqual(record.source_payload_hash, admitted[record.producer_seq]["source_payload_hash"])
+                self.assertTrue(record.reason.endswith("byte_limit"))
+            persisted = []
+            for path in self.list_v1_files(tmp_dir):
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    rows = csv.DictReader(handle)
+                    persisted.extend(int(float(row["MainPress"])) for row in rows)
+            self.assertEqual(len(persisted), len(set(persisted)))
+            self.assertFalse(set(persisted) & failed)
+            self.assertEqual(set(persisted) | failed, set(admitted))
+            self.assertEqual(state["processing_failure_count"], len(failed))
+            service.start()
+            try:
+                self.assertEqual(service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 9999.0))["status"], "ACCEPTED")
+            finally:
+                self.assertFalse(service.stop(timeout_sec=10))
+            self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
+            last = []
+            for path in self.list_v1_files(tmp_dir):
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    last.extend(float(row["MainPress"]) for row in csv.DictReader(handle))
+            self.assertEqual(last.count(9999.0), 1)
+
     def test_csv_source_budget_includes_inflight_payloads(self) -> None:
         started, release = threading.Event(), threading.Event()
         original_open = Path.open
