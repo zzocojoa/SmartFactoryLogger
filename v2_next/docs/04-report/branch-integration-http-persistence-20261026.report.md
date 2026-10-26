@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `6daf4fdb` 전체 backend1,004시험·1skip 뒤 추가 제품 변경이 있다. 최신 `446fb62d` 관련293시험·1skip 및 기본 정적 검사11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `671865ab` 전체 backend1,009시험 중1,008통과·1skip, 기본 정적 검사11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -504,3 +504,37 @@ JSON 크기 계산을 `persistence_payload.py`로 옮겨 접수와 스풀에서 
 - `fact-output-budget/csv-preflight-verification.json`:258개 실제 CSV 자료의 문자/UTF-8 길이·문자 폭이 계산과 일치했다. ASCII·따옴표/한글/이모지·제어문자·넓은 문자열4조건의 실제 파일 쓰기와 tracemalloc 최고치가 예약량 이내였으며 내용 readback도 일치했다. 전체 RSS 또는 모든 경로의 예약 완료를 뜻하지 않는다.
 - 근거는 세 제품 파일의 SHA256과 Python3.12.6에 결합했다. `spot_observation_fact.py`=`628bcd09c50aee547e9f067c6b40405b341af9a3e3d8e13d02036da6e4a81abc`, `spot_observation_queue.py`=`30893d7e43bb9ccc00fcae4febb91883a524511fa9c1d471dbcd36974e61cb25`, `persistence_payload.py`=`3c253503666c6fce2714f20970fb9e3f7c1d98d7dba01fe9831d0b9a678e8d9a`.
 - 이번 제품 변경은 `877bf4f0`, `a7945a51`, `446fb62d`다. 이전 전체1,004시험은 이 세 변경 전 결과로 보존한다. 이번 결과를 최신 전체 backend/frontend/Electron/설치본/현장 통과로 확대하지 않는다. 전체7단계/17명세와 master 통합·최종 빌드는 계속 남아 있다.
+
+## 2026-10-27 완료 재점검에서 발견한 health 시험 경계
+
+사용자 요청으로 `e9d9a6f8`에서 전체 backend를 다시 실행했다. `branch-completion-audit-e9d9-full-backend`는1,007개 중1,005통과·1실패·기존 F01 1skip,318.965초,exit1이었다. `test_executor_backlog_is_separate_from_worker_execution`에서 기대50ms 이상에46.6227ms가 기록됐다. 단독 모듈9개는 통과했지만 전체 실패를 지우지 않고 보존했다.
+
+- 원인 재현: task 생성 직후부터60ms를 기다리던 fixture에 event-loop30ms 지연을 넣었다. 실제 제출부터의 대기는33.2525ms로 짧아져 예상한 assertion이 실패했다(`health-backlog-scheduling-red`,exit1).
+- 수정: 실제 단일 ThreadPoolExecutor의 submit 완료를 확인한 뒤60ms hold를 시작한다. 제품 health 계측과50ms assertion은 그대로다. 지연 사례를 유지한 `health-backlog-scheduling-green`의9시험 통과(0.516초,exit0), 해당 시험 Ruff exit0.
+- commit `ce607541`. 이는 시험의 시작 경계 수정이며 현장 성능 기준을 완화하거나 서버 응답 시간을 개선한 변경이 아니다. 원래 전체 실패와 이전 감사는 당시 결과로 유지한다.
+
+## HTTP 1단계 — fact 복구 읽기·해석·보존 자료의 owner 예산 합산
+
+복구 파일의 읽기 범위를 실제 남은 크기와1MiB 중 작은 값으로 고정한다. 읽은 bytes와 읽기/strip 사본·파일 버퍼를 먼저 예약하고, 각 행의 JSON 해석 공간과 보존할 문자열 공간도 owner의 기존 queue/inflight와 합산한다. 읽기 사본은 CSV 렌더링 전에 해제하며, 보존 문자열 예약은 참조를 놓은 뒤 반환한다. 기존20행/1MiB 제한과 실제 복구 성공 후에만 offset을 전진하는 동작을 유지한다. 공간 부족은 `spool_recovery_byte_limit`로 전달한다.
+
+- `test_spool_recovery_shares_owner_budget_and_preserves_source`: 실제20행 스풀과12MiB 이상의 큐 원본을 두었다. 기존 초기화 ready/기대failed의 RED(`fact-recovery-shared-budget-red`,exit1)를 확인했다. 수정 후 원본 bytes·offset0·아직 처리하지 않은 접수12건 보존, 임시 processing 예약0, 정상 drain 금지를 확인했다. 별도 충분한 공간의 owner에서는 같은20행과 후속 관측999가 실제 CSV에 정확히 저장됐다. 첫 owner의12건을 저장 완료로 집계하지 않는다.
+- `fact-recovery-shared-budget-green`:67시험 중66통과·F01 1skip,9.492초,exit0. backend Ruff·기본 mypy11파일 exit0. commit `5cb22f5b`.
+- JSON 파싱 오류는 위치/사유를 유지한 작은 오류로 연결하고 전체 decoded 문서를 예외에 붙잡아 두지 않는다. 이 작업은 일반 복구 payload 사본의 예약이며 모든 Python 객체/인덱스·프로세스 RSS 상한의 입증은 아니다.
+- 독립 복구 제어·최초 owner 가용성/접수 결과의 전체 계약, fact 구성/파일 검산 및 통합CSV/이미지 임시 사본은 계속 남은 범위다.
+
+## HTTP 1단계 — 과거 복구 값의 문자열 확장 예약
+
+과거 JSON 필드가 dict/list인 경우 CSV 문자열화 과정에서 따옴표가 추가될 수 있다. 일반 문자열의4배 입력 크기 예약 외에 같은 크기를 추가로 확보한 뒤 변환한다. 기존 자료를 다른 값으로 바꾸거나 임의로 삭제하지 않는다.
+
+- `test_recovery_reserves_expanded_container_text`: 실제 복구한 Unicode/따옴표 문자열의 보존 공간320,064bytes가 예약167,764bytes보다 큰 RED를 확인했다. 이후 실제 CSV 확인에서 fixture의 완료 시각 누락 때문에 관측 키가 비어 저장되지 않는 별도 실패가 났다. 그 실패를 확인하기 전에 `1b7b104d`를 커밋한 절차 오류도 기록한다. 이 중간 실행은 GREEN으로 집계하지 않는다.
+- 완료 시각과 `legacy:1` 키 확인을 fixture에 추가한 뒤 제품 소스를 `5cb22f5b`와 같게 되돌려 재현했다. `fact-recovery-container-budget-red-r2`는167,956/320,064bytes의 예상 assertion 실패(exit1)였다. 추가 예약을 복원한 최종 `fact-recovery-container-budget-green-r2`는68시험 중67통과·F01 1skip,9.812초,exit0이며 실제 CSV 값·잔여0까지 확인했다.
+- 최종 제품 Ruff·mypy11파일 exit0이며, 후속 fixture만 수정한 `671865ab`의 Ruff도 exit0이다. 원시 실패·수정 결과를 모두 보존한다. 이 작은 경계 검증을 전체17명세 완료로 집계하지 않는다.
+
+## 2026-10-27 복구 메모리·health 시험 보완 후 전체 회귀
+
+최종 코드 `671865ab6bcd2c34ee991ee90eae8f790d34728f`에서 격리 AppData/설정의 `python -m unittest discover -s backend/tests`를 실행했다. `fact-recovery-and-health-full-backend`는 **1,009개 중1,008통과·기존 F01자료 미제공1skip**,315.855초,exit0이다. 제품·시험 변경 없이 실행을 마쳤으며 이후에는 이 보고서와 CHANGELOG만 정리했다.
+
+- stdout150,036bytes SHA256 `9b4dd0e836229b4997f157561616c0a03273548e57367461a0f30b0e2bd69ec7`, stderr46,285bytes SHA256 `87a4aab7ce99f6f46767870c6d38c684c644b8f59a378fdee601f180fc9fce99`. 전체 로그 대조 `log-review.json`에 unittest FAIL/ERROR0을 확인했다.
+- manifest 초기화 traceback은 기존 `test_csv_image_startup.py:120`의 의도적 읽기 오류다. 이전 전체 검사 대비 추가된 `preserving primary error stages=shutdown_evidence_peers` 문구는 `test_image_shutdown_evidence.py`의 부분 시작 실패·동시 종료 시나리오 및 최종 영수증0/2 검사와 대조했다. 검사 실패로 숨기거나 운영 장애로 확대하지 않는다. 기존 Starlette/httpx 경고는 유지한다.
+- 최종 제품 파일 SHA256: `spot_observation_fact.py`=`4f35691e5e3b1d0eb0f90348dee1d4cee654512084d08c4461b2b37d2d133a43`. 시험 SHA256은 `health_timing`=`0c2d35c3a761d50cac186960542eccf174204f022fc194f431a86850343f84c1`, `spot_observation_fact`=`9b2642618318d2118484f4f1fc5c6eadd78c1b302c5fd0cd7458e24d0b3e0fba`, `temperature_fact_queue`=`27092d114d2c2e8325a1ce183077a2eb9c7b8aa60afc14dcd6dc001c16fb6e2d`다.
+- 변경 commit은 `ce607541`, `5cb22f5b`, `1b7b104d`, `671865ab`다. 첫 실패한 전체 검사와 잘못된 fixture의 중간 결과는 보존한다. 전체 HTTP7단계/17명세, 통합CSV/이미지·fact 구성/검산 예산, 영속 대조·복구 제어, 최종 설치본과 master 통합은 미완료다. 서버 적용은 하지 않았다.

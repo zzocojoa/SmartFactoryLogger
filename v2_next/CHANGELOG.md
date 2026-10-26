@@ -26,7 +26,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Reserve owner-backed fact CSV rendering and spool serialization workspace;
   preflight oversized spool rows before allocating their JSON copies. Share the
   JSON sizing logic between admission and spool writes.
-- Fact construction/recovery/readback workspace and corresponding integrated
+- Reserve bounded spool reads, JSON decoding and retained recovery fields with
+  other queued fact payloads. Preserve source bytes and offsets when reservation
+  fails; include expansion of legacy container values before normalization.
+- Start the health executor-backlog test's hold interval after actual submission,
+  including a delayed event-loop scheduling case; retain the 50 ms assertion.
+- Fact construction/readback workspace and corresponding integrated
   CSV/image reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
