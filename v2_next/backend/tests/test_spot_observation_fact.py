@@ -301,6 +301,30 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual([row["instrument_info"] for row in rows], [info] * 3)
             self.assertEqual(writer.spool_pending_count(), 0)
 
+    def test_oversized_spool_row_is_preserved_and_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            first = (json.dumps(self.current_fact_row(1)) + "\n").encode("utf-8")
+            large = (json.dumps(self.current_fact_row(2, instrument_info="x" * 1024**2))
+                     + "\n").encode("utf-8")
+            original = first + large
+            spool.write_bytes(original)
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            writer._flush_spool()
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "UNCERTAIN.*spool-row-too-large") as error:
+                    writer._flush_spool()
+                self.assertIn(str(spool), str(error.exception))
+                self.assertIn(f"offset={len(first)}", str(error.exception))
+                self.assertEqual(spool.read_bytes(), original)
+            with output.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1"])
+            self.assertEqual(writer.spool_pending_count(), 1)
+            self.assertEqual(writer.manifest_summary()["row_count"], 1)
+            self.assertEqual(list(Path(tmp).glob("*.schema-mismatch.*")), [])
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",

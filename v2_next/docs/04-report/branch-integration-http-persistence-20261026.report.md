@@ -323,3 +323,12 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_spool_recovery_read_budget_preserves_utf8_rows`: 한글 필드가 큰3건에서 첫 복구3행/기대2행의 RED(`fact-spool-bytes-red`, exit1)를 확인했다. 수정 후 첫2행·잔여1건과 다음1행의 원래 키/한글 내용을 대조했다. 실제 파일 읽기의 각 합계가1MiB 이하임도 확인했다.
 - `fact-spool-bytes-green`: fact/queue/종료 회귀90시험 중89통과·기존 private F01자료 미제공1skip,46.301초,exit0. backend Ruff·mypy10파일 exit0.
 - 이 단계는 읽기 bytes 경계다. 한 행 자체의 상한 초과 종결, 새 segment/전체 스풀 예산 및 임시 해석 사본 예약은 후속 필수 범위다.
+
+## HTTP 1단계 — 상한을 넘는 단일 fact 스풀 행
+
+한 행이1MiB를 넘으면 자동으로 건너뛰거나 자르지 않고 `UNCERTAIN spool-row-too-large`와
+원본 절대경로·바이트 위치를 오류로 보고한다. 앞서 확인한 행의 복구와 원본은 유지한다.
+
+- `test_oversized_spool_row_is_preserved_and_rejected`: 정상 앞 행 다음의 큰 행에서 오류가 없던 RED(`fact-spool-large-row-red`, exit1)를 확인했다. 수정 후 두 번의 같은 오류/위치, 원본 바이트 불변, CSV 앞1행·미복구1건을 대조했다.
+- `fact-spool-large-row-green`: fact/queue/종료 회귀91시험 중90통과·기존 private F01자료 미제공1skip,exit0. backend Ruff·mypy10파일 exit0.
+- 오류의 최종 상태/API 연결과 새 segment·원본 읽기 전용 정책 전체는 미완료다. 이 한 경계로 전체 복구를 통과 처리하지 않는다.

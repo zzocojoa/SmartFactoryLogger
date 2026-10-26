@@ -331,6 +331,10 @@ class SpotObservationFactWriter:
                         break
                     if (len(line) == remaining_bytes and not line.endswith(b"\n")
                             and handle.tell() < spool_path.stat().st_size):
+                        if remaining_bytes == FACT_SPOOL_RECOVERY_BYTE_LIMIT:
+                            raise ValueError(
+                                f"UNCERTAIN spool-row-too-large: {spool_path} offset={end_offset}"
+                            )
                         # Retry this whole row in the next bounded batch; a
                         # byte boundary may fall inside a UTF-8 character.
                         break
