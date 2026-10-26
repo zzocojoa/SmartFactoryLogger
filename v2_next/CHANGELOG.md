@@ -23,8 +23,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
   on budget failure. Shared decoded string references are counted once.
 - Count worker processing failures and disk failures separately; later successful
   writes or spool recovery do not erase their identities or failure history.
-  Writer output/spool copies and corresponding CSV/image reservations remain
-  unfinished.
+- Reserve owner-backed fact CSV rendering and spool serialization workspace;
+  preflight oversized spool rows before allocating their JSON copies. Share the
+  JSON sizing logic between admission and spool writes.
+- Fact construction/recovery/readback workspace and corresponding integrated
+  CSV/image reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify

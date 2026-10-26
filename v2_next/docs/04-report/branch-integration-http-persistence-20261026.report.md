@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `6daf4fdb` 전체 backend 1,004개 중1,003통과·기존 F01 1skip, 기본 정적 검사 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `6daf4fdb` 전체 backend1,004시험·1skip 뒤 추가 제품 변경이 있다. 최신 `446fb62d` 관련293시험·1skip 및 기본 정적 검사11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -495,3 +495,12 @@ JSON 크기 계산을 `persistence_payload.py`로 옮겨 접수와 스풀에서 
 - `test_spool_serialization_shares_owner_budget`: 실제 첫 append를 지연해 큐를 채운 뒤 해당 append에1회 오류를 주입했다. JSON escape로 커지는 유효 행에서 기존 스풀 실패0/기대1의 RED(`fact-spool-shared-budget-red`,exit1)를 확인했다. 수정 후 메모리 사유·스풀/메모리 잔량0·실패 ID의 저장 누락이 설명됨·이후 작은 ID의 실제 저장 및 중복 없음이 일치했다. 이 합성 한도 시험은 운영 데이터 손실 발생의 근거가 아니다.
 - `fact-spool-shared-budget-green-r2`: 파일 버퍼 예약까지 포함한 최종 상태의 fact/queue66시험 중65통과·기존 private F01자료 미제공1skip,9.268초,exit0. backend Ruff·기본 mypy11파일 exit0.
 - 전체 복구 읽기·fact 구성·파일 검산 임시 공간, 통합 CSV/이미지 및 영속 추적/압력 제어와17개 전체 시나리오는 계속 남아 있다. 다음 관련 회귀 범위 검증을 수행한다.
+
+## 2026-10-27 fact 출력·스풀 예약 후 관련 회귀
+
+제품 commit `446fb62d76afc852cf013de58b6d925aba59efd0`에서 fact/queue/정상 종료/SPOT API/온도 시계5모듈을 실행했다. `fact-output-shared-budget-regression`은 **293시험 중292통과·기존 private F01자료 미제공1skip**,80.319초,exit0이다. backend Ruff 및 기본 mypy11파일도 최종 제품 상태에서 exit0이다.
+
+- stdout17,106bytes SHA256 `07fdddf1ec43139e68cedc8a1c52549be46410bddaa78271aec449408a0856f8`, stderr10,500bytes SHA256 `055fb71f1d6f3e5c9659139b88b3d1dd7ff144d58c8234e47ed1ea7bfa25c23a`. `log-review.json`에서 unittest FAIL/ERROR·Traceback0, 기존 전체 검사 대비 새로운 정규화 오류 문구0을 확인했다.
+- `fact-output-budget/csv-preflight-verification.json`:258개 실제 CSV 자료의 문자/UTF-8 길이·문자 폭이 계산과 일치했다. ASCII·따옴표/한글/이모지·제어문자·넓은 문자열4조건의 실제 파일 쓰기와 tracemalloc 최고치가 예약량 이내였으며 내용 readback도 일치했다. 전체 RSS 또는 모든 경로의 예약 완료를 뜻하지 않는다.
+- 근거는 세 제품 파일의 SHA256과 Python3.12.6에 결합했다. `spot_observation_fact.py`=`628bcd09c50aee547e9f067c6b40405b341af9a3e3d8e13d02036da6e4a81abc`, `spot_observation_queue.py`=`30893d7e43bb9ccc00fcae4febb91883a524511fa9c1d471dbcd36974e61cb25`, `persistence_payload.py`=`3c253503666c6fce2714f20970fb9e3f7c1d98d7dba01fe9831d0b9a678e8d9a`.
+- 이번 제품 변경은 `877bf4f0`, `a7945a51`, `446fb62d`다. 이전 전체1,004시험은 이 세 변경 전 결과로 보존한다. 이번 결과를 최신 전체 backend/frontend/Electron/설치본/현장 통과로 확대하지 않는다. 전체7단계/17명세와 master 통합·최종 빌드는 계속 남아 있다.
