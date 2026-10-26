@@ -536,6 +536,36 @@ class FactQueueTests(unittest.TestCase):
             ])
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["2", "3"])
 
+    def test_csv_output_budget_failure_preserves_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            owner = SpotObservationQueue(lambda: SpotObservationFactWriter(path))
+            try:
+                large = observation(1)
+                large["instrument_info"] = "x" * (5 * 1024**2)
+                self.assertTrue(owner.enqueue(large))
+                owner._queue.join()
+                state = owner.snapshot()
+                self.assertEqual(state["write_failure_count"], 1)
+                self.assertEqual(state["last_error_code"], "csv_output_byte_limit")
+                self.assertEqual(state["last_failed_observation_key"], "synthetic-A:1")
+                self.assertEqual(state["pending_payload_bytes"], 0)
+                self.assertEqual(state["processing_payload_bytes"], 0)
+                self.assertEqual(state["spool_pending_count"], 0)
+                self.assertEqual(state["rejected_count"], 0)
+                self.assertTrue(owner.enqueue(observation(2)))
+                self.assertFalse(owner.close(10))
+                state = owner.snapshot()
+                self.assertEqual(state["accepted_count"], 2)
+                self.assertEqual(state["completed_count"], 2)
+                self.assertEqual(state["write_failure_count"], 1)
+                self.assertEqual(state["pending_payload_bytes"], 0)
+                self.assertFalse(state["writes_drained"])
+            finally:
+                owner.close(10)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["2"])
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, field
+import io
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, Callable, ContextManager, NoReturn, Optional
 from uuid import uuid4
 
 from backend.FacilityData.spot_low_signal import (
@@ -40,6 +42,48 @@ FACT_SPOOL_RECOVERY_ROW_LIMIT = 20
 FACT_SPOOL_RECOVERY_BYTE_LIMIT = 1024**2
 FACT_SPOOL_PENDING_BYTE_LIMIT = 64 * 1024**2
 FACT_SPOOL_SEGMENT_BYTE_LIMIT = 4 * 1024**2
+
+
+class FactPayloadBudgetExceeded(RuntimeError):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _csv_record_sizes(values: Iterable[str]) -> tuple[int, int, int]:
+    """Preflight the fixed excel dialect without allocating a rendered record."""
+    characters = encoded = 2  # CRLF
+    highest = 0
+    for index, value in enumerate(values):
+        characters += int(index > 0)
+        encoded += int(index > 0)
+        extra = value.count('"') + (2 if any(char in value for char in ',"\r\n') else 0)
+        characters += len(value) + extra
+        if value.isascii():
+            encoded += len(value) + extra
+        else:
+            highest = max(highest, ord(max(value)))
+            encoded += extra
+            for char in value:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise ValueError("Unpaired surrogate in fact CSV output")
+                encoded += 1 + (code > 0x7F) + (code > 0x7FF) + (code > 0xFFFF)
+    width = 4 if highest > 0xFFFF else 2 if highest > 0xFF else 1
+    return characters, encoded, width
+
+
+def _csv_output_reservation(fact: Mapping[str, str]) -> int:
+    row = _csv_record_sizes(fact.get(column, "") for column in SPOT_OBSERVATION_FACT_COLUMNS)
+    header = _csv_record_sizes(SPOT_OBSERVATION_FACT_COLUMNS)
+    # CPython 3.12 _csv.c grows a UCS4 record in 32768-character blocks.
+    # Cover the old/new buffer during growth, the final Unicode record and
+    # UTF-8 encoding/BOM copies. Header bytes may still be buffered by the file.
+    record_buffer = max((characters // 32768 + 1) * 32768 * 4
+                        for characters, _, _ in (row, header))
+    text_and_encoded = max(characters * width + 2 * encoded
+                           for characters, encoded, width in (row, header))
+    return 2 * record_buffer + text_and_encoded + header[1] + 3 + io.DEFAULT_BUFFER_SIZE
 FACT_SPOOL_STORAGE_VERSION = 1
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
@@ -179,6 +223,7 @@ class SpotObservationFactWriter:
     spool_last_error_code: Optional[str] = None
     existing_fact_hash_ms: float = 0.0
     existing_fact_index_ms: float = 0.0
+    payload_reservation: Callable[[int, str], ContextManager[None]] | None = field(default=None, repr=False)
     _seen_keys: set[str] = field(default_factory=set)
     _seen_poll_sequences: set[int] = field(default_factory=set, init=False, repr=False)
     _polls_by_service: dict[str, set[int]] = field(default_factory=dict, init=False, repr=False)
@@ -270,22 +315,34 @@ class SpotObservationFactWriter:
                 return None
             self._append_fact(fact)
             return fact
+        except FactPayloadBudgetExceeded:
+            # No disk write was attempted by the refused allocation. The owner
+            # records terminal failure under the admitted observation identity.
+            raise
         except Exception:
             self.failure_count += 1
             self._spool_fact(fact)
             return None
 
     def _append_fact(self, fact: Mapping[str, str]) -> None:
-        with _SPOT_OBSERVATION_FACT_FILE_LOCK:
-            write_header = self._prepare_output_file_for_append()
-            previous_size = self._output_size()
-            with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
-                if write_header:
-                    writer.writeheader()
-                writer.writerow(fact)
-            self._extend_manifest_digest(previous_size)
-            self._record_manifest_row(fact)
+        reservation = (self.payload_reservation(_csv_output_reservation(fact), "csv_output_byte_limit")
+                       if self.payload_reservation is not None else nullcontext())
+        with reservation:
+            with _SPOT_OBSERVATION_FACT_FILE_LOCK:
+                write_header = self._prepare_output_file_for_append()
+                previous_size = self._output_size()
+                with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
+                    try:
+                        if write_header:
+                            writer.writeheader()
+                        writer.writerow(fact)
+                    finally:
+                        # The C record buffer survives writerow until the
+                        # writer is released; keep its reservation until then.
+                        del writer
+                self._extend_manifest_digest(previous_size)
+                self._record_manifest_row(fact)
 
     def _prepare_output_file_for_append(self) -> bool:
         if not self.output_path.exists() or self.output_path.stat().st_size == 0:

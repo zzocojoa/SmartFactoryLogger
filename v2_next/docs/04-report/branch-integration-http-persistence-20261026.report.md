@@ -470,3 +470,12 @@ worker 처리 실패와 실제 writer 실패를 별도 누적한 뒤 합산한�
 - backend Ruff·기본 mypy10파일은 이번 제품 변경에서 exit0이다. 이후에는 보고서/CHANGELOG만 편집했다. frontend/Electron/설치본/현장 검사를 새로 수행했다는 뜻은 아니다.
 - 독립 대조 `fact-decode-accounting/decoded-payload-verification.json`은261자료의 해석 문자열 내용 크기·접수 시 상한·공유 JSON key의 중복 청구 방지를 확인했다. 현재 queue SHA256 `06e775f16e442d8f6e502d1c83209898fa4ff37df6d75096af5a024272178812`에 결합됐다. R1 검증 스크립트의 getsizeof 기준 문자열에는 선택적 UTF-8 cache까지 포함돼 비교가 실패했으며, 원문/로그를 보존하고 R2에서는 독립 고정폭 인코더로 문자 내용만 대조했다. 제품 코드의 변경은 없었다. 이 검사는 선택적 cache·객체 overhead·전체 RSS 보장이 아니다.
 - 이번 제품 변경은 `ab0da354`, `6daf4fdb`다. writer/스풀 및 CSV/이미지 임시 메모리, 영속 추적·부분 쓰기 복구·압력 제어·전체7단계/17명세·최종 설치본과 master 통합은 계속 미완료다. 운영 서버에는 적용하지 않았다.
+
+## HTTP 1단계 — owner의 fact CSV 출력 사본 선예약
+
+owner가 writer에 합산 예산 예약 경로를 연결한다. 실제 행을 렌더링하기 전에 열의 길이·CSV quoting·UTF-8 길이·문자 폭을 계산하고, CSV 내부 레코드 버퍼/성장 사본·최종 문자열·인코딩/파일 버퍼 공간을 예약한다. writer와 파일을 놓은 뒤 예약을 반환한다. 부족하면 `csv_output_byte_limit`와 원래 접수 ID의 실패로 종결하고 무제한 스풀 할당으로 우회하지 않는다.
+
+- 버퍼 계산 근거는 [CPython3.12.6 _csv.c](https://raw.githubusercontent.com/python/cpython/v3.12.6/Modules/_csv.c)의 UCS4 레코드·32768문자 증가 단위와 출력 문자열 생성이다. 실제 사용 중 Python3.12의 보수적 작업 공간 계산이며 프로세스 RSS 상한이 아니다. 원본 문자열 참조는 다시 청구하지 않는다.
+- `test_csv_output_budget_failure_preserves_identity`:5MiB 실제 출력 필드를 보냈을 때 기존 실패0/기대1의 RED(`fact-csv-output-budget-red`,exit1)를 확인했다. 수정 후 첫 ID/사유·스풀 우회 없음·예약 반환·다음 작은 ID의 실제 CSV 저장·과거 실패 유지가 일치했다.
+- `fact-csv-output-budget-green`: queue/fact64시험 중63통과·기존 private F01자료 미제공1skip,8.186초,exit0. backend Ruff·기본 mypy10파일 exit0.
+- 이 경계는 owner를 통한 fact CSV 렌더링이다. fact 구성·스풀 직렬화/복구·파일 읽기 임시 공간 및 통합 CSV/이미지 경로의 전체 예약은 계속 남아 있다. 앞선1,004시험 전체 결과는 이번 제품 변경을 포함하지 않는다.

@@ -6,15 +6,18 @@ a promise of lossless operation through an unbounded storage outage.
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import logging
 import queue
 import threading
 import time
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Iterator, Literal, Mapping
 
-from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter, build_spot_observation_key
+from backend.FacilityData.spot_observation_fact import (
+    FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
+)
 
 
 FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
@@ -276,6 +279,20 @@ class SpotObservationQueue:
             "observation_key": observation_key, "reason": code,
         })
 
+    @contextmanager
+    def _reserve_writer_payload(self, size: int, reason: str) -> Iterator[None]:
+        with self._lock:
+            if self._state["pending_payload_bytes"] + size > FACT_PENDING_PAYLOAD_BYTE_LIMIT:
+                raise FactPayloadBudgetExceeded(reason)
+            self._state["pending_payload_bytes"] += size
+            self._state["processing_payload_bytes"] += size
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._state["pending_payload_bytes"] -= size
+                self._state["processing_payload_bytes"] -= size
+
     def manifest_summary(self, *, realtime_rows=None) -> dict[str, Any]:
         before = self.snapshot()
         if not before["writes_drained"]:
@@ -333,6 +350,7 @@ class SpotObservationQueue:
         try:
             writer = self._factory()
             self._writer = writer
+            writer.payload_reservation = self._reserve_writer_payload
             if not writer.ensure_initialized():
                 raise RuntimeError("fact_header_initialization_failed")
             writer._flush_spool()
@@ -385,6 +403,8 @@ class SpotObservationQueue:
                         self._state["last_success_at"] = time.time()
             except _PayloadBudgetExceeded:
                 self._record_failure("decode_byte_limit", event.observation_key, worker_failure=True)
+            except FactPayloadBudgetExceeded as exc:
+                self._record_failure(exc.reason, event.observation_key, worker_failure=True)
             except Exception:
                 self._record_failure("writer_state_unavailable", event.observation_key, worker_failure=True)
             finally:
