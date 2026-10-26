@@ -224,6 +224,7 @@ class SpotObservationFactWriter:
     )
     _spool_read_offsets: dict[Path, int] = field(default_factory=dict, init=False, repr=False)
     _active_spool_segment: Path | None = field(default=None, init=False, repr=False)
+    _uncertain_spool_path: Path | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.load_existing_keys:
@@ -320,6 +321,8 @@ class SpotObservationFactWriter:
 
     def _flush_spool(self) -> None:
         with self._spool_state_lock:
+            if self._uncertain_spool_path is not None:
+                raise ValueError(f"UNCERTAIN spool write requires manual recovery: {self._uncertain_spool_path}")
             spool_path = next((path for path in self._spool_recoverable_paths()
                                if path.exists() and path.stat().st_size > self._spool_read_offsets.get(path, 0)), None)
             if spool_path is None:
@@ -410,8 +413,13 @@ class SpotObservationFactWriter:
         raise error
 
     def _spool_fact(self, fact: Mapping[str, str]) -> None:
+        writing_path: Path | None = None
         try:
             with self._spool_state_lock:
+                if self._uncertain_spool_path is not None:
+                    self.spool_failure_count += 1
+                    self.spool_last_error_code = "spool_write_uncertain"
+                    return
                 payload = (json.dumps(dict(fact), sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
                 pending_bytes = sum(
                     max(0, path.stat().st_size - self._spool_read_offsets.get(path, 0))
@@ -423,13 +431,20 @@ class SpotObservationFactWriter:
                     return
                 spool_path, mode = self._spool_append_target(len(payload))
                 with spool_path.open(mode) as handle:
+                    writing_path = spool_path
                     handle.write(payload)
                 self._active_spool_segment = spool_path
                 if self._spool_pending_count_cache is not None:
                     self._spool_pending_count_cache += 1
         except Exception:
-            self.spool_failure_count += 1
-            self.spool_last_error_code = "spool_write_failed"
+            with self._spool_state_lock:
+                self.spool_failure_count += 1
+                if writing_path is not None:
+                    self._uncertain_spool_path = writing_path
+                    self._spool_pending_count_cache = None
+                    self.spool_last_error_code = "spool_write_uncertain"
+                else:
+                    self.spool_last_error_code = "spool_write_failed"
 
     def _effective_spool_path(self) -> Path:
         if self.spool_path is not None:

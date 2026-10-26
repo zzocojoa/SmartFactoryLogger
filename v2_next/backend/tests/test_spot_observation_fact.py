@@ -431,6 +431,46 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual(restarted.manifest_summary()["row_count"], 13)
             self.assertEqual(spool.read_bytes(), legacy)
 
+    def test_spool_close_failure_blocks_later_segments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            directory = spool.with_name(spool.name + ".segments-v1")
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            self.assertEqual(writer.spool_pending_count(), 0)
+            original_open = Path.open
+
+            class FailedClose:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    return self.handle
+
+                def __exit__(self, *args):
+                    self.handle.close()
+                    raise OSError("injected close failure after actual spool write")
+
+            def failing_open(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                return FailedClose(handle) if path.parent == directory and mode == "xb" else handle
+
+            with patch.object(Path, "open", failing_open):
+                writer._spool_fact(self.current_fact_row(1))
+            first = list(directory.glob("*.jsonl"))
+            self.assertEqual(len(first), 1)
+            original = first[0].read_bytes()
+            self.assertEqual(json.loads(original)["spot_observation_key"], "svc-1:1")
+            writer._spool_fact(self.current_fact_row(2))
+            self.assertEqual(len(list(directory.glob("*.jsonl"))), 1)
+            self.assertEqual(first[0].read_bytes(), original)
+            self.assertEqual(writer.spool_failure_count, 2)
+            self.assertEqual(writer.spool_last_error_code, "spool_write_uncertain")
+            with self.assertRaisesRegex(ValueError, "UNCERTAIN.*spool"):
+                writer._flush_spool()
+            self.assertFalse(output.exists())
+            self.assertEqual(writer.spool_pending_count(), 1)
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",

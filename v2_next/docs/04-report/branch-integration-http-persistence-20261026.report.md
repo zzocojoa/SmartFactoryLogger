@@ -374,7 +374,15 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 잘못된 기존 스풀도 자동 이동하지 않고 원래 경로/위치의 UNCERTAIN 오류로 남긴다.
 새 segment만 해당 데이터 복구 후 정리하며 기존20행/1MiB 읽기와64MiB 미복구 상한을 유지한다.
 
-- `test_segmented_spool_rotates_and_preserves_legacy_source`: 기존2,331bytes가4,350,331bytes로 늘어나는 RED(`fact-spool-segments-red`, exit1)를 확인했다. 수정 후 새2파일 각각4MiB 이하·원본 불변·전체13키/JPEG 아닌 실제 fact CSV 내용·재시작 중복 없음·미복구0을 확인했다.
+- `test_segmented_spool_rotates_and_preserves_legacy_source`: 기존2,331bytes가4,350,331bytes로 늘어나는 RED(`fact-spool-segments-red`, exit1)를 확인했다. 수정 후 새2파일 각각4MiB 이하·원본 불변·13개 관측 키와 실제 fact CSV 내용·재시작 중복 없음·미복구0을 확인했다.
 - 기존 파일 삭제/오류 파일 이동을 기대하던 fixture를 승인된 읽기 전용 원본 정책으로 변경했다. 기존 성공 데이터·미복구 건수·실패 판정 assertions를 유지하고, 디스크 실패 주입도 실제 새 segment 쓰기 경로에 적용했다.
 - `fact-spool-segments-green`: fact/queue/종료 회귀/SPOT API273시험 중272통과·기존 private F01자료 미제공1skip,77.204초,exit0. backend Ruff·mypy10파일 exit0.
 - 새 segment의 부분 쓰기/닫기 불확실성, 임시 사본 선예약·독립 복구 예약과 나머지17명세 전체는 계속 남은 범위다. 이전994시험 전체 결과를 이 제품 변경 이후의 전체 검사로 재사용하지 않는다.
+
+## HTTP 1단계 — 새 fact 스풀 닫기 실패의 불확실성 유지
+
+실제 bytes를 쓴 뒤 close가 실패하면 해당 writer를 미확정 상태로 유지한다. 추가 segment를 만들거나 자동 복구하지 않고 원본과 오류 경로를 보존한다. 이전 pending 건수 cache도 무효화해 실제 남은 행을 다시 확인한다.
+
+- `test_spool_close_failure_blocks_later_segments`: 실제 파일 쓰기 후 close 오류를 주입했다. 기존 동작은 다음 접수에서 새 파일을 만들어 2파일/기대1파일로 RED(`fact-spool-close-red`, exit1)였다. 수정 후 원본 불변·추가 쓰기 거절·UNCERTAIN 복구 오류·실제 pending1을 확인했다.
+- `fact-spool-close-green`: fact/queue/종료 회귀95개 중94통과·기존 private F01자료 미제공1skip,46.405초,exit0. 현재 작업 폴더의 `branch-audit-current-ruff`와 `branch-audit-current-mypy`는 각각 exit0이며 기본 mypy 범위는10파일이다.
+- 동일 writer의 close 실패 처리 범위다. 짧은 쓰기 반환값, 읽기 실패의 독립 집계, 행 크기 계약 및 전체17명세는 계속 남아 있다. 강제 종료 복구용 영속 저널을 추가한 것은 아니다.
