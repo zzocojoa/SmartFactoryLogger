@@ -310,11 +310,32 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
 
 
 @dataclass(frozen=True)
+class CSVWriteConfig:
+    generation: int
+    log_dir: Path
+    fallback_log_dir: Path
+    auto_save: bool
+    v1_enabled: bool
+    v2_enabled: bool
+    sidecar_enabled: bool
+    v1_header: tuple[str, ...]
+    v2_contract: V2CsvContract
+
+    @property
+    def required_sinks(self) -> tuple[str, ...]:
+        if not self.auto_save:
+            return ()
+        return tuple(name for name, enabled in (("csv_v1", self.v1_enabled), ("csv_v2", self.v2_enabled))
+                     if enabled)
+
+
+@dataclass(frozen=True)
 class CSVEventEnvelope:
     producer_instance_id: str
     producer_seq: int
     payload: bytes
     source_payload_hash: str
+    write_config: CSVWriteConfig
 
 
 class CSVLoggerService:
@@ -325,6 +346,7 @@ class CSVLoggerService:
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
+        self._writer_context = threading.local()
         # CSV data logs path (User configured)
         self.active_log_dir = Path(config.LOG_PATH)
         self.fallback_log_dir = config.APP_DATA_DIR / "logs" / "data"
@@ -476,15 +498,18 @@ class CSVLoggerService:
                              sort_keys=True, separators=(",", ":")).encode("utf-8")
         payload_bytes = self._estimate_factory_data_bytes(data)
         now = time.time()
-        with self._lifecycle_lock:
+        with self._lifecycle_lock, self._config_lock:
             self._producer_seq += 1
+            write_config = self._capture_write_config_locked()
             envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
-                                        payload, hashlib.sha256(payload).hexdigest())
+                                        payload, hashlib.sha256(payload).hexdigest(), write_config)
             result: dict[str, Any] = {
                 "status": "ACCEPTED", "reason": None,
                 "producer_instance_id": envelope.producer_instance_id,
                 "producer_seq": envelope.producer_seq,
                 "source_payload_hash": envelope.source_payload_hash,
+                "config_generation": write_config.generation,
+                "required_sinks": write_config.required_sinks,
             }
             if not self.running:
                 return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
@@ -507,6 +532,22 @@ class CSVLoggerService:
     def enqueue(self, data: FactoryData) -> None:
         """Compatibility entry point; production callers can inspect the receipt."""
         self.enqueue_detailed(data)
+
+    def _capture_write_config_locked(self) -> CSVWriteConfig:
+        return CSVWriteConfig(
+            generation=self._config_version, log_dir=self.active_log_dir.absolute(),
+            fallback_log_dir=self.fallback_log_dir.absolute(), auto_save=self.auto_save,
+            v1_enabled=self.csv_v1_enabled, v2_enabled=self.csv_v2_enabled,
+            sidecar_enabled=self.csv_v2_sidecar_enabled, v1_header=tuple(self.csv_header),
+            v2_contract=self._resolve_v2_contract(),
+        )
+
+    def _write_settings(self) -> CSVWriteConfig:
+        settings = getattr(self._writer_context, "settings", None)
+        if settings is not None:
+            return settings
+        with self._config_lock:
+            return self._capture_write_config_locked()
 
     def _estimate_factory_data_bytes(self, data: FactoryData) -> int:
         try:
@@ -637,6 +678,11 @@ class CSVLoggerService:
             return False
 
     def _get_log_dir(self) -> Path:
+        admitted = getattr(self._writer_context, "settings", None)
+        if admitted is not None:
+            # An admitted generation cannot silently change its destination.
+            self._ensure_dir(admitted.log_dir)
+            return admitted.log_dir
         with self._config_lock:
             active_dir = self.active_log_dir
             fallback_dir = self.fallback_log_dir
@@ -659,7 +705,8 @@ class CSVLoggerService:
         return active_dir
 
     def _open_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[object], Optional[csv.writer]]:
-        if not self.auto_save or not self.csv_v1_enabled:
+        settings = self._write_settings()
+        if not settings.auto_save or not settings.v1_enabled:
             return None, None
         return self._open_v1_log_file_unchecked(timestamp_str, prefix)
 
@@ -668,7 +715,7 @@ class CSVLoggerService:
         timestamp_str: str,
         prefix: str,
     ) -> Tuple[Optional[object], Optional[csv.writer]]:
-        if not self.auto_save:
+        if not self._write_settings().auto_save:
             return None, None
         return self._open_v1_log_file_unchecked(timestamp_str, prefix)
 
@@ -678,31 +725,33 @@ class CSVLoggerService:
         prefix: str,
     ) -> Tuple[Optional[object], Optional[csv.writer]]:
         filename = f"{prefix}_{timestamp_str}.csv"
+        settings = self._write_settings()
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
         handle = None
         try:
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
             writer = csv.writer(handle)
-            if handle.tell() == 0 and self.csv_header:
-                writer.writerow(self.csv_header)
+            if handle.tell() == 0 and settings.v1_header:
+                writer.writerow(settings.v1_header)
                 handle.flush()
             self.logger.info("CSV log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
             self._close_file(handle)
             self.logger.error("Failed to open CSV log file: %s", exc)
-            if log_dir != self.fallback_log_dir:
-                fallback_path = self.fallback_log_dir / filename
+            if (getattr(self._writer_context, "settings", None) is None
+                    and log_dir != settings.fallback_log_dir):
+                fallback_path = settings.fallback_log_dir / filename
                 try:
-                    self._ensure_dir(self.fallback_log_dir)
+                    self._ensure_dir(settings.fallback_log_dir)
                     handle = fallback_path.open("a", newline="", encoding="utf-8-sig")
                     writer = csv.writer(handle)
-                    if handle.tell() == 0 and self.csv_header:
-                        writer.writerow(self.csv_header)
+                    if handle.tell() == 0 and settings.v1_header:
+                        writer.writerow(settings.v1_header)
                         handle.flush()
                     self.logger.warning("CSV log fallback path used: %s", fallback_path)
-                    self.active_log_dir = self.fallback_log_dir
+                    self.active_log_dir = settings.fallback_log_dir
                     return handle, writer
                 except Exception as exc2:
                     self.logger.error("Failed to open CSV log file (fallback): %s", exc2)
@@ -729,6 +778,9 @@ class CSVLoggerService:
         )
 
     def _get_active_v2_contract(self) -> V2CsvContract:
+        admitted = getattr(self._writer_context, "settings", None)
+        if admitted is not None:
+            return admitted.v2_contract
         if self._active_v2_contract is None:
             self._active_v2_contract = self._resolve_v2_contract()
         return self._active_v2_contract
@@ -752,7 +804,8 @@ class CSVLoggerService:
         return candidate
 
     def _open_v2_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[object], Optional[csv.writer]]:
-        if not self.auto_save or not self.csv_v2_enabled:
+        settings = self._write_settings()
+        if not settings.auto_save or not settings.v2_enabled:
             return None, None
         contract = self._get_active_v2_contract()
         filename = f"{prefix}_{timestamp_str}.csv"
@@ -1216,7 +1269,8 @@ class CSVLoggerService:
         return resolve_runtime_git_commit()
 
     def _write_v2_sidecar(self, csv_path: Path, contract: Optional[V2CsvContract] = None) -> None:
-        if not self.csv_v2_sidecar_enabled:
+        settings = self._write_settings()
+        if not settings.sidecar_enabled:
             return
         active_contract = contract or self._get_active_v2_contract()
         sidecar_path = csv_path.with_suffix(".metadata.json")
@@ -1262,7 +1316,7 @@ class CSVLoggerService:
                 "git_commit": validate_git_commit(runtime_git_commit),
                 "runtime_info": get_runtime_info(),
                 "v1_compatibility": True,
-                "v1_csv_enabled": self.csv_v1_enabled,
+                "v1_csv_enabled": settings.v1_enabled,
                 "v1_columns": V1_CSV_COLUMNS,
                 "v2_columns": list(active_contract.columns),
                 "header_policy": (
@@ -2656,7 +2710,7 @@ class CSVLoggerService:
                     "SPOT observation writes drained after the initial shutdown "
                     "deadline; finalizing the manifest."
                 )
-        if csv_path is not None and self.csv_v2_sidecar_enabled:
+        if csv_path is not None and self._write_settings().sidecar_enabled:
             from backend.FacilityData.drivers import spot_api
 
             defer_closeout = (
@@ -2809,19 +2863,27 @@ class CSVLoggerService:
         v2_writer = None
         current_config_version = -1
         current_file_date: Optional[date] = None
-        deferred_item: Optional[FactoryData] = None
+        deferred_item: Optional[CSVEventEnvelope] = None
+        settings = self._write_settings()
+        self._writer_context.settings = settings
+        auto_save, csv_v1_enabled, csv_v2_enabled = settings.auto_save, settings.v1_enabled, settings.v2_enabled
 
         while True:
             try:
                 item: Optional[FactoryData] = None
-                with self._config_lock:
-                    auto_save = self.auto_save
-                    csv_v1_enabled = self.csv_v1_enabled
-                    csv_v2_enabled = self.csv_v2_enabled
-                    config_version = self._config_version
+                envelope: Optional[CSVEventEnvelope] = None
+                if deferred_item is not None:
+                    envelope, deferred_item = deferred_item, None
+                else:
+                    try:
+                        envelope = self.queue.get(timeout=0.2)
+                    except queue.Empty:
+                        pass
 
-                if config_version != current_config_version:
-                    current_config_version = config_version
+                if envelope is not None and envelope.write_config.generation != current_config_version:
+                    # Finish the old generation with its admitted settings,
+                    # before adopting a later event's output contract.
+                    switch_ready = True
                     if buffer:
                         if auto_save and (f_handle is None or writer is None):
                             f_handle, writer = self._open_v1_log_file_for_drain(
@@ -2831,10 +2893,8 @@ class CSVLoggerService:
                         if auto_save and self._flush_buffer(writer, f_handle, buffer):
                             buffer.clear()
                             self._buffer_size = 0
-                        elif not auto_save:
-                            buffer.clear()
-                            self._buffer_size = 0
                         else:
+                            switch_ready = False
                             self.logger.warning("CSV v1 buffer retained during config change.")
                     if v2_buffer:
                         if auto_save and csv_v2_enabled and (v2_handle is None or v2_writer is None):
@@ -2845,11 +2905,14 @@ class CSVLoggerService:
                         if csv_v2_enabled and self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
                             v2_buffer.clear()
                         else:
-                            self._runtime_write_failure_observed = True
-                            self.logger.warning(
-                                "CSV v2 buffer dropped during config change; clean shutdown will be rejected."
-                            )
-                            v2_buffer.clear()
+                            switch_ready = False
+                            self.logger.warning("CSV v2 buffer retained during config change.")
+                    if not switch_ready:
+                        deferred_item = envelope
+                        if not self.running:
+                            break
+                        time.sleep(0.2)
+                        continue
                     self._close_file(f_handle)
                     self._close_v2_file(
                         v2_handle,
@@ -2860,16 +2923,14 @@ class CSVLoggerService:
                     v2_handle = None
                     v2_writer = None
                     current_file_date = None
+                    settings = envelope.write_config
+                    self._writer_context.settings = settings
+                    current_config_version = settings.generation
+                    auto_save = settings.auto_save
+                    csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
 
-                if deferred_item is not None:
-                    item = deferred_item
-                    deferred_item = None
-                else:
-                    try:
-                        envelope = self.queue.get(timeout=0.2)
-                        item = FactoryData.model_validate_json(envelope.payload) if envelope is not None else None
-                    except queue.Empty:
-                        item = None
+                if envelope is not None:
+                    item = FactoryData.model_validate_json(envelope.payload)
 
                 if item is None:
                     if not self.running:
@@ -2927,10 +2988,10 @@ class CSVLoggerService:
                             current_file_date = None
                         else:
                             if not self.running:
-                                deferred_item = item
+                                deferred_item = envelope
                                 self._buffer_size = len(buffer)
                                 break
-                            deferred_item = item
+                            deferred_item = envelope
                             self._buffer_size = len(buffer)
                             time.sleep(0.2)
                             continue
@@ -3004,7 +3065,7 @@ class CSVLoggerService:
                     except Exception:
                         item_file_date = current_file_date
                     if item_file_date != current_file_date and deferred_item is None:
-                        deferred_item = item
+                        deferred_item = envelope
                         self.logger.warning(
                             "CSV daily rollover delayed because flush raised an exception. "
                             "Current row deferred to preserve daily file boundary."
@@ -3028,7 +3089,7 @@ class CSVLoggerService:
         shutdown_flush_succeeded = not self._runtime_write_failure_observed
         if buffer:
             try:
-                if self.auto_save and (f_handle is None or writer is None):
+                if auto_save and (f_handle is None or writer is None):
                     f_handle, writer = self._open_v1_log_file_for_drain(
                         self._filename_timestamp(buffer[0][1]),
                         prefix=file_prefix,
@@ -3043,7 +3104,7 @@ class CSVLoggerService:
                 self.logger.warning("CSV v1 final flush failed: %s", exc)
         if v2_buffer:
             try:
-                if self.csv_v2_enabled and (v2_handle is None or v2_writer is None):
+                if csv_v2_enabled and (v2_handle is None or v2_writer is None):
                     v2_handle, v2_writer = self._open_v2_log_file(
                         self._filename_timestamp(v2_buffer[0][1]),
                         prefix=v2_file_prefix,
@@ -3062,7 +3123,7 @@ class CSVLoggerService:
                 self.logger.warning(
                     "CSV deferred shutdown row was not written because previous-day final flush failed."
                 )
-            elif self.auto_save:
+            elif deferred_item.write_config.auto_save:
                 self._close_file(f_handle)
                 if not self._close_v2_file(
                     v2_handle,
@@ -3073,9 +3134,13 @@ class CSVLoggerService:
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 try:
-                    timestamp = self._parse_timestamp(deferred_item)
-                    row = self._build_row(deferred_item, timestamp)
-                    if self.csv_v1_enabled:
+                    settings = deferred_item.write_config
+                    self._writer_context.settings = settings
+                    csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
+                    deferred_data = FactoryData.model_validate_json(deferred_item.payload)
+                    timestamp = self._parse_timestamp(deferred_data)
+                    row = self._build_row(deferred_data, timestamp)
+                    if csv_v1_enabled:
                         f_handle, writer = self._open_log_file(
                             self._filename_timestamp(timestamp),
                             prefix=file_prefix,
@@ -3085,10 +3150,10 @@ class CSVLoggerService:
                         else:
                             shutdown_flush_succeeded = False
                             self.logger.warning("CSV deferred shutdown v1 row was not written.")
-                    if self.csv_v2_enabled:
+                    if csv_v2_enabled:
                         self._sample_seq += 1
                         v2_row = self._build_v2_row(
-                            deferred_item,
+                            deferred_data,
                             timestamp,
                             datetime.now().astimezone(),
                             self._sample_seq,
@@ -3117,17 +3182,18 @@ class CSVLoggerService:
         if not self._finalize_deferred_observation_closeouts(safe=shutdown_flush_succeeded):
             shutdown_flush_succeeded = False
         if (
-            self.csv_v2_enabled
-            and self.csv_v2_sidecar_enabled
+            csv_v2_enabled
+            and settings.sidecar_enabled
             and self._finalize_spot_image_manifest_on_stop
         ):
             if not self._write_spot_image_fact_final_manifest_safely():
                 shutdown_flush_succeeded = False
-        elif self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
+        elif csv_v2_enabled and settings.sidecar_enabled:
             self.logger.warning(
                 "Skipped SPOT image fact final manifest because image capture did not drain."
             )
         self._shutdown_flush_succeeded = shutdown_flush_succeeded
+        del self._writer_context.settings
         self.logger.info("CSV logger thread stopped.")
 
 

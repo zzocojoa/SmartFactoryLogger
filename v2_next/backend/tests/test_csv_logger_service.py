@@ -184,6 +184,44 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual([first["producer_seq"], second["producer_seq"]], [1, 2])
             self.assertEqual(second["source_payload_hash"], hashlib.sha256(expected_payload).hexdigest())
 
+    def test_queued_records_keep_admitted_sink_after_config_change(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with self.create_temp_dir() as tmp_dir:
+            old_dir, new_dir = tmp_dir / "before", tmp_dir / "after"
+            old_dir.mkdir()
+            new_dir.mkdir()
+            service = self.create_service(old_dir, True)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == old_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test did not release old CSV destination")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                try:
+                    first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertTrue(started.wait(2))
+                    second = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                    service.apply_config(log_path=new_dir, csv_v1_enabled=False, csv_v2_enabled=True)
+                    third = service.enqueue_detailed(self.create_data("2026-03-09T07:20:27.000", 32.0))
+                finally:
+                    release.set()
+                    self.assertTrue(service.stop(timeout_sec=5))
+            old_rows = self.read_rows(self.list_v1_files(old_dir)[0])
+            self.assertEqual([float(row[3]) for row in old_rows[1:]], [30.0, 31.0])
+            new_rows = self.read_rows(self.list_v2_files(new_dir)[0])
+            self.assertEqual([float(row[new_rows[0].index("MainPress")]) for row in new_rows[1:]], [32.0])
+            self.assertEqual(self.list_v2_files(old_dir), [])
+            self.assertEqual(self.list_v1_files(new_dir), [])
+            self.assertEqual(first["config_generation"], second["config_generation"])
+            self.assertGreater(third["config_generation"], second["config_generation"])
+            self.assertEqual(second["required_sinks"], ("csv_v1",))
+            self.assertEqual(third["required_sinks"], ("csv_v2",))
+
     def test_same_date_rows_stay_in_one_file(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             log_dir = tmp_dir

@@ -106,3 +106,11 @@ CSV 접수 전에 canonical JSON bytes와 source payload hash를 만들고, `log
 - `tdd/csv-envelope-green`: CSV service/runtime/image-startup/fact 86시험 중85통과·기존 F01 1skip, exit0. 변경 파일 Ruff와 프로젝트 지정 mypy 9파일 exit0.
 - 추가로 repository.py를 명시 지정한 mypy는 기존 annotation 오류9개로 exit1이다. 변경 전 HEAD를 `--shadow-file`로 검사한 `csv-envelope-mypy-baseline`에서도 같은9개가 확인됐다. 현재 변경으로 새 오류는 없지만 이 추가 범위의 전체 정적 검사 통과를 주장하지 않는다.
 - 설정 세대·목적지 고정, 합산64MiB/5000 예약, 상세 결과의 통합 수집 호출부 연결 및 출력별 추적은 아직 후속 작업이다. 현재 envelope 추가만으로 CSV 저장 무결성 전체를 완료 처리하지 않는다.
+
+## HTTP 1단계 — CSV 접수 세대와 출력 설정 고정
+
+접수와 같은 설정 잠금 안에서 세대·출력 목록·절대 경로·v1 헤더·v2 계약을 frozen 설정으로 잡는다. worker는 이벤트 순서대로 설정을 채택하며 이전 세대의 buffer를 이전 설정으로 flush한 뒤 전환한다. 접수한 경로가 실패했다고 다른 fallback 경로로 몰래 바꾸지 않는다. 기존 직접 파일 열기 API의 fallback 동작은 유지한다.
+
+- `test_queued_records_keep_admitted_sink_after_config_change`: 실제 첫 파일 열기를 지연하고 두 번째 v1 자료 접수 후 경로와 형식을 v2로 변경한다. `tdd/csv-config-red`에서 이전 v1 파일에30만 남는 실패(exit1)를 확인했고, 수정 후 이전 파일30/31·새 v2 파일32와 세대/출력 영수증을 대조했다.
+- `tdd/csv-config-regression`: 기존 CSV service/runtime/image-startup/replay/v2 운영 계약157시험 통과, exit0. Ruff와 프로젝트 지정 mypy9파일도 exit0.
+- 현재 고정한 것은 설정상의 출력 경로와 계약이다. 파일명·schema rollover의 최종 실제 목적지 ID, trace 출력·복구 중 가용성의 세대별 결합, 합산 예산 및 실패 경계는 아직 미완료다. RV03/RV04/RR02 전체 통과로 집계하지 않는다.
