@@ -50,6 +50,12 @@ class SpotObservationQueue:
         with self._lock:
             if not self._state["accepting"]:
                 return self._reject_locked("persistence_closed")
+            if self._queue.full():
+                return self._reject_locked("queue_full")
+            # Dequeue transfers ownership to the writer, not out of the budget.
+            pending = self._state["accepted_count"] - self._state["completed_count"]
+            if pending >= self._queue.maxsize:
+                return self._reject_locked("pending_item_limit")
             try:
                 self._queue.put_nowait((payload, time.monotonic()))
             except queue.Full:

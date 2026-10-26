@@ -279,6 +279,39 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_pending_limit_includes_inflight_writes(self):
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def blocked_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test disk write not released")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                owner = SpotObservationQueue(lambda: writer, capacity=2)
+                try:
+                    self.assertTrue(owner.enqueue(observation(1)))
+                    self.assertTrue(started.wait(2))
+                    self.assertTrue(owner.enqueue(observation(2)))
+                    self.assertFalse(owner.enqueue(observation(3)),
+                                     "inflight plus queued facts must obey the same pending limit")
+                    state = owner.snapshot()
+                    self.assertEqual(state["pending_write_count"], 2)
+                    self.assertEqual(state["queue_depth"], 1)
+                    self.assertEqual(state["last_error_code"], "pending_item_limit")
+                finally:
+                    release.set()
+                    owner.close(2)
+                    self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "2"])
+
     def test_rollover_deferred_until_owner_stops_and_all_paths_finalize(self):
         for successful in [True, False]:
             with self.subTest(successful=successful), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
