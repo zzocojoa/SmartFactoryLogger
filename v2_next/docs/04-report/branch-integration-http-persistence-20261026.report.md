@@ -425,3 +425,12 @@ runtime writer와 독립 manifest가 같은 파일 목록으로 잔여를 계산
 - `log-review-r2.json`에서 전체 로그와 unittest 결과를 대조했다. 이미지 manifest 초기화 Traceback1개는 `test_csv_image_startup.py`의 의도된 읽기 오류이며, 첫 로그 검사기의 포괄적인 Traceback 분류를 바로잡았다. 제품 검사를 반복하거나 실패 원문을 삭제하지 않았다. unittest FAIL/ERROR는 없고 Starlette/httpx deprecation 경고는 남아 있다.
 - 최종 제품 변경의 backend Ruff·기본 mypy10파일은 exit0이다. 전체 회귀 이후에는 보고서와 CHANGELOG만 편집했다.
 - 이번 묶음의 코드 commit은 f5ae671b·272bbb52·d20fea81·facaff71·e6656ce0·58fd675f이다. 임시 메모리 선예약, 생산/출력 영속 대조, 부분 CSV/JPEG 복구, 압력 제어 및 전체7단계/17명세·최종 설치본·master 통합은 미완료다. 이번 결과를 frontend/Electron/설치본/현장 전체 통과로 확대하지 않는다.
+
+## HTTP 1단계 — fact 접수 직렬화 사본의 선예약
+
+fact owner에서 JSON 컨테이너를 분리하고 인코딩 길이를 먼저 계산한다. source 문자열은 불변 참조를 공유하며, 실제 직렬화 문자열/UTF-8 bytes를 만들기 전에 두 사본의 공간을 예약한다. 접수 성공 후 문자열 임시분을 해제하고 최종 bytes 예약은 기존 완료 시점까지 유지한다. 부족하면 기존 관측 ID와 `pending_byte_limit`를 반환한다.
+
+- `test_serialization_scratch_respects_pending_budget`: 실제 첫6MiB 입력의 쓰기를 지연하고 다음6MiB 입력을 보내 기존 ACCEPTED/기대REJECTED_LIMIT의 RED(`fact-serialization-budget-red-r2`, exit1)를 확인했다. 첫 실행은 시험 클래스명을 잘못 지정한 로더 오류로 별도 보존했다. 수정 후 첫 실제 저장·두 번째 거절·잔여 공간 반환·다음 정상 접수/저장을 대조했다.
+- 기존 bytes 한계 시험의 기대식을 원본1개에서 직렬화 사본까지 포함한2개로 변경했다. 기존 예약 유지·반환·실제 저장 데이터 assertions는 유지했다. 새 내부 반환값의 타입 표기도 보완했다.
+- `fact-serialization-budget-green-r2`: 관련19시험 중18통과·기존 private F01자료 미제공1skip,exit0. backend Ruff·기본 mypy10파일 exit0.
+- 현재는 UTF-8 길이를 기준으로 두 사본을 예약한다. Python의 넓은 Unicode 문자열 표현, decode/출력 사본과 CSV·이미지 경로의 선예약은 아직 추가 검증·보완이 필요하다. 이 접수 경계나 앞선1,000시험을 현재 전체 예산 계약의 완료로 표시하지 않는다.

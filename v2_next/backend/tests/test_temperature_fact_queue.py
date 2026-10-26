@@ -376,6 +376,46 @@ class FactQueueTests(unittest.TestCase):
                 self.assertFalse(owner.snapshot()["writer_alive"])
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1"])
 
+    def test_serialization_scratch_respects_pending_budget(self):
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def blocked_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    started.set()
+                    if not release.wait(10):
+                        raise TimeoutError("test disk write not released")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    first = observation(1)
+                    first["source_payload_for_budget"] = "a" * (6 * 1024**2)
+                    second = observation(2)
+                    second["source_payload_for_budget"] = "b" * (6 * 1024**2)
+                    first_size = len(json.dumps(first, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+                    self.assertTrue(owner.enqueue(first))
+                    self.assertTrue(started.wait(2))
+                    result = owner.enqueue_detailed(second)
+                    self.assertEqual(result.status, "REJECTED_LIMIT")
+                    self.assertEqual(result.reason, "pending_byte_limit")
+                    self.assertEqual(result.observation_key, "synthetic-A:2")
+                    self.assertEqual(owner.snapshot()["pending_payload_bytes"], first_size)
+                    release.set()
+                    owner._queue.join()
+                    self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+                    self.assertTrue(owner.enqueue(observation(3)))
+                finally:
+                    release.set()
+                    owner.close(30)
+                    self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "3"])
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open
@@ -410,7 +450,9 @@ class FactQueueTests(unittest.TestCase):
                     state = owner.snapshot()
                     self.assertEqual(state["pending_payload_bytes"], serialized_bytes)
                     self.assertLessEqual(serialized_bytes, limit)
-                    self.assertGreater(serialized_bytes + encoded_size, limit)
+                    # Admission reserves encoded text and final UTF-8 bytes
+                    # before either temporary allocation.
+                    self.assertGreater(serialized_bytes + 2 * encoded_size, limit)
                     self.assertEqual(state["last_error_code"], "pending_byte_limit")
                     release.set()
                     owner._queue.join()

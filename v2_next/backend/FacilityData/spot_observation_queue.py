@@ -38,6 +38,73 @@ class FactPersistencePending(RuntimeError):
     """Normal asynchronous work remains; it is not a disk failure."""
 
 
+class _PayloadBudgetExceeded(ValueError):
+    pass
+
+
+def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = None) -> tuple[Any, int]:
+    """Detach containers and size UTF-8 JSON without allocating encoded strings.
+
+    Immutable source strings are shared, not copied. Container/object overhead
+    is separate from the serialized-payload budget. Match json.dumps defaults
+    with ensure_ascii=False and allow_nan=False.
+    """
+    if limit < 0:
+        raise _PayloadBudgetExceeded
+    result: Any
+    if isinstance(value, str):
+        if len(value) + 2 > limit:
+            raise _PayloadBudgetExceeded
+        size = len(value)
+        if not value.isascii():
+            size = 0
+            for char in value:
+                code = ord(char)
+                if 0xD800 <= code <= 0xDFFF:
+                    raise ValueError("Unpaired surrogate in JSON payload")
+                size += 1 + (code > 0x7F) + (code > 0x7FF) + (code > 0xFFFF)
+        size += 2 + value.count('"') + value.count("\\")
+        size += 5 * sum(value.count(chr(code)) for code in range(32))
+        size -= 4 * sum(value.count(char) for char in "\b\f\n\r\t")
+        result = value
+    elif value is None or isinstance(value, (bool, int, float)):
+        size = len(json.dumps(value, allow_nan=False))
+        result = value
+    elif isinstance(value, (dict, list, tuple)):
+        parents = set() if parents is None else parents
+        identity = id(value)
+        if identity in parents:
+            raise ValueError("Circular JSON payload")
+        parents.add(identity)
+        size = 2
+        try:
+            if isinstance(value, dict):
+                result = {}
+                for index, (key, item) in enumerate(value.items()):
+                    if not (key is None or isinstance(key, (str, bool, int, float))):
+                        raise TypeError("Unsupported JSON object key")
+                    key_text = key if isinstance(key, str) else json.dumps(key, allow_nan=False)
+                    _, key_size = _prepare_json_payload(key_text, limit - size, parents)
+                    size += key_size + 2 + (2 if index else 0)
+                    detached, item_size = _prepare_json_payload(item, limit - size, parents)
+                    result[key] = detached
+                    size += item_size
+            else:
+                result = []
+                for index, item in enumerate(value):
+                    size += 2 if index else 0
+                    detached, item_size = _prepare_json_payload(item, limit - size, parents)
+                    result.append(detached)
+                    size += item_size
+        finally:
+            parents.remove(identity)
+    else:
+        raise TypeError("Unsupported JSON value")
+    if size > limit:
+        raise _PayloadBudgetExceeded
+    return result, size
+
+
 class SpotObservationQueue:
     def __init__(self, factory: Callable[[], SpotObservationFactWriter], capacity: int = 256):
         if isinstance(capacity, bool) or capacity <= 0:
@@ -70,10 +137,8 @@ class SpotObservationQueue:
     def enqueue_detailed(self, snapshot: Mapping[str, Any]) -> FactAdmissionResult:
         observation_key = ""
         try:
-            # Bytes own all nested data. No caller can mutate a queued observation.
             source = dict(snapshot)
             observation_key = build_spot_observation_key(source)
-            payload = json.dumps(source, ensure_ascii=False, allow_nan=False).encode("utf-8")
         except (TypeError, ValueError, OverflowError):
             return self._reject("INVALID", "snapshot_serialization_failed", observation_key)
         with self._lock:
@@ -87,14 +152,35 @@ class SpotObservationQueue:
             pending = self._state["accepted_count"] - self._state["completed_count"]
             if pending >= self._queue.maxsize:
                 return self._reject_locked("REJECTED_LIMIT", "pending_item_limit", observation_key)
-            if self._state["pending_payload_bytes"] + len(payload) > FACT_PENDING_PAYLOAD_BYTE_LIMIT:
-                return self._reject_locked("REJECTED_LIMIT", "pending_byte_limit", observation_key)
+            available = FACT_PENDING_PAYLOAD_BYTE_LIMIT - self._state["pending_payload_bytes"]
             try:
+                source, payload_size = _prepare_json_payload(source, available // 2)
+            except _PayloadBudgetExceeded:
+                return self._reject_locked("REJECTED_LIMIT", "pending_byte_limit", observation_key)
+            except (TypeError, ValueError, OverflowError):
+                return self._reject_locked("INVALID", "snapshot_serialization_failed", observation_key)
+            # Reserve both the serialized text and final UTF-8 bytes before
+            # either allocation. Containers are detached while leaves share
+            # immutable source strings; queued bytes own the final snapshot.
+            reservation = payload_size * 2
+            self._state["pending_payload_bytes"] += reservation
+            accepted = False
+            payload = b""
+            try:
+                payload = json.dumps(source, ensure_ascii=False, allow_nan=False).encode("utf-8")
+                if len(payload) != payload_size:
+                    raise ValueError("JSON payload size changed after reservation")
                 self._queue.put_nowait((payload, time.monotonic()))
+                self._state["accepted_count"] += 1
+                accepted = True
             except queue.Full:
                 return self._reject_locked("REJECTED_FULL", "queue_full", observation_key)
-            self._state["accepted_count"] += 1
-            self._state["pending_payload_bytes"] += len(payload)
+            except (TypeError, ValueError, OverflowError):
+                return self._reject_locked("INVALID", "snapshot_serialization_failed", observation_key)
+            finally:
+                if not accepted:
+                    payload = b""
+                self._state["pending_payload_bytes"] -= reservation - (payload_size if accepted else 0)
         return FactAdmissionResult("ACCEPTED", None, observation_key)
 
     def _reject(self, status: FactAdmissionStatus, code: str, observation_key: str) -> FactAdmissionResult:
