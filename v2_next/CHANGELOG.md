@@ -43,8 +43,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
   canonical JSON bytes, reusing the serialization reservation without changing
   the EMA formula. Bound JSON chunk joining and UTF-8 encoding in CSV admission,
   fact admission, and spool output; preserve their existing bytes and hashes.
-- Fact construction/readback, CSV row rendering, and image workspace reservations
-  remain unfinished.
+- Reserve CSV record encoding and file-output workspace before writing. Release
+  the CSV writer's retained record buffer before returning the reservation, and
+  flush each row inside the existing batch/time drain operation. Record an
+  oversized output against its original producer and sink, continue later rows,
+  and reject clean shutdown after any processing failure.
+- Fact construction/readback, CSV row construction/scalar conversion and retained
+  error-path values, and image workspace reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify
