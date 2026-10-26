@@ -479,3 +479,11 @@ owner가 writer에 합산 예산 예약 경로를 연결한다. 실제 행을 �
 - `test_csv_output_budget_failure_preserves_identity`:5MiB 실제 출력 필드를 보냈을 때 기존 실패0/기대1의 RED(`fact-csv-output-budget-red`,exit1)를 확인했다. 수정 후 첫 ID/사유·스풀 우회 없음·예약 반환·다음 작은 ID의 실제 CSV 저장·과거 실패 유지가 일치했다.
 - `fact-csv-output-budget-green`: queue/fact64시험 중63통과·기존 private F01자료 미제공1skip,8.186초,exit0. backend Ruff·기본 mypy10파일 exit0.
 - 이 경계는 owner를 통한 fact CSV 렌더링이다. fact 구성·스풀 직렬화/복구·파일 읽기 임시 공간 및 통합 CSV/이미지 경로의 전체 예약은 계속 남아 있다. 앞선1,004시험 전체 결과는 이번 제품 변경을 포함하지 않는다.
+
+## HTTP 1단계 — 초과 스풀 행의 직렬화 전 거절
+
+JSON 크기 계산을 `persistence_payload.py`로 옮겨 접수와 스풀에서 재사용한다. 함수 본문이 이름 변경 외에 기존 구현과 같은지 대조했다. 스풀의1MiB 행 제한과64MiB 미복구 제한을 실제 문자열/bytes 생성 전에 확인하며, 원래 파일과 다음 정상 행의 저장/복구를 유지한다.
+
+- `test_oversized_spool_rejects_before_serialization`:12MiB 입력의 생성은 측정에서 제외하고 스풀 거절 동안의 추가 할당을 tracemalloc로 측정했다. 기존 최고31,462,003bytes/상한16,777,216bytes의 RED(`fact-spool-preflight-red`,exit1)를 확인했다. 수정 후 상한 이하·원본 불변·명시적 행 크기 실패1·다음 실제 정상 복구를 확인했다.
+- `fact-spool-preflight-green`: fact/queue65시험 중64통과·기존 private F01자료 미제공1skip,8.735초,exit0. backend Ruff와 공통 모듈을 추가한 기본 mypy11파일 exit0.
+- 이는 초과 입력의 사전 거절이다. 허용된 스풀 행의 실제 임시 사본도 owner의 다른 대기 자료와 합산하는 예약, 복구 읽기·fact 구성 등의 남은 메모리 경계는 계속 구현한다. tracemalloc 측정은 전체 프로세스 RSS 보장이 아니다.

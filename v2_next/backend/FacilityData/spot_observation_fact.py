@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, NoReturn, Optional
 from uuid import uuid4
 
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, prepare_json_payload
 from backend.FacilityData.spot_low_signal import (
     LOW_SIGNAL_ALARM_BIT,
     LOW_SIGNAL_COMPARATORS,
@@ -477,8 +478,17 @@ class SpotObservationFactWriter:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_write_uncertain"
                     return
-                payload = (json.dumps(dict(fact), sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
-                if len(payload) > FACT_SPOOL_RECOVERY_BYTE_LIMIT:
+                try:
+                    # Any valid row can need at most 1x UTF-8 bytes plus 4x
+                    # Unicode character contents. Reject before rendering it.
+                    source, payload_size, _, _ = prepare_json_payload(
+                        dict(fact), 5 * FACT_SPOOL_RECOVERY_BYTE_LIMIT)
+                except PayloadBudgetExceeded:
+                    self.spool_failure_count += 1
+                    self.spool_last_error_code = "spool_row_too_large"
+                    return
+                payload_size += 1  # newline
+                if payload_size > FACT_SPOOL_RECOVERY_BYTE_LIMIT:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_row_too_large"
                     return
@@ -486,10 +496,13 @@ class SpotObservationFactWriter:
                     max(0, path.stat().st_size - self._spool_read_offsets.get(path, 0))
                     for path in self._spool_pending_paths() if path.exists()
                 )
-                if pending_bytes + len(payload) > FACT_SPOOL_PENDING_BYTE_LIMIT:
+                if pending_bytes + payload_size > FACT_SPOOL_PENDING_BYTE_LIMIT:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_byte_limit"
                     return
+                payload = (json.dumps(source, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+                if len(payload) != payload_size:
+                    raise ValueError("Spool payload size changed after preflight")
                 spool_path, mode = self._spool_append_target(len(payload))
                 with spool_path.open(mode) as handle:
                     writing_path = spool_path

@@ -1,6 +1,7 @@
 import csv
 import json
 import tempfile
+import tracemalloc
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -473,6 +474,38 @@ class SpotObservationFactTests(unittest.TestCase):
                 csv.field_size_limit(previous_limit)
             self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1", "svc-1:3"])
             self.assertEqual(rows[0]["instrument_info"], fact["instrument_info"])
+
+    def test_oversized_spool_rejects_before_serialization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            writer._spool_fact(self.current_fact_row(1))
+            directory = spool.with_name(spool.name + ".segments-v1")
+            segment = next(directory.glob("*.jsonl"))
+            original = segment.read_bytes()
+            oversized = self.current_fact_row(2, instrument_info="x" * (12 * 1024**2))
+            # Input creation is outside the measurement: inspect only the new
+            # allocations made while rejecting the unsupported spool row.
+            self.assertFalse(tracemalloc.is_tracing())
+            tracemalloc.start()
+            try:
+                writer._spool_fact(oversized)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertLessEqual(peak, 16 * 1024**2, "oversized row must be rejected before serialization copies")
+            self.assertEqual(writer.spool_failure_count, 1)
+            self.assertEqual(writer.spool_last_error_code, "spool_row_too_large")
+            self.assertEqual(segment.read_bytes(), original)
+            self.assertEqual(writer.spool_pending_count(), 1)
+            writer._spool_fact(self.current_fact_row(3))
+            writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 0)
+            self.assertEqual(writer.spool_failure_count, 1)
+            with output.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1", "svc-1:3"])
 
     def test_segmented_spool_rotates_and_preserves_legacy_source(self) -> None:
         from backend.FacilityData.spot_observation_fact import _spool_pending_count
