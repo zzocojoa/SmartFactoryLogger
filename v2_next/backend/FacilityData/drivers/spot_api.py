@@ -578,12 +578,13 @@ def _spot_image_capture_link_stale_threshold_ms() -> float:
 
 
 def _spot_image_capture_config_signature() -> tuple[Path, Path, int, float]:
-    return (
-        _spot_image_capture_log_path().absolute(),
-        _spot_image_capture_root().absolute(),
-        _spot_image_capture_retention_days(),
-        _spot_image_capture_link_stale_threshold_ms(),
-    )
+    with config.PERSISTENCE_CONFIG_LOCK:
+        return (
+            _spot_image_capture_log_path().absolute(),
+            _spot_image_capture_root().absolute(),
+            _spot_image_capture_retention_days(),
+            _spot_image_capture_link_stale_threshold_ms(),
+        )
 
 
 def _get_spot_image_capture_writer(
@@ -1213,6 +1214,23 @@ def _maybe_enqueue_spot_image_capture(
     image_url: str,
     source: str,
     image_age_ms: Optional[float] = None,
+) -> None:
+    # The publisher holds the same lock only while swapping prepared values.
+    # Capture policy, limits, and writer settings therefore belong to one state.
+    with config.PERSISTENCE_CONFIG_LOCK:
+        _enqueue_spot_image_capture_locked(
+            image_bytes=image_bytes, captured_at=captured_at, image_url=image_url,
+            source=source, image_age_ms=image_age_ms,
+        )
+
+
+def _enqueue_spot_image_capture_locked(
+    *,
+    image_bytes: bytes,
+    captured_at: float,
+    image_url: str,
+    source: str,
+    image_age_ms: Optional[float],
 ) -> None:
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count

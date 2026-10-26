@@ -216,6 +216,59 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(spot.get_spot_image_capture_health()['fact_row_count'], 3)
         self.assertTrue(finished['accounting_consistent'])
 
+    def test_capture_during_config_apply_uses_complete_previous_settings(self):
+        from backend.Configuration import Configuration_DB_Manager as settings
+
+        manager = settings.ConfigManager()
+        new_log = self.root / 'new-log'
+        new_images = self.root / 'new-images'
+        manager._snapshot = {'values': {
+            'settings': {'logpath': str(new_log), 'autosave': True},
+            'spot': {'image_capture': {'enabled': True, 'mode': 'all',
+                                      'path': str(new_images), 'retention_days': 0,
+                                      'min_interval_sec': 0, 'link_to_observation': False}},
+        }}
+        entered, release = threading.Event(), threading.Event()
+        self.releases.append(release)
+        normalize = settings._normalize_spot_image_capture_mode
+        results = []
+
+        def delayed_mode(*args):
+            entered.set()
+            if not release.wait(10):
+                raise RuntimeError('test config release missing')
+            return normalize(*args)
+
+        self.enqueue()
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        with patch.dict(spot.config.__dict__, spot.config.__dict__.copy()), \
+             patch.object(settings.logger_service, 'apply_config'), \
+             patch.object(settings, '_normalize_spot_image_capture_mode', delayed_mode):
+            apply_thread = threading.Thread(target=lambda: results.append(manager.apply_changes({
+                'settings.logpath': {}, 'spot.image_capture.path': {},
+            })))
+            self.controllers.append(apply_thread)
+            apply_thread.start()
+            try:
+                self.assertTrue(entered.wait(3))
+                # Configuration preparation must not block live capture admission.
+                self.enqueue()
+                self.assertTrue(spot.flush_spot_image_capture_queue(3))
+                self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 2)
+                self.assertEqual(len(list((new_log / 'images').rglob('*.jpg'))), 0)
+            finally:
+                release.set()
+                apply_thread.join(3)
+            self.assertFalse(apply_thread.is_alive())
+            self.assertEqual(results[0]['pending'], [])
+            self.enqueue()
+            self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            self.assertEqual(len(list(new_images.rglob('*.jpg'))), 1)
+            for log_path, count in [(self.root, 2), (new_log, 1)]:
+                with (log_path / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+                    self.assertEqual(len(list(csv.DictReader(handle))), count)
+            self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
+
     def test_capture_payload_budget_includes_inflight_and_linked_snapshot(self):
         limit = 5 * 1024**2
         self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', limit))

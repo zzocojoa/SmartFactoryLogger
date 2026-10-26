@@ -7,8 +7,12 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
+from threading import RLock
 from typing import List, Tuple, Optional
 from dotenv import load_dotenv
+
+# Runtime publication and storage admission share this short, I/O-free boundary.
+PERSISTENCE_CONFIG_LOCK = RLock()
 
 # Load .env file (if present)
 load_dotenv()

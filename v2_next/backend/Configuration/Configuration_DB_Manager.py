@@ -456,6 +456,7 @@ class ConfigManager:
 
         applied: list[str] = []
         pending: list[str] = []
+        persistence_values: dict[str, Any] = {}
         values = self._snapshot.get("values", {})
         settings = values.get("settings", {})
         system_cfg = values.get("system", {})
@@ -526,7 +527,7 @@ class ConfigManager:
         if log_changed:
             log_path_value = settings.get("logpath")
             resolved_log_path = config.resolve_storage_path(log_path_value, "logs", "LogPath")
-            config.LOG_PATH = resolved_log_path
+            persistence_values["LOG_PATH"] = resolved_log_path
             config.AUTO_SAVE = bool(settings.get("autosave", config.DEFAULT_AUTO_SAVE))
             logging_cfg = values.get("logging", {})
             config.CSV_HEADER = logging_cfg.get("csv_header") or config.DEFAULT_CSV_HEADER
@@ -605,7 +606,7 @@ class ConfigManager:
                     refresh_float = float(config.DEFAULT_SPOT_REFRESH_INTERVAL)
                 if refresh_float <= 0:
                     refresh_float = float(config.DEFAULT_SPOT_REFRESH_INTERVAL)
-                config.SPOT_REFRESH_INTERVAL = refresh_float
+                spot_persistence_values: dict[str, Any] = {"SPOT_REFRESH_INTERVAL": refresh_float}
                 config.SPOT_CROSSHAIR_X = float(spot_cfg.get("crosshair_x", config.DEFAULT_SPOT_CROSSHAIR_X))
                 config.SPOT_CROSSHAIR_Y = float(spot_cfg.get("crosshair_y", config.DEFAULT_SPOT_CROSSHAIR_Y))
                 config.SPOT_CROSSHAIR_COLOR = str(
@@ -640,15 +641,15 @@ class ConfigManager:
                 image_capture_enabled = bool(
                     image_capture_cfg.get("enabled", config.DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED)
                 )
-                config.SPOT_IMAGE_CAPTURE_ENABLED = image_capture_enabled
-                config.SPOT_IMAGE_CAPTURE_MODE = _normalize_spot_image_capture_mode(
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_ENABLED"] = image_capture_enabled
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_MODE"] = _normalize_spot_image_capture_mode(
                     image_capture_cfg.get("mode", config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE),
                     image_capture_enabled,
                 )
-                config.SPOT_IMAGE_CAPTURE_PATH = str(
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_PATH"] = str(
                     image_capture_cfg.get("path") or config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH
                 )
-                config.SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = max(
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC"] = max(
                     0.0,
                     float(
                         image_capture_cfg.get(
@@ -657,11 +658,11 @@ class ConfigManager:
                         )
                     ),
                 )
-                config.SPOT_IMAGE_CAPTURE_MAX_BYTES = max(
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_MAX_BYTES"] = max(
                     1,
                     int(image_capture_cfg.get("max_bytes", config.DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES)),
                 )
-                config.SPOT_IMAGE_CAPTURE_RETENTION_DAYS = max(
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_RETENTION_DAYS"] = max(
                     0,
                     int(
                         image_capture_cfg.get(
@@ -670,15 +671,23 @@ class ConfigManager:
                         )
                     ),
                 )
-                config.SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = bool(
+                spot_persistence_values["SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION"] = bool(
                     image_capture_cfg.get(
                         "link_to_observation",
                         config.DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION,
                     )
                 )
+                persistence_values.update(spot_persistence_values)
                 applied.extend(sorted(spot_changed))
             except Exception:
                 pending.extend(sorted(spot_changed))
+
+        # Path resolution and parsing above can wait or fail. Publish only the
+        # prepared storage fields together; never hold this lock over file I/O,
+        # CSV reconfiguration, or PLC reconnects.
+        with config.PERSISTENCE_CONFIG_LOCK:
+            for name, value in persistence_values.items():
+                setattr(config, name, value)
 
         if plc_changed:
             extruder_cfg = values.get("extruder", {})

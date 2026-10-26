@@ -224,3 +224,11 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - `test_queued_captures_keep_admitted_destinations`: 첫 실제 JPEG 쓰기를 지연하고 두 번째 접수 후 log/image 경로를 변경했다. `image-destination-red`는 이전 경로의 이미지1개/기대2개로 실패(exit1). 수정 후 이전 경로2개·새 경로1개와 각 원장/JPEG SHA256, 종료 예약0을 확인했다.
 - `image-destination-green`: 이미지 종료·SPOT API·retention·CSV 이미지 시작240시험 통과(exit0). backend Ruff·기본 mypy10파일도 exit0.
 - 이 결과는 접수 후 writer 선택 경계다. 설정 적용 전체와 접수의 원자성, 명시적 설정 세대·출력 계약 식별자, 날짜별 실제 목적지·영속 trace와 복구 계약은 계속 남은 필수 범위다. 기존 보존 자료와 서버 설치본은 변경하지 않았다.
+
+## HTTP 1단계 — 이미지 설정 게시와 접수의 일관성
+
+ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 설정을 먼저 해석한 뒤 같은 잠금 안에서 한꺼번에 게시한다. 이미지 접수도 그 잠금 경계를 사용한다. 경로 확인·CSV 설정 적용·PLC 재연결은 잠금 밖에 둬서 설정 준비가 느려도 이전의 완전한 설정으로 접수·저장을 계속한다.
+
+- `test_capture_during_config_apply_uses_complete_previous_settings`: 실제 ConfigManager의 경로 변경과 이미지 모드 해석 사이를 지연하고 이미지를 접수했다. 기존 동작은 새 log/옛 상대 image 경로를 섞어 이전 폴더1개/기대2개로 실패했다. 실패 시에도 설정 thread를 join한 뒤 fixture를 복원하도록 정리한 `image-config-atomic-red-r2`에서 동일 실패(exit1)를 다시 확인했다.
+- 수정한 `image-config-atomic-green`: 이미지·SPOT·retention·CSV 시작·설정 서비스251시험 통과(exit0). 설정 준비 중 이전 폴더2개, 게시 후 새 폴더1개와 각 원장 수를 대조했다. backend Ruff·기본 mypy10파일도 exit0.
+- 잠금 범위는 이 저장 설정 게시와 이미지 접수다. 다른 설정·소비자의 전체 트랜잭션 또는 명시적 generation/required-sink/trace 계약 완료를 주장하지 않는다. 설정 세대 식별·복구·합산 임시 예산과 전체17명세는 계속 남아 있다.
