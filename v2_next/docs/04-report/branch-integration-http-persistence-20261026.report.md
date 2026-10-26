@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `671865ab` 전체 backend1,009시험 중1,008통과·1skip, 기본 정적 검사11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `5e42daf2` 전체 backend1,011시험 중1,010통과·1skip, backend Ruff·기본 mypy11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -538,3 +538,28 @@ JSON 크기 계산을 `persistence_payload.py`로 옮겨 접수와 스풀에서 
 - manifest 초기화 traceback은 기존 `test_csv_image_startup.py:120`의 의도적 읽기 오류다. 이전 전체 검사 대비 추가된 `preserving primary error stages=shutdown_evidence_peers` 문구는 `test_image_shutdown_evidence.py`의 부분 시작 실패·동시 종료 시나리오 및 최종 영수증0/2 검사와 대조했다. 검사 실패로 숨기거나 운영 장애로 확대하지 않는다. 기존 Starlette/httpx 경고는 유지한다.
 - 최종 제품 파일 SHA256: `spot_observation_fact.py`=`4f35691e5e3b1d0eb0f90348dee1d4cee654512084d08c4461b2b37d2d133a43`. 시험 SHA256은 `health_timing`=`0c2d35c3a761d50cac186960542eccf174204f022fc194f431a86850343f84c1`, `spot_observation_fact`=`9b2642618318d2118484f4f1fc5c6eadd78c1b302c5fd0cd7458e24d0b3e0fba`, `temperature_fact_queue`=`27092d114d2c2e8325a1ce183077a2eb9c7b8aa60afc14dcd6dc001c16fb6e2d`다.
 - 변경 commit은 `ce607541`, `5cb22f5b`, `1b7b104d`, `671865ab`다. 첫 실패한 전체 검사와 잘못된 fixture의 중간 결과는 보존한다. 전체 HTTP7단계/17명세, 통합CSV/이미지·fact 구성/검산 예산, 영속 대조·복구 제어, 최종 설치본과 master 통합은 미완료다. 서버 적용은 하지 않았다.
+
+## HTTP 1단계 — 통합 CSV 접수 직렬화 공간 선예약
+
+기존 CSV 원본 bytes와 변환 중인 작업 공간을 합산한다. JSON 문자열·UTF-8 bytes를 생성하기 전에 공통 크기 계산으로 공간을 확보하고, 접수 성공 시 실제 원본 bytes만 기존 pending 예약으로 옮긴다. 예약을 이중 청구하지 않으며 거절·예외·정상 접수 뒤 임시 참조를 놓고 나머지 예약을 반환한다. 기존 canonical compact JSON·원본 hash·EMA 의미는 유지한다.
+
+- `test_csv_serialization_shares_pending_budget_before_allocation`: 실제 writer를 지연해20MiB 원본을 유지한 상태에서24MiB 입력을 보냈다. 원본만 합치면64MiB 이하지만 직렬화 공간을 합치면 넘는다. 기존 ACCEPTED/기대 REJECTED_LIMIT의 RED(`csv-serialization-shared-budget-red`,exit1)를 확인했다.
+- 수정 후 생성 전 `pending_byte_limit` 거절, 원래 생산 순번2·hash 없음·drop1, 추가 할당 상한, 임시 예약0을 확인했다. 뒤의 작은 순번3은 실제 CSV에 저장됐고 종료 후 전체 예약0이었다. 첫 원본과 작은 후속값만30/32로 남는다.
+- `csv-serialization-shared-budget-green`: CSV service/runtime62시험 통과,13.624초,exit0. 예약 반환 assertion을 보완한 최종 단독 검사도 exit0. backend Ruff·기본 mypy11파일 exit0. commit `b31b6172`.
+- 상태의 `pending_processing_payload_bytes`는 현재 접수 직렬화 예약을 포함하고 `pending_payload_bytes`는 원본과 그 작업 공간의 합계다. worker의 decode·출력 행/CSV 렌더링 공간은 아직 남아 있다. 이 필드를 전체 CSV 메모리 또는 프로세스 RSS 검증 완료로 해석하지 않는다.
+
+## HTTP 1단계 — 비활성·종료 CSV 접수의 우선 판정
+
+같은 lifecycle/config 잠금에서 생산 ID와 설정을 잡은 뒤 저장 OFF·종료 여부를 먼저 판정한다. 저장하지 않을 큰 입력을 직렬화하거나 메모리 부족으로 집계하지 않는다. 이 경로는 원본 bytes를 만들지 않으므로 hash를 생성하지 않는다. 활성 저장의 잘못된 입력·용량 거절 계약은 유지한다.
+
+- `test_csv_inactive_admission_skips_large_payload_work`:40MiB 입력에 기존 REJECTED_LIMIT/기대 DISABLED의 RED(`csv-inactive-large-payload-red`,exit1)를 확인했다. 수정 후 OFF는 DISABLED, 종료는 CLOSED, 생산 순번1/2·원본 hash 없음·pending/drop0과 파일 생성 없음이 일치했다. 저장을 켜고 재시작한 뒤 순번3은 실제 CSV에 기록됐다.
+- `csv-inactive-large-payload-green`: CSV service/runtime와 실제 소비·온도 clock·history5모듈95시험 통과,28.593초,exit0. backend Ruff·기본 mypy11파일 exit0. commit `5e42daf2`.
+- `csv-serialization-budget/compact-json-verification.json`:266개 한글·이모지·제어문자·중첩 JSON의 기존 canonical bytes/hash 일치와 보수적 예약 상한을 대조했다. 이는 compact 출력의 크기 계산 대조이며17개 전체 시나리오에 추가 통과로 합산하지 않는다.
+
+## 2026-10-27 CSV 접수 메모리 보완 후 전체 백엔드 회귀
+
+최종 제품 commit `5e42daf22bf19acda891e813d02b3a54e5ec3846`에서 격리 AppData/설정의 `python -m unittest discover -s backend/tests`를 실행했다. `csv-serialization-full-backend`는 **1,011개 중1,010통과·기존 private F01자료 미제공1skip**,322.370초,exit0이다. 실행 중 제품·시험·문서를 변경하지 않았다.
+
+- 전체 stdout/stderr를 읽고 직전1,009시험의 로그와 정규화 대조했다. unittest FAIL/ERROR0, 새 오류 문구0이다. manifest 초기화 traceback은 기존 `test_csv_image_startup.py`의 오류 주입이며 Starlette/httpx 경고는 유지한다.
+- `csv-serialization-budget/verification.json`에 RED·GREEN·전체 회귀의 명령/종료 코드·로그 해시와 최종 소스 해시를 연결했다. repository.py SHA256=`17b63197523a9490c2e052759f2454e6348570383da743009946eb3f796c501e`, 시험 SHA256=`315d2a945ced0e2604177a520ffc54a0a0a02148f5692bf8545100387f21a583`다.
+- 전체7단계/17명세는 계속 미완료다. 다음 CSV decode·출력 사본, 이미지·fact의 남은 예산, 영속 대조·부분 쓰기 복구·압력 제어·화면 연동, 최종 설치본 검증과 master 통합이 남아 있다. 이번 변경은 개발 브랜치 범위이며 운영 서버에 적용하지 않았다.

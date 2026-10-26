@@ -31,8 +31,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
   fails; include expansion of legacy container values before normalization.
 - Start the health executor-backlog test's hold interval after actual submission,
   including a delayed event-loop scheduling case; retain the 50 ms assertion.
-- Fact construction/readback workspace and corresponding integrated
-  CSV/image reservations remain unfinished.
+- Reserve integrated CSV serialization workspace with retained input bytes before
+  allocating JSON text or UTF-8 copies. Preserve canonical payload hashes and
+  transfer admitted source bytes without charging them twice.
+- Classify disabled or closed CSV admission before allocating large payloads;
+  preserve producer identities without reporting a storage-budget failure.
+- Fact construction/readback, CSV decoding/row rendering, and image workspace
+  reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify
