@@ -544,15 +544,28 @@ class CSVLoggerService:
                     # Include internal clock/provenance fields. Default JSON
                     # separators give a conservative bound for compact output.
                     snapshot, encoded_size, characters, width = prepare_json_payload(dict(data), available)
-                    required_bytes = encoded_size + characters * width
+                    text_bytes = characters * width
+                    # iterencode chunks and their joined text coexist, then
+                    # the joined text and UTF-8 output coexist. Reserve the
+                    # larger phase, including wide Unicode text storage.
+                    required_bytes = max(2 * text_bytes, encoded_size + text_bytes)
                     with self._runtime_lock:
                         if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
                                 + required_bytes > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
                             raise PayloadBudgetExceeded
                         self._pending_processing_payload_bytes += required_bytes
                         reserved_bytes = required_bytes
-                    payload = json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
-                                         sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    # EMA serializes to UTF-8 bytes and then Python text. Use
+                    # this reserved workspace before retaining canonical bytes,
+                    # and size the same detached input rather than the caller's
+                    # potentially mutable model. The temporary model and JSON
+                    # copies are released when the estimator returns.
+                    payload_bytes = self._estimate_factory_data_bytes(FactoryData.model_construct(**snapshot))
+                    encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False,
+                                               sort_keys=True, separators=(",", ":"))
+                    # Avoid the one-shot encoder's growing aggregate buffer;
+                    # join bounded chunks within the two-copy reservation.
+                    payload = "".join(encoder.iterencode(snapshot)).encode("utf-8")
                 except PayloadBudgetExceeded:
                     with self._runtime_lock:
                         self._drop_count += 1
@@ -563,7 +576,6 @@ class CSVLoggerService:
                 result["source_payload_hash"] = hashlib.sha256(payload).hexdigest()
                 envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
                                             payload, result["source_payload_hash"], write_config, characters * width)
-                payload_bytes = self._estimate_factory_data_bytes(data)
                 snapshot = None
                 with self._runtime_lock:
                     queue_limit = self.queue.maxsize
