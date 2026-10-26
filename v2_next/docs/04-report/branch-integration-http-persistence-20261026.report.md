@@ -342,3 +342,14 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - 기존 unreadable-spool 시험은 binary 읽기에도 같은 I/O 실패를 주입하도록 보완했으며 실패를 clean으로 바꾸지 않는 assertion을 유지했다.
 - `fact-spool-count-green`: fact/queue/종료 회귀/SPOT API271시험 중270통과·기존 private F01자료 미제공1skip,75.979초,exit0. backend Ruff·mypy10파일 exit0.
 - 읽기 조각 크기 제한이며 집계 총 스캔 시간의 보장은 아니다. 스풀 전체64MiB·4MiB segment·원본 읽기 전용 전환과 독립 복구 제어는 계속 남아 있다.
+
+## HTTP 1단계 — fact 스풀 전체 미복구 bytes 상한
+
+현재 활성 스풀과 미해결 schema-mismatch 보존 파일의 미복구 bytes 합계에64MiB 상한을
+적용했다. 새 행까지 합산해 상한을 넘으면 추가 쓰기를 거절하고 기존 파일은 유지한다.
+`spool_failure_count`와 `spool_last_error_code=spool_byte_limit`를 남기며 owner의 메모리
+상태에도 사유를 전달한다. 이후 성공 때문에 과거 실패를 지우지 않는다.
+
+- `test_spool_byte_limit_preserves_existing_pending_files`: 실제 활성/보존 파일과 다음 행을 합산한 경계에서 기존 거절0/기대1의 RED(`fact-spool-limit-red`, exit1)를 확인했다. 수정 후 거절1·정확한 사유·두 기존 파일 바이트와 미복구2건 불변을 대조했다. 정상 스풀 쓰기/복구 회귀도 유지했다.
+- `fact-spool-limit-green`: fact/queue/종료 회귀/SPOT API272시험 중271통과·기존 private F01자료 미제공1skip,77.170초,exit0. backend Ruff·mypy10파일 exit0.
+- 스풀 새4MiB segment·기존 단일 원본의 읽기 전용 전환, 직렬화 임시 bytes 선예약과 복구 독립 제어는 계속 구현해야 한다. 이 상한 추가를 R02/RR03 전체 완료로 보지 않는다.

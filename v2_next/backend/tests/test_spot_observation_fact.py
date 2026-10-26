@@ -363,6 +363,30 @@ class SpotObservationFactTests(unittest.TestCase):
             with patch.object(Path, "open", side_effect=AssertionError("cached count performed I/O")):
                 self.assertEqual(writer.spool_pending_count(), 3)
 
+    def test_spool_byte_limit_preserves_existing_pending_files(self) -> None:
+        from backend.FacilityData import spot_observation_fact as fact_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = Path(tmp) / "facts.failed.jsonl"
+            archive = Path(tmp) / "facts.failed.20261027T000000Z.schema-mismatch.jsonl"
+            first = (json.dumps(self.current_fact_row(1), sort_keys=True, ensure_ascii=False)
+                     + "\n").encode("utf-8")
+            second = (json.dumps(self.current_fact_row(2), sort_keys=True, ensure_ascii=False)
+                      + "\n").encode("utf-8")
+            spool.write_bytes(first)
+            archive.write_bytes(b"unresolved-legacy-row\n")
+            archive_before = archive.read_bytes()
+            writer = SpotObservationFactWriter(Path(tmp) / "facts.csv", spool_path=spool)
+            self.assertEqual(writer.spool_pending_count(), 2)
+            budget = len(first) + len(archive_before) + len(second) - 1
+            with patch.object(fact_module, "FACT_SPOOL_PENDING_BYTE_LIMIT", budget, create=True):
+                writer._spool_fact(self.current_fact_row(2))
+            self.assertEqual(writer.spool_failure_count, 1)
+            self.assertEqual(writer.spool_last_error_code, "spool_byte_limit")
+            self.assertEqual(spool.read_bytes(), first)
+            self.assertEqual(archive.read_bytes(), archive_before)
+            self.assertEqual(writer.spool_pending_count(), 2)
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",

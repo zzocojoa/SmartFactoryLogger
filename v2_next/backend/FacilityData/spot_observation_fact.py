@@ -37,6 +37,7 @@ _SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
 _MANIFEST_SQL_BATCH_SIZE = 4096
 FACT_SPOOL_RECOVERY_ROW_LIMIT = 20
 FACT_SPOOL_RECOVERY_BYTE_LIMIT = 1024**2
+FACT_SPOOL_PENDING_BYTE_LIMIT = 64 * 1024**2
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -172,6 +173,7 @@ class SpotObservationFactWriter:
     load_existing_keys: bool = True
     failure_count: int = 0
     spool_failure_count: int = 0
+    spool_last_error_code: Optional[str] = None
     existing_fact_hash_ms: float = 0.0
     existing_fact_index_ms: float = 0.0
     _seen_keys: set[str] = field(default_factory=set)
@@ -405,41 +407,40 @@ class SpotObservationFactWriter:
         try:
             with self._spool_state_lock:
                 spool_path = self._effective_spool_path()
+                payload = (json.dumps(dict(fact), sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+                pending_bytes = sum(
+                    max(0, path.stat().st_size - self._spool_read_offsets.get(path, 0))
+                    for path in self._spool_pending_paths() if path.exists()
+                )
+                if pending_bytes + len(payload) > FACT_SPOOL_PENDING_BYTE_LIMIT:
+                    self.spool_failure_count += 1
+                    self.spool_last_error_code = "spool_byte_limit"
+                    return
                 spool_path.parent.mkdir(parents=True, exist_ok=True)
-                with spool_path.open("a", encoding="utf-8", newline="") as handle:
-                    handle.write(
-                        json.dumps(
-                            dict(fact),
-                            sort_keys=True,
-                            ensure_ascii=False,
-                        )
-                    )
-                    handle.write("\n")
+                with spool_path.open("ab") as handle:
+                    handle.write(payload)
                 if self._spool_pending_count_cache is not None:
                     self._spool_pending_count_cache += 1
         except Exception:
             self.spool_failure_count += 1
+            self.spool_last_error_code = "spool_write_failed"
 
     def _effective_spool_path(self) -> Path:
         if self.spool_path is not None:
             return self.spool_path
         return self.output_path.with_name(f"{self.output_path.name}.failed.jsonl")
 
+    def _spool_pending_paths(self) -> list[Path]:
+        spool_path = self._effective_spool_path()
+        archive_pattern = f"{spool_path.stem}.*.schema-mismatch{spool_path.suffix}"
+        return [spool_path, *sorted(spool_path.parent.glob(archive_pattern))]
+
     def spool_pending_count(self) -> int:
         with self._spool_state_lock:
             if self._spool_pending_count_cache is not None:
                 return self._spool_pending_count_cache
-            spool_path = self._effective_spool_path()
-            suffix = spool_path.suffix
-            archive_pattern = (
-                f"{spool_path.stem}.*.schema-mismatch{suffix}"
-            )
-            spool_paths = [
-                spool_path,
-                *sorted(spool_path.parent.glob(archive_pattern)),
-            ]
             pending_count = 0
-            for pending_path in spool_paths:
+            for pending_path in self._spool_pending_paths():
                 if (
                     not pending_path.exists()
                     or pending_path.stat().st_size == 0

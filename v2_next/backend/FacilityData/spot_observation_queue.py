@@ -52,6 +52,7 @@ class SpotObservationQueue:
         self._state: dict[str, Any] = {
             "queue_capacity": capacity, "accepted_count": 0, "completed_count": 0,
             "rejected_count": 0, "write_failure_count": 0, "spool_failure_count": 0,
+            "spool_last_error_code": None,
             "spool_pending_count": 0, "inflight": False, "initialization_state": "pending",
             "initialization_duration_ms": None, "last_write_duration_ms": None,
             "last_error_code": None, "last_success_at": None, "accepting": True,
@@ -166,6 +167,7 @@ class SpotObservationQueue:
             self._file_stamp = (stat.st_size, stat.st_mtime_ns)
             self._state["write_failure_count"] = max(self._state["write_failure_count"], writer.failure_count)
             self._state["spool_failure_count"] = writer.spool_failure_count
+            self._state["spool_last_error_code"] = writer.spool_last_error_code
             self._state["spool_pending_count"] = pending
             self._state["existing_fact_hash_ms"] = writer.existing_fact_hash_ms
             self._state["existing_fact_index_ms"] = writer.existing_fact_index_ms
