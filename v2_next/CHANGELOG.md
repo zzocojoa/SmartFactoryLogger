@@ -48,6 +48,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
   flush each row inside the existing batch/time drain operation. Record an
   oversized output against its original producer and sink, continue later rows,
   and reject clean shutdown after any processing failure.
+- Leave room for the admitted configuration's CSV headers during admission and
+  decoding, so a full queue cannot strand rows before a writer opens. Reserve
+  formula-escape string copies and retain their shared v1/v2 ownership until
+  drained. Normalize only the required prefix of bounded temperature text,
+  preserving its content and truncation indicator.
 - Fact construction/readback, CSV row construction/scalar conversion and retained
   error-path values, and image workspace reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
