@@ -12,6 +12,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Iterable, Protocol, TextIO, Tuple
 from uuid import uuid4
+from pydantic import ValidationError
 
 from .. import config
 from .. import constants
@@ -636,26 +637,23 @@ class CSVLoggerService:
             available = (CSV_PENDING_PAYLOAD_BYTE_LIMIT - self._pending_source_payload_bytes
                          - self._pending_processing_payload_bytes)
             if reservation > available:
-                self._processing_failure_count += 1
-                self._last_processing_failure_seq = sequence
-                self._last_processing_failure_reason = "decode_byte_limit"
-                self._runtime_write_failure_observed = True
-                self._pending_events[sequence][1].clear()
-                self._completed_event_sequences.add(sequence)
                 failed = True
             else:
                 self._pending_processing_payload_bytes += reservation
                 self._pending_decoded_payloads[sequence] = (reservation, set())
                 failed = False
         if failed:
-            self.logger.error("CSV processing failed", extra={
-                "producer_instance_id": envelope.producer_instance_id,
-                "producer_seq": sequence,
-                "source_payload_hash": envelope.source_payload_hash,
-                "reason": "decode_byte_limit",
-            })
+            self._record_csv_processing_failure(envelope, "decode_byte_limit")
             return None
-        data = FactoryData.model_validate_json(envelope.payload)
+        data = None
+        try:
+            data = FactoryData.model_validate_json(envelope.payload)
+        except ValidationError:
+            # Drop the exception's input references before returning its budget.
+            pass
+        if data is None:
+            self._record_csv_processing_failure(envelope, "decode_invalid_payload")
+            return None
         identities: set[int] = set()
         retained = decoded_string_bytes(data.__dict__, identities)
         if retained > reservation:
@@ -664,6 +662,21 @@ class CSVLoggerService:
             self._pending_processing_payload_bytes -= reservation - retained
             self._pending_decoded_payloads[sequence] = (retained, identities)
         return data
+
+    def _record_csv_processing_failure(self, envelope: CSVEventEnvelope, reason: str) -> None:
+        with self._runtime_lock:
+            self._processing_failure_count += 1
+            self._last_processing_failure_seq = envelope.producer_seq
+            self._last_processing_failure_reason = reason
+            self._runtime_write_failure_observed = True
+            self._pending_events[envelope.producer_seq][1].clear()
+            self._completed_event_sequences.add(envelope.producer_seq)
+        self.logger.error("CSV processing failed", extra={
+            "producer_instance_id": envelope.producer_instance_id,
+            "producer_seq": envelope.producer_seq,
+            "source_payload_hash": envelope.source_payload_hash,
+            "reason": reason,
+        })
 
     def _finish_csv_decode(self, sequence: Optional[int]) -> None:
         """Call only after dropping decoded-item and local row references."""

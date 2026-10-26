@@ -426,6 +426,35 @@ class CSVLoggerServiceTests(unittest.TestCase):
             values = [float(row[3]) for path in self.list_v1_files(tmp_dir) for row in self.read_rows(path)[1:]]
             self.assertEqual(values, [30.0, *range(32, 128), 999.0])
 
+    def test_csv_decode_validation_failure_preserves_identity(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            malformed = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            malformed.Status = {"unexpected": "object"}  # JSON-safe mutation after model validation.
+            with self.assertLogs(service.logger, level="ERROR") as captured:
+                service.start()
+                try:
+                    bad_receipt = service.enqueue_detailed(malformed)
+                    self.assertEqual(bad_receipt["status"], "ACCEPTED")
+                    good_receipt = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                    self.assertEqual(good_receipt["status"], "ACCEPTED")
+                finally:
+                    self.assertFalse(service.stop(timeout_sec=5))
+            state = service.get_runtime_state()
+            self.assertEqual(state["processing_failure_count"], 1)
+            self.assertEqual(state["last_processing_failure_seq"], bad_receipt["producer_seq"])
+            self.assertEqual(state["last_processing_failure_reason"], "decode_invalid_payload")
+            self.assertEqual(state["pending_event_count"], 0)
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            failures = [entry for entry in captured.records if entry.msg == "CSV processing failed"]
+            self.assertEqual(len(failures), 1)
+            self.assertEqual(failures[0].producer_instance_id, bad_receipt["producer_instance_id"])
+            self.assertEqual(failures[0].producer_seq, bad_receipt["producer_seq"])
+            self.assertEqual(failures[0].source_payload_hash, bad_receipt["source_payload_hash"])
+            self.assertEqual(failures[0].reason, "decode_invalid_payload")
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual([float(row[3]) for row in rows[1:]], [31.0])
+
     def test_csv_source_budget_includes_inflight_payloads(self) -> None:
         started, release = threading.Event(), threading.Event()
         original_open = Path.open
