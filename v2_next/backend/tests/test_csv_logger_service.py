@@ -601,6 +601,46 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(len(rows), 2)
                 self.assertEqual(rows[1][rows[0].index("DIE_ID")], "'" + data.Die_ID)
 
+    def test_csv_joined_metadata_remains_in_pending_budget(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        previous_field_limit = csv.field_size_limit(8 * 1024**2)
+        self.addCleanup(csv.field_size_limit, previous_field_limit)
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+            data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            fields = ["product_" + "X" * (2 * 1024**2), "mold_" + "Y" * (2 * 1024**2)]
+            data.operator_metadata_missing_fields = fields
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(30):
+                        raise TimeoutError("test did not release joined-metadata CSV writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                tracemalloc.start()
+                try:
+                    receipt = service.enqueue_detailed(data)
+                    self.assertEqual(receipt["status"], "ACCEPTED")
+                    self.assertTrue(started.wait(5))
+                    allocated, _ = tracemalloc.get_traced_memory()
+                    pending = service.get_runtime_state()["pending_payload_bytes"]
+                finally:
+                    tracemalloc.stop()
+                    release.set()
+                    stopped = service.stop(timeout_sec=30)
+            self.assertLessEqual(allocated, pending + 1024**2, "joined CSV metadata is outside the pending budget")
+            self.assertTrue(stopped)
+            self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
+            files = self.list_v2_files(tmp_dir)
+            self.assertEqual(len(files), 1)
+            rows = self.read_rows(files[0])
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1][rows[0].index("operator_metadata_missing_fields")], ",".join(fields))
+
     def test_csv_header_pressure_does_not_strand_admitted_rows(self) -> None:
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

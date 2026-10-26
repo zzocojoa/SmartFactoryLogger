@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Iterable, Iterator, Protocol, TextIO, Tuple
+from typing import Any, Callable, Optional, Iterable, Iterator, Protocol, TextIO, Tuple
 from uuid import uuid4
 from pydantic import ValidationError
 
@@ -2587,7 +2587,7 @@ class CSVLoggerService:
             self._escape_csv_text(data.Product_No_operator or ""),
             self._escape_csv_text(data.Mold_No_operator or ""),
             self._fmt_bool(bool(data.operator_metadata_valid)),
-            self._escape_csv_text(",".join(data.operator_metadata_missing_fields or [])),
+            self._escape_csv_text(self._join_csv_text(data.operator_metadata_missing_fields or [])),
             self._escape_csv_text(data.operator_metadata_updated_at or ""),
             *v1_values,
             self._fmt(data.MainRamPosition_D0010),
@@ -2751,26 +2751,41 @@ class CSVLoggerService:
             text = text[:max_length]
         return self._escape_csv_text(text), truncated
 
+    def _make_csv_row_text(self, required: int, build: Callable[[], str]) -> str:
+        sequence = getattr(self._writer_context, "decoded_sequence", None)
+        if sequence is None:
+            return build()  # Legacy direct formatting has no owner.
+        header_workspace = self._write_settings().header_workspace_bytes
+        with self._runtime_lock:
+            if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
+                    + required + header_workspace > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                raise CSVOutputBudgetExceeded("csv_row_byte_limit")
+            reserved, identities = self._pending_decoded_payloads[sequence]
+            self._pending_processing_payload_bytes += required
+            self._pending_decoded_payloads[sequence] = (reserved + required, identities)
+        result = build()
+        with self._runtime_lock:
+            identities.add(id(result))
+            self._pending_row_copies.setdefault(sequence, []).append(result)
+        return result
+
+    def _join_csv_text(self, values: list[str]) -> str:
+        if not values:
+            return ""
+        if len(values) == 1:
+            return values[0]  # str.join shares the original in this case.
+        characters = len(values) - 1
+        width = 1
+        for value in values:
+            characters += len(value)
+            if value:
+                width = max(width, decoded_string_bytes(value) // len(value))
+        return self._make_csv_row_text(characters * width, lambda: ",".join(values))
+
     def _escape_csv_text(self, value: str) -> str:
         if value and value[0] in CSV_INJECTION_PREFIXES:
-            sequence = getattr(self._writer_context, "decoded_sequence", None)
-            if sequence is None:
-                return "'" + value  # Legacy direct formatting has no owner.
             width = decoded_string_bytes(value) // len(value)
-            required = (len(value) + 1) * width
-            header_workspace = self._write_settings().header_workspace_bytes
-            with self._runtime_lock:
-                if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
-                        + required + header_workspace > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
-                    raise CSVOutputBudgetExceeded("csv_row_byte_limit")
-                reserved, identities = self._pending_decoded_payloads[sequence]
-                self._pending_processing_payload_bytes += required
-                self._pending_decoded_payloads[sequence] = (reserved + required, identities)
-            escaped = "'" + value
-            with self._runtime_lock:
-                identities.add(id(escaped))
-                self._pending_row_copies.setdefault(sequence, []).append(escaped)
-            return escaped
+            return self._make_csv_row_text((len(value) + 1) * width, lambda: "'" + value)
         return value
 
     def _to_local_timestamp(self, timestamp: datetime) -> datetime:
