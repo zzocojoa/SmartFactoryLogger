@@ -279,6 +279,31 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_initialization_failure_is_unavailable_not_closed(self):
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+
+            def unavailable_open(target, mode="r", *args, **kwargs):
+                if target == path and any(flag in mode for flag in "wax"):
+                    raise OSError("synthetic unavailable destination")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", unavailable_open):
+                owner = SpotObservationQueue(lambda: SpotObservationFactWriter(path))
+                try:
+                    owner._thread.join(2)
+                    self.assertFalse(owner.snapshot()["writer_alive"])
+                    self.assertEqual(owner.snapshot()["initialization_state"], "failed")
+                    result = owner.enqueue_detailed(observation(1))
+                    self.assertEqual(result.status, "REJECTED_UNAVAILABLE")
+                    self.assertEqual(result.reason, "initialization_failed")
+                    self.assertEqual(result.observation_key, "synthetic-A:1")
+                    self.assertFalse(result.accepted)
+                    self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+                finally:
+                    self.assertFalse(owner.close(2))
+
     def test_detailed_admission_reports_full_queue_with_observation_identity(self):
         started, release = threading.Event(), threading.Event()
         with tempfile.TemporaryDirectory() as tmp:

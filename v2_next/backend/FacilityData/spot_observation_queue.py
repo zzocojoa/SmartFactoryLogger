@@ -76,6 +76,8 @@ class SpotObservationQueue:
         except (TypeError, ValueError, OverflowError):
             return self._reject("INVALID", "snapshot_serialization_failed", observation_key)
         with self._lock:
+            if self._state["initialization_state"] == "failed" and not self._stop.is_set():
+                return self._reject_locked("REJECTED_UNAVAILABLE", "initialization_failed", observation_key)
             if not self._state["accepting"]:
                 return self._reject_locked("REJECTED_CLOSED", "persistence_closed", observation_key)
             if self._queue.full():

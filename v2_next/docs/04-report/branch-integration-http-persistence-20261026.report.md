@@ -80,3 +80,11 @@
 - `tdd/fact-admission-red`: 임시 API가 반환한 CLOSED와 실제 필요한 FULL의 행동 불일치로 exit1.
 - `tdd/fact-admission-green`: 16시험 중 15통과·기존 F01 1skip, exit0; 해당 모듈 mypy/Ruff exit0.
 - 실제 수집 호출부의 상세 결과 사용, 초기화 실패와 정상 종료의 분리, DISABLED/입력 신원/추적 결과 대조는 후속 경계다. 상세 API 추가 자체를 전체 접수 계약 완료로 간주하지 않는다.
+
+## HTTP 1단계 — 초기화 실패의 상세 결과
+
+실제 파일 열기 실패로 owner 초기화가 끝난 상태를 `REJECTED_UNAVAILABLE/initialization_failed`로 구분했다. 명시적으로 close한 owner의 기존 CLOSED 계약은 유지한다.
+
+- `tdd/fact-unavailable-red` 및 `audit-recheck-20261027-d66ea095`에서 CLOSED/UNAVAILABLE의 예상 행동 실패를 확인했다.
+- `tdd/fact-unavailable-green`: 모듈 17시험 중 16통과·기존 F01 1skip, exit0. 해당 변경의 Ruff/mypy도 exit0.
+- 이는 실패 상태의 분류 수정이며, 독립 재초기화·복구 제어까지 구현했다는 의미는 아니다.
