@@ -5,6 +5,7 @@ import json
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import queue
 import shutil
 import stat
 import subprocess
@@ -269,6 +270,41 @@ class CSVLoggerServiceTests(unittest.TestCase):
             new_rows = self.read_rows(self.list_v1_files(new_dir)[0])
             self.assertEqual([float(row[3]) for row in old_rows[1:]], [30.0])
             self.assertEqual([float(row[3]) for row in new_rows[1:]], [31.0])
+
+    def test_csv_pending_limit_includes_inflight_and_both_outputs(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+            service.queue = queue.Queue(maxsize=2)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.name.startswith("Factory_Integrated_Log_v2_") and mode == "a":
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test did not release v2 file open")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                try:
+                    first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertTrue(started.wait(2))
+                    second = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                    rejected = service.enqueue_detailed(self.create_data("2026-03-09T07:20:27.000", 32.0))
+                    self.assertEqual(rejected["status"], "REJECTED_LIMIT")
+                    self.assertEqual(rejected["reason"], "pending_item_limit")
+                    self.assertEqual(rejected["producer_seq"], 3)
+                    self.assertEqual([first["status"], second["status"]], ["ACCEPTED", "ACCEPTED"])
+                    self.assertEqual(service.get_runtime_state()["pending_event_count"], 2)
+                finally:
+                    release.set()
+                    self.assertTrue(service.stop(timeout_sec=5))
+            self.assertEqual(service.get_runtime_state()["pending_event_count"], 0)
+            for path in self.list_v1_files(tmp_dir) + self.list_v2_files(tmp_dir):
+                rows = self.read_rows(path)
+                self.assertEqual([float(row[rows[0].index("MainPress")]) for row in rows[1:]], [30.0, 31.0])
+            self.assertEqual(len(self.list_v1_files(tmp_dir)) + len(self.list_v2_files(tmp_dir)), 2)
 
     def test_same_date_rows_stay_in_one_file(self) -> None:
         with self.create_temp_dir() as tmp_dir:

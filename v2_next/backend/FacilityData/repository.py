@@ -309,6 +309,9 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
     ).hexdigest()
 
 
+CSV_PENDING_EVENT_LIMIT = 5000
+
+
 @dataclass(frozen=True)
 class CSVWriteConfig:
     generation: int
@@ -342,7 +345,9 @@ class CSVLoggerService:
     def __init__(self, *, require_runtime_manifest_state: bool = False) -> None:
         self.running = False
         self.thread: Optional[threading.Thread] = None
-        self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=5000)
+        self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=CSV_PENDING_EVENT_LIMIT)
+        self._pending_events: dict[int, tuple[CSVEventEnvelope, set[str]]] = {}
+        self._pending_row_events: dict[int, tuple[list, int]] = {}
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
@@ -515,15 +520,24 @@ class CSVLoggerService:
                 return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
             if not write_config.auto_save:
                 return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
-            try:
-                self.queue.put_nowait(envelope)
-            except queue.Full:
-                with self._runtime_lock:
-                    self._drop_count += 1
-                    self._last_drop_at = time.time()
-                self.logger.warning("CSV log queue full. Dropping data.")
-                return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
             with self._runtime_lock:
+                queue_limit = self.queue.maxsize
+                pending_limit = min(queue_limit, CSV_PENDING_EVENT_LIMIT) if queue_limit > 0 else CSV_PENDING_EVENT_LIMIT
+                if self.queue.full():
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
+                if len(self._pending_events) >= pending_limit:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_LIMIT", "reason": "pending_item_limit"}
+                try:
+                    self.queue.put_nowait(envelope)
+                except queue.Full:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
+                self._pending_events[envelope.producer_seq] = (envelope, set(write_config.required_sinks))
                 self._last_enqueue_at = now
                 if self._payload_bytes_ema is None:
                     self._payload_bytes_ema = float(payload_bytes)
@@ -533,7 +547,27 @@ class CSVLoggerService:
 
     def enqueue(self, data: FactoryData) -> None:
         """Compatibility entry point; production callers can inspect the receipt."""
-        self.enqueue_detailed(data)
+        result = self.enqueue_detailed(data)
+        if result["status"] not in {"ACCEPTED", "DISABLED", "REJECTED_CLOSED"}:
+            self.logger.warning("CSV persistence rejected an event.", extra=result)
+
+    def _bind_pending_row(self, row: list, envelope: CSVEventEnvelope) -> None:
+        with self._runtime_lock:
+            # Retain the row itself: an id must not be reused while its binding exists.
+            self._pending_row_events[id(row)] = (row, envelope.producer_seq)
+
+    def _complete_pending_rows(self, rows: list[Tuple[list, datetime]], sink: str) -> None:
+        with self._runtime_lock:
+            for row, _ in rows:
+                binding = self._pending_row_events.pop(id(row), None)
+                if binding is None:
+                    continue  # Direct legacy flush callers have no admitted envelope.
+                sequence = binding[1]
+                pending = self._pending_events.get(sequence)
+                if pending is not None:
+                    pending[1].discard(sink)
+                    if not pending[1]:
+                        del self._pending_events[sequence]
 
     def _capture_write_config_locked(self) -> CSVWriteConfig:
         return CSVWriteConfig(
@@ -2591,6 +2625,7 @@ class CSVLoggerService:
         writer.writerows([row for row, _ in rows])
         handle.flush()
         self._mark_write_completed()
+        self._complete_pending_rows(rows, "csv_v1")
         return True
 
     def _flush_v2_buffer(
@@ -2611,6 +2646,7 @@ class CSVLoggerService:
         self._last_csv_flush_duration_ms = (time.perf_counter() - flush_started) * 1000.0
         self._commit_v2_rows_persisted(persistence)
         self._mark_write_completed()
+        self._complete_pending_rows(rows, "csv_v2")
         return True
 
     def _prepare_v2_rows_persisted(
@@ -2821,6 +2857,7 @@ class CSVLoggerService:
             last_enqueue_at = self._last_enqueue_at
             last_write_at = self._last_write_at
             payload_bytes_ema = self._payload_bytes_ema
+            pending_event_count = len(self._pending_events)
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -2838,6 +2875,7 @@ class CSVLoggerService:
             "writer_lag_sec": writer_lag_sec,
             "payload_bytes_ema": payload_bytes_ema,
             "estimated_queue_bytes": estimated_queue_bytes,
+            "pending_event_count": pending_event_count,
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
             "running": self.running,
@@ -2938,6 +2976,8 @@ class CSVLoggerService:
                     if not self.running:
                         break
                 else:
+                    # A decoded item exists only when its admitted envelope exists.
+                    assert envelope is not None
                     timestamp = self._parse_timestamp(item)
                     if not auto_save:
                         continue
@@ -3024,8 +3064,10 @@ class CSVLoggerService:
                         current_file_date = item_file_date
 
                     if csv_v1_enabled:
+                        self._bind_pending_row(row, envelope)
                         buffer.append((row, timestamp))
                     if v2_row is not None:
+                        self._bind_pending_row(v2_row, envelope)
                         v2_buffer.append((v2_row, timestamp))
                     self._buffer_size = len(buffer)
 
@@ -3147,6 +3189,7 @@ class CSVLoggerService:
                     timestamp = self._parse_timestamp(deferred_data)
                     row = self._build_row(deferred_data, timestamp)
                     if csv_v1_enabled:
+                        self._bind_pending_row(row, deferred_item)
                         f_handle, writer = self._open_log_file(
                             self._filename_timestamp(timestamp),
                             prefix=file_prefix,
@@ -3165,6 +3208,7 @@ class CSVLoggerService:
                             self._sample_seq,
                             row,
                         )
+                        self._bind_pending_row(v2_row, deferred_item)
                         v2_handle, v2_writer = self._open_v2_log_file(
                             self._filename_timestamp(timestamp),
                             prefix=v2_file_prefix,
@@ -3178,6 +3222,9 @@ class CSVLoggerService:
                     shutdown_flush_succeeded = False
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
         self._buffer_size = 0
+        with self._runtime_lock:
+            if self._pending_events:
+                shutdown_flush_succeeded = False
         self._close_file(f_handle)
         if not self._close_v2_file(
             v2_handle,

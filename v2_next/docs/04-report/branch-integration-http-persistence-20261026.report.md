@@ -129,3 +129,11 @@ CSV 접수 전에 canonical JSON bytes와 source payload hash를 만들고, `log
 
 - `test_disabled_admission_has_no_pending_work`의 ACCEPTED/DISABLED 불일치로 RED(exit1), 수정 후 CSV service/runtime58시험 통과(exit0), Ruff·프로젝트 mypy exit0.
 - 비활성만 돌려주는 빈 구현은 같은 모듈의 실제 저장·불변 원본·세대 전환 시험을 통과할 수 없다. 입력 오류·현재 저장 불가·합산 예산 등의 남은 접수 경계는 계속 구현한다.
+
+## HTTP 1단계 — CSV pending 건수 예약
+
+CSV 접수에서 queue 슬롯과 별개로 원본 이벤트를 예약하고 v1/v2의 필수 출력이 모두 flush될 때 해제한다. queue 밖 buffer·inflight도 최대5000건에 포함한다. 끝까지 남은 접수 자료는 정상 종료로 표시하지 않는다. 신규 출력별 trace 확정은 아직 2단계의 미완료 계약이다.
+
+- `test_csv_pending_limit_includes_inflight_and_both_outputs`: 실제 v2 파일 열기를 지연하고 2건 한도에서 세 번째를 거절하는지, 해제 후 두 CSV에30/31만 저장되고 pending0인지 검사. `tdd/csv-items-red`에서 ACCEPTED/LIMIT 예상 실패(exit1), 최종 `csv-items-final-green`의 CSV160시험 통과(exit0).
+- 2026-10-27 완료 감사에서 발견한 Optional envelope 타입 오류2개는 실제 decode 조건을 명시해 해결했다. 최종 backend Ruff·프로젝트 mypy9파일 exit0. repository.py 추가 검사는 기존9오류만 남으며 exit1이다. 기존 오류와 신규 오류가 사라진 결과를 구분해 보존했다.
+- 이번 건수 제한은 bytes·직렬화/출력 임시 사본·스풀 한도나 부분 쓰기 무결성 전체의 완료를 뜻하지 않는다. 감사의 원시 결과와 원본4문서 복원/원격 통합/전체7단계 잔여 범위도 유지한다.
