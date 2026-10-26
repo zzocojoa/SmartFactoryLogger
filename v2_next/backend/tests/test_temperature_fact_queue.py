@@ -279,6 +279,33 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_detailed_admission_reports_full_queue_with_observation_identity(self):
+        started, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+
+            def factory():
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError("test initialization not released")
+                return SpotObservationFactWriter(path)
+
+            owner = SpotObservationQueue(factory, capacity=1)
+            try:
+                self.assertTrue(started.wait(2))
+                self.assertTrue(owner.enqueue(observation(1)))
+                result = owner.enqueue_detailed(observation(2))
+                self.assertEqual(result.status, "REJECTED_FULL")
+                self.assertEqual(result.reason, "queue_full")
+                self.assertEqual(result.observation_key, "synthetic-A:2")
+                self.assertFalse(result.accepted)
+                self.assertEqual(owner.snapshot()["rejected_count"], 1)
+            finally:
+                release.set()
+                owner.close(3)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1"])
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

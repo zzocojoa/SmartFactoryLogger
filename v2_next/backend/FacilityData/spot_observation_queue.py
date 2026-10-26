@@ -6,16 +6,32 @@ a promise of lossless operation through an unbounded storage outage.
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import json
 import queue
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping
 
-from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
+from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter, build_spot_observation_key
 
 
 FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
+FactAdmissionStatus = Literal[
+    "ACCEPTED", "REJECTED_FULL", "REJECTED_LIMIT", "REJECTED_UNAVAILABLE",
+    "REJECTED_CLOSED", "DISABLED", "INVALID",
+]
+
+
+@dataclass(frozen=True)
+class FactAdmissionResult:
+    status: FactAdmissionStatus
+    reason: str | None
+    observation_key: str
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "ACCEPTED"
 
 
 class FactPersistencePending(RuntimeError):
@@ -47,38 +63,45 @@ class SpotObservationQueue:
         self._thread.start()
 
     def enqueue(self, snapshot: Mapping[str, Any]) -> bool:
+        """Compatibility wrapper; callers needing provenance use enqueue_detailed."""
+        return self.enqueue_detailed(snapshot).accepted
+
+    def enqueue_detailed(self, snapshot: Mapping[str, Any]) -> FactAdmissionResult:
+        observation_key = ""
         try:
             # Bytes own all nested data. No caller can mutate a queued observation.
-            payload = json.dumps(dict(snapshot), ensure_ascii=False, allow_nan=False).encode("utf-8")
+            source = dict(snapshot)
+            observation_key = build_spot_observation_key(source)
+            payload = json.dumps(source, ensure_ascii=False, allow_nan=False).encode("utf-8")
         except (TypeError, ValueError, OverflowError):
-            return self._reject("snapshot_serialization_failed")
+            return self._reject("INVALID", "snapshot_serialization_failed", observation_key)
         with self._lock:
             if not self._state["accepting"]:
-                return self._reject_locked("persistence_closed")
+                return self._reject_locked("REJECTED_CLOSED", "persistence_closed", observation_key)
             if self._queue.full():
-                return self._reject_locked("queue_full")
+                return self._reject_locked("REJECTED_FULL", "queue_full", observation_key)
             # Dequeue transfers ownership to the writer, not out of the budget.
             pending = self._state["accepted_count"] - self._state["completed_count"]
             if pending >= self._queue.maxsize:
-                return self._reject_locked("pending_item_limit")
+                return self._reject_locked("REJECTED_LIMIT", "pending_item_limit", observation_key)
             if self._state["pending_payload_bytes"] + len(payload) > FACT_PENDING_PAYLOAD_BYTE_LIMIT:
-                return self._reject_locked("pending_byte_limit")
+                return self._reject_locked("REJECTED_LIMIT", "pending_byte_limit", observation_key)
             try:
                 self._queue.put_nowait((payload, time.monotonic()))
             except queue.Full:
-                return self._reject_locked("queue_full")
+                return self._reject_locked("REJECTED_FULL", "queue_full", observation_key)
             self._state["accepted_count"] += 1
             self._state["pending_payload_bytes"] += len(payload)
-        return True
+        return FactAdmissionResult("ACCEPTED", None, observation_key)
 
-    def _reject(self, code: str) -> bool:
+    def _reject(self, status: FactAdmissionStatus, code: str, observation_key: str) -> FactAdmissionResult:
         with self._lock:
-            return self._reject_locked(code)
+            return self._reject_locked(status, code, observation_key)
 
-    def _reject_locked(self, code: str) -> bool:
+    def _reject_locked(self, status: FactAdmissionStatus, code: str, observation_key: str) -> FactAdmissionResult:
         self._state["rejected_count"] += 1
         self._state["last_error_code"] = code
-        return False
+        return FactAdmissionResult(status, code, observation_key)
 
     def snapshot(self) -> dict[str, Any]:
         # Never wait on a writer/file/spool lock, scan, or filesystem call.

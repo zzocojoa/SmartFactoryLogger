@@ -72,3 +72,11 @@
 새 `.gitattributes`는 고정 증거·도구의 줄바꿈 자동 변환을 끄고 CRLF를 정상 줄 끝으로 검사한다. 단순 `git add`는 stat이 같은 파일의 이전 변환 결과를 재사용할 수 있어, 원문이 확인된 경로를 `--renormalize`로 다시 읽었다.
 
 `staged-document-byte-check-r2.json`에서 문서/도구 154개가 스테이징 바이트와 실제 원문이 일치함을 확인했다. 문서는 변경 전 감사 SHA256과도 일치하는 것만 포함했다. `git diff --cached --check` exit0, 줄 끝 차이를 제외한 docs/scripts diff exit0이다. 본문 변경 없이 원래 줄바꿈을 보존하는 커밋이며, 미복원 4문서는 포함하지 않았다.
+
+## HTTP 1단계 — fact 상세 접수 API
+
+불변 `FactAdmissionResult(status, reason, observation_key)`와 `enqueue_detailed()`를 추가했다. 기존 Boolean `enqueue()`는 호환 래퍼다. 기존 큐/건수/bytes 거절과 직렬화 실패의 원인을 결과에 연결하며, fact의 `service_id:poll_seq` 키를 그대로 사용한다.
+
+- `tdd/fact-admission-red`: 임시 API가 반환한 CLOSED와 실제 필요한 FULL의 행동 불일치로 exit1.
+- `tdd/fact-admission-green`: 16시험 중 15통과·기존 F01 1skip, exit0; 해당 모듈 mypy/Ruff exit0.
+- 실제 수집 호출부의 상세 결과 사용, 초기화 실패와 정상 종료의 분리, DISABLED/입력 신원/추적 결과 대조는 후속 경계다. 상세 API 추가 자체를 전체 접수 계약 완료로 간주하지 않는다.
