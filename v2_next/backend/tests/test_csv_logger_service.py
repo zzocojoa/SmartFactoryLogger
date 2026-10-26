@@ -11,6 +11,7 @@ import stat
 import subprocess
 import threading
 import time
+import tracemalloc
 from typing import Any
 import unittest
 from uuid import uuid4
@@ -305,6 +306,62 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 rows = self.read_rows(path)
                 self.assertEqual([float(row[rows[0].index("MainPress")]) for row in rows[1:]], [30.0, 31.0])
             self.assertEqual(len(self.list_v1_files(tmp_dir)) + len(self.list_v2_files(tmp_dir)), 2)
+
+    def test_csv_serialization_shares_pending_budget_before_allocation(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        budget = 64 * 1024**2
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            first_data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            first_data.Status = "x" * (20 * 1024**2)
+            large = self.create_data("2026-03-09T07:20:26.000", 31.0)
+            large.Status = "y" * (24 * 1024**2)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(60):
+                        raise TimeoutError("test did not release CSV serialization-budget writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                try:
+                    first = service.enqueue_detailed(first_data)
+                    self.assertEqual(first["status"], "ACCEPTED")
+                    self.assertTrue(started.wait(5))
+                    pending = service.get_runtime_state()["pending_source_payload_bytes"]
+                    self.assertGreater(pending, 20 * 1024**2)
+                    tracemalloc.start()
+                    try:
+                        rejected = service.enqueue_detailed(large)
+                        _, peak = tracemalloc.get_traced_memory()
+                    finally:
+                        tracemalloc.stop()
+                    self.assertEqual(rejected["status"], "REJECTED_LIMIT")
+                    self.assertEqual(rejected["reason"], "pending_byte_limit")
+                    self.assertEqual(rejected["producer_seq"], 2)
+                    self.assertIsNone(rejected["source_payload_hash"])
+                    self.assertLess(peak, budget - pending)
+                    state = service.get_runtime_state()
+                    self.assertEqual(state["pending_source_payload_bytes"], pending)
+                    self.assertEqual(state["pending_processing_payload_bytes"], 0)
+                    self.assertEqual(state["pending_payload_bytes"], pending)
+                    self.assertEqual(state["pending_event_count"], 1)
+                    self.assertEqual(state["drop_count"], 1)
+                    small = self.create_data("2026-03-09T07:20:27.000", 32.0)
+                    accepted = service.enqueue_detailed(small)
+                    self.assertEqual(accepted["status"], "ACCEPTED")
+                    self.assertEqual(accepted["producer_seq"], 3)
+                finally:
+                    release.set()
+                    self.assertTrue(service.stop(timeout_sec=10))
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual([float(row[3]) for row in rows[1:]], [30.0, 32.0])
+            self.assertEqual(service.get_runtime_state()["pending_source_payload_bytes"], 0)
+            self.assertEqual(service.get_runtime_state()["pending_processing_payload_bytes"], 0)
+            self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
 
     def test_csv_source_budget_includes_inflight_payloads(self) -> None:
         started, release = threading.Event(), threading.Event()
