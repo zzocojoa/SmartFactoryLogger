@@ -353,3 +353,16 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_spool_byte_limit_preserves_existing_pending_files`: 실제 활성/보존 파일과 다음 행을 합산한 경계에서 기존 거절0/기대1의 RED(`fact-spool-limit-red`, exit1)를 확인했다. 수정 후 거절1·정확한 사유·두 기존 파일 바이트와 미복구2건 불변을 대조했다. 정상 스풀 쓰기/복구 회귀도 유지했다.
 - `fact-spool-limit-green`: fact/queue/종료 회귀/SPOT API272시험 중271통과·기존 private F01자료 미제공1skip,77.170초,exit0. backend Ruff·mypy10파일 exit0.
 - 스풀 새4MiB segment·기존 단일 원본의 읽기 전용 전환, 직렬화 임시 bytes 선예약과 복구 독립 제어는 계속 구현해야 한다. 이 상한 추가를 R02/RR03 전체 완료로 보지 않는다.
+
+## 2026-10-27 fact 스풀 변경 후 백엔드 전체 회귀
+
+제품 코드 `4a753efe`에서 프로젝트 백엔드 검사와 같은
+`python -m unittest discover -s backend/tests`를 격리 AppData/설정으로 실행했다.
+`fact-spool-full-backend`:994시험 중993통과·기존 private F01자료 미제공1skip,
+314.121초,exit0. 전체 stdout/stderr와 결과는 기존 `BRANCH_SYNC_20261026_4d2950c6/tdd/`
+아래 해당 폴더에 보존했다. `log-review.json`에는 두 전체 로그의 해시와 오류/경고 분류가 있다.
+
+- 기존 부정 입력/디스크 실패/종료 timeout 시험의 로그는 보존하며 실제 unittest FAIL/ERROR는 없었다.
+- Starlette/httpx deprecation 경고는 남아 있다. 이 실행은 frontend/Electron/패키지 빌드 또는 현장 검증을 새로 수행한 것이 아니다.
+- 관련 backend Ruff와 기본 mypy10파일도 최종 제품 변경에서 exit0이다. 이후에는 이 보고서와 CHANGELOG만 갱신했다.
+- 이번5개 행동 수정은 b94bcc58·8f1d7657·78ed68ed·2a46f31a·4a753efe에 분리해 커밋했다. 전체 HTTP7단계/17명세, 새4MiB segment와 원본 읽기 전용 전환, master 통합 및 최종 설치본 검증은 계속 미완료다. 운영 서버에는 변경을 적용하지 않았다.

@@ -9,6 +9,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
   and image destination binding across runtime configuration changes.
 - Publish prepared image storage settings atomically with capture admission while
   keeping path preparation and reconnect work outside the admission lock.
+- Bound fact spool recovery to 20 rows / 1 MiB per call and count pending rows
+  without reading an unlimited line. Report oversized rows with their original
+  location, and reject new spool writes above the 64 MiB unresolved-byte budget.
+  Segment rotation and read-only preservation of legacy spools remain pending.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify
