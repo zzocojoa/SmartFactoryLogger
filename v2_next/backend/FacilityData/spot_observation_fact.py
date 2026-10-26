@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, field
 import io
 from pathlib import Path
@@ -385,75 +385,104 @@ class SpotObservationFactWriter:
                                if path.exists() and path.stat().st_size > self._spool_read_offsets.get(path, 0)), None)
             if spool_path is None:
                 return
+            with ExitStack() as recovered_payloads:
+                pending: list[tuple[dict[str, str], int]] = []
+                fact = None
+                try:
+                    pending, end_offset = self._read_spool_batch(spool_path, recovered_payloads)
+                    for fact, row_end in pending:
+                        key = fact["spot_observation_key"]
+                        if key and key not in self._seen_keys:
+                            self._append_fact(fact)
+                        self._spool_read_offsets[spool_path] = row_end
+                        if self._spool_pending_count_cache is not None:
+                            self._spool_pending_count_cache = max(0, self._spool_pending_count_cache - 1)
+                    self._spool_read_offsets[spool_path] = end_offset
+                    if end_offset == spool_path.stat().st_size and spool_path != self._effective_spool_path():
+                        spool_path.unlink()
+                        self._spool_read_offsets.pop(spool_path, None)
+                        if spool_path == self._active_spool_segment:
+                            self._active_spool_segment = None
+                finally:
+                    # Drop recovered strings before returning their reservations.
+                    pending.clear()
+                    fact = None
+
+    def _reserve_recovery_payload(self, size: int) -> ContextManager[None]:
+        return (self.payload_reservation(size, "spool_recovery_byte_limit")
+                if self.payload_reservation is not None else nullcontext())
+
+    def _read_spool_batch(
+        self, spool_path: Path, recovered_payloads: ExitStack,
+    ) -> tuple[list[tuple[dict[str, str], int]], int]:
+        offset = self._spool_read_offsets.get(spool_path, 0)
+        read_limit = min(FACT_SPOOL_RECOVERY_BYTE_LIMIT, max(0, spool_path.stat().st_size - offset))
+        # The byte batch plus readline/strip copies and the file buffer. Freeze
+        # the extent so an external append cannot exceed the reserved read size.
+        with self._reserve_recovery_payload(2 * read_limit + io.DEFAULT_BUFFER_SIZE):
             pending: list[tuple[dict[str, str], int]] = []
             spool_lines: list[tuple[bytes, int]] = []
-            with spool_path.open("rb") as handle:
-                handle.seek(self._spool_read_offsets.get(spool_path, 0))
-                end_offset = handle.tell()
-                remaining_bytes = FACT_SPOOL_RECOVERY_BYTE_LIMIT
-                for _ in range(FACT_SPOOL_RECOVERY_ROW_LIMIT):
-                    if remaining_bytes == 0:
-                        break
-                    line = handle.readline(remaining_bytes)
-                    if not line:
-                        break
-                    if (len(line) == remaining_bytes and not line.endswith(b"\n")
-                            and handle.tell() < spool_path.stat().st_size):
-                        if remaining_bytes == FACT_SPOOL_RECOVERY_BYTE_LIMIT:
-                            raise ValueError(
-                                f"UNCERTAIN spool-row-too-large: {spool_path} offset={end_offset}"
-                            )
-                        # Retry this whole row in the next bounded batch; a
-                        # byte boundary may fall inside a UTF-8 character.
-                        break
-                    remaining_bytes -= len(line)
-                    spool_lines.append((line, handle.tell()))
+            line = b""
+            raw = None
+            completed = False
+            try:
+                with spool_path.open("rb") as handle:
+                    handle.seek(offset)
                     end_offset = handle.tell()
-            for line, row_end in spool_lines:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    self._reject_invalid_spool(
-                        spool_path,
-                        "malformed-json",
-                        exc,
-                    )
-                if not isinstance(raw, dict):
-                    self._reject_invalid_spool(
-                        spool_path,
-                        "non-object-row",
-                    )
-                if (
-                    raw.get("spot_observation_fact_schema_version")
-                    != SPOT_OBSERVATION_FACT_SCHEMA_VERSION
-                    or not set(SPOT_OBSERVATION_FACT_COLUMNS).issubset(raw)
-                ):
-                    self._reject_invalid_spool(
-                        spool_path,
-                        "schema-mismatch",
-                    )
-                pending.append((
-                    {
-                        column: _text(raw.get(column))
-                        for column in SPOT_OBSERVATION_FACT_COLUMNS
-                    }, row_end,
-                ))
-            for fact, row_end in pending:
-                key = fact["spot_observation_key"]
-                if key and key not in self._seen_keys:
-                    self._append_fact(fact)
-                self._spool_read_offsets[spool_path] = row_end
-                if self._spool_pending_count_cache is not None:
-                    self._spool_pending_count_cache = max(0, self._spool_pending_count_cache - 1)
-            self._spool_read_offsets[spool_path] = end_offset
-            if end_offset == spool_path.stat().st_size and spool_path != self._effective_spool_path():
-                spool_path.unlink()
-                self._spool_read_offsets.pop(spool_path, None)
-                if spool_path == self._active_spool_segment:
-                    self._active_spool_segment = None
+                    remaining_bytes = read_limit
+                    for _ in range(FACT_SPOOL_RECOVERY_ROW_LIMIT):
+                        if remaining_bytes == 0:
+                            break
+                        line = handle.readline(remaining_bytes)
+                        if not line:
+                            break
+                        if (len(line) == remaining_bytes and not line.endswith(b"\n")
+                                and handle.tell() < spool_path.stat().st_size):
+                            if remaining_bytes == FACT_SPOOL_RECOVERY_BYTE_LIMIT:
+                                raise ValueError(
+                                    f"UNCERTAIN spool-row-too-large: {spool_path} offset={end_offset}"
+                                )
+                            break  # Retry the whole row, including any split UTF-8 character.
+                        remaining_bytes -= len(line)
+                        spool_lines.append((line, handle.tell()))
+                        end_offset = handle.tell()
+                for line, row_end in spool_lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # At most four bytes per input byte for retained Unicode
+                    # facts; separately cover JSON text and decoded values while
+                    # building them. Object/index overhead is measured separately.
+                    recovered_payloads.enter_context(self._reserve_recovery_payload(4 * len(line)))
+                    with self._reserve_recovery_payload(8 * len(line)):
+                        try:
+                            parse_error = None
+                            try:
+                                raw = json.loads(line)
+                            except json.JSONDecodeError as exc:
+                                # Keep the location, not JSONDecodeError.doc and
+                                # its traceback's unbudgeted full decoded text.
+                                parse_error = ValueError(str(exc))
+                            if parse_error is not None:
+                                self._reject_invalid_spool(spool_path, "malformed-json", parse_error)
+                            if not isinstance(raw, dict):
+                                self._reject_invalid_spool(spool_path, "non-object-row")
+                            if (raw.get("spot_observation_fact_schema_version")
+                                    != SPOT_OBSERVATION_FACT_SCHEMA_VERSION
+                                    or not set(SPOT_OBSERVATION_FACT_COLUMNS).issubset(raw)):
+                                self._reject_invalid_spool(spool_path, "schema-mismatch")
+                            pending.append(({column: _text(raw.get(column))
+                                             for column in SPOT_OBSERVATION_FACT_COLUMNS}, row_end))
+                        finally:
+                            raw = None
+                completed = True
+                return pending, end_offset
+            finally:
+                spool_lines.clear()
+                line = b""
+                raw = None
+                if not completed:
+                    pending.clear()
 
     def _reject_invalid_spool(
         self,

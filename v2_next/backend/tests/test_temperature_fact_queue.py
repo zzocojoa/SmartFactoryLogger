@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import httpx
 from backend.FacilityData.drivers import spot_api
-from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
+from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter, build_spot_observation_fact
 from backend.FacilityData.spot_observation_queue import SpotObservationQueue, FactPersistencePending
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.schemas import FactoryData
@@ -622,6 +622,65 @@ class FactQueueTests(unittest.TestCase):
             self.assertEqual(len(keys), len(set(keys)))
             self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
             self.assertEqual(owner.snapshot()["spool_failure_count"], 1)
+
+    def test_spool_recovery_shares_owner_budget_and_preserves_source(self):
+        started, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            for sequence in range(1, 21):
+                snapshot = observation(sequence)
+                snapshot["instrument_info"] = "x" * 40000
+                writer._spool_fact(build_spot_observation_fact(snapshot))
+            spool = writer._active_spool_segment
+            self.assertIsNotNone(spool)
+            original = spool.read_bytes()
+
+            def factory():
+                started.set()
+                if not release.wait(10):
+                    raise TimeoutError("test initialization not released")
+                return writer
+
+            owner = SpotObservationQueue(factory)
+            try:
+                self.assertTrue(started.wait(2))
+                for sequence in range(100, 112):
+                    snapshot = observation(sequence)
+                    snapshot["source_payload_for_budget"] = "x" * 1024**2
+                    self.assertTrue(owner.enqueue(snapshot))
+                release.set()
+                owner.close(20)
+                state = owner.snapshot()
+                self.assertEqual(state["initialization_state"], "failed")
+                self.assertEqual(state["processing_payload_bytes"], 0)
+                self.assertGreater(state["pending_payload_bytes"], 12 * 1024**2)
+                self.assertEqual(state["accepted_count"], 12)
+                self.assertEqual(state["completed_count"], 0)
+                self.assertFalse(state["writes_drained"])
+                self.assertEqual(writer._spool_read_offsets.get(spool, 0), 0)
+                self.assertEqual(spool.read_bytes(), original)
+                self.assertEqual(self.read_rows(path), [])
+            finally:
+                release.set()
+                owner.close(20)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+
+            # Independently recover the preserved disk rows with sufficient space.
+            # The first owner's 12 unprocessed admissions remain reported above.
+            recovered = SpotObservationQueue(lambda: SpotObservationFactWriter(path))
+            try:
+                self.assertTrue(recovered.enqueue(observation(999)))
+                self.assertTrue(recovered.close(20))
+                self.assertEqual(recovered.snapshot()["pending_payload_bytes"], 0)
+                self.assertEqual(recovered.snapshot()["processing_payload_bytes"], 0)
+            finally:
+                recovered.close(20)
+            rows = self.read_rows(path)
+            self.assertEqual([row["spot_poll_seq"] for row in rows],
+                             [str(sequence) for sequence in range(1, 21)] + ["999"])
+            self.assertTrue(all(row["instrument_info"] == "x" * 40000 for row in rows[:-1]))
 
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
