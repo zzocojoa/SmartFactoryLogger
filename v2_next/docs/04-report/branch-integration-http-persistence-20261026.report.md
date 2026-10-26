@@ -208,3 +208,11 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - `image-bytes-red`: 접수3/기대2로 exit1. 첫 회귀의238시험 중 이 새 시험만 연결 키가 비어 실패했다. fixture에 필수 조회 완료 시각이 빠진 원인을 확인하고 입력을 보완했다. 제품 동작은 추가 변경하지 않았다.
 - `image-bytes-green-r2`: 수정 fixture가 포함된 이미지 종료33시험 통과(exit0). 앞 실행의 나머지205시험도 통과했고 해당 제품 상태의 backend Ruff/mypy10파일은 exit0이다.
 - 이 예약은 보존 중인 원본 payload 범위다. 직렬화·decode·출력 임시 사본과 공유 참조의 중복 예약 방지, 스풀/복구 예산은 계속 구현할 필수 범위이며 R02/RR03 전체 완료가 아니다. 새 JSON snapshot 경로의 입력 오류가 감시로 전파되지 않도록 하는 경계도 다음 시험으로 확인한다.
+
+## HTTP 1단계 — 잘못된 이미지 연결 snapshot의 거절
+
+직렬화할 수 없는 연결 snapshot은 원본 큐/예약에 넣지 않고 별도 invalid 거절·사유로 남긴다. 저장 입력 오류가 이미지 조회 호출부로 전파되지 않으며 다음 정상 capture를 계속 저장한다. 과거 invalid 집계는 후속 쓰기 성공 후에도 유지한다.
+
+- `test_invalid_link_snapshot_rejects_capture_and_next_capture_succeeds`: NaN의 실제 JSON ValueError가 호출부로 전파되는 RED(`image-invalid-red`, exit1)를 확인했다. 수정 후 다음 정상 이미지만 저장되고 연결 키2·예약0·거절1/쓰기 실패0을 대조했다.
+- `image-invalid-green`: 이미지 종료·SPOT API·retention·CSV 이미지 시작239시험 통과(exit0), backend Ruff·mypy10파일 exit0.
+- 전체 상세 admission/영속 trace와 이미지 설정 세대·실제 목적지 고정은 아직 후속 작업이다. 이번 수정은 입력 오류 격리 범위다.

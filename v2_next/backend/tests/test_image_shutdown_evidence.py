@@ -244,6 +244,34 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual([row['spot_image_linked_observation_key'] for row in rows],
                          ['budget-fixture:1', 'budget-fixture:2', 'budget-fixture:4'])
 
+    def test_invalid_link_snapshot_rejects_capture_and_next_capture_succeeds(self):
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
+        invalid = {'spot_service_instance_id': 'invalid-fixture', 'spot_poll_seq': 1,
+                   'spot_last_poll_completed_at': '2026-09-29T00:00:01Z', 'signalpc': float('nan')}
+        with patch.object(spot, '_spot_temperature_snapshot', invalid):
+            self.enqueue()
+        rejected = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(rejected['enqueued_count'], 0)
+        self.assertEqual(rejected['pending_payload_bytes'], 0)
+        self.assertEqual(rejected['unfinished_tasks'], 0)
+        self.assertEqual(rejected['dropped_count'], 1)
+        self.assertEqual(rejected['dropped_invalid_count'], 1)
+        self.assertEqual(spot.get_spot_image_capture_health()['last_error_code'],
+                         'snapshot_serialization_failed')
+        valid = dict(invalid, spot_poll_seq=2, signalpc=80.0)
+        with patch.object(spot, '_spot_temperature_snapshot', valid):
+            self.enqueue()
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertEqual(final['dropped_invalid_count'], 1)
+        self.assertEqual(final['failure_count'], 0)
+        self.assertTrue(final['accounting_consistent'])
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([row['spot_image_linked_observation_key'] for row in rows], ['invalid-fixture:2'])
+
     def test_concurrent_begin_and_stop_keep_first_baseline(self):
         self.history()
         entered, release = self.block_write(fail=True)

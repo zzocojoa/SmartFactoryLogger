@@ -281,6 +281,7 @@ _spot_image_capture_dropped_oversize_count = 0
 _spot_image_capture_dropped_queue_full_count = 0
 _spot_image_capture_dropped_pending_limit_count = 0
 _spot_image_capture_dropped_payload_limit_count = 0
+_spot_image_capture_dropped_invalid_count = 0
 _spot_image_capture_pending_payload_bytes = 0
 _spot_image_capture_failure_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
@@ -823,6 +824,7 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
         "dropped_pending_limit_count": _spot_image_capture_dropped_pending_limit_count,
         "dropped_payload_limit_count": _spot_image_capture_dropped_payload_limit_count,
+        "dropped_invalid_count": _spot_image_capture_dropped_invalid_count,
         "pending_payload_bytes": _spot_image_capture_pending_payload_bytes,
         "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
         "last_error_at": _spot_image_capture_last_error_at or None,
@@ -885,6 +887,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     global _spot_image_capture_dropped_pending_limit_count
     global _spot_image_capture_dropped_payload_limit_count, _spot_image_capture_pending_payload_bytes
+    global _spot_image_capture_dropped_invalid_count
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
@@ -907,6 +910,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_dropped_queue_full_count = 0
         _spot_image_capture_dropped_pending_limit_count = 0
         _spot_image_capture_dropped_payload_limit_count = 0
+        _spot_image_capture_dropped_invalid_count = 0
         _spot_image_capture_pending_payload_bytes = 0
         _spot_image_capture_failure_count = 0
         _spot_image_capture_last_enqueue_at = 0.0
@@ -1040,6 +1044,7 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
             "dropped_pending_limit_count": _spot_image_capture_dropped_pending_limit_count,
             "dropped_payload_limit_count": _spot_image_capture_dropped_payload_limit_count,
+            "dropped_invalid_count": _spot_image_capture_dropped_invalid_count,
             "pending_payload_bytes": _spot_image_capture_pending_payload_bytes,
             "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
             "failure_count": _spot_image_capture_failure_count,
@@ -1209,6 +1214,8 @@ def _maybe_enqueue_spot_image_capture(
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     global _spot_image_capture_dropped_pending_limit_count
     global _spot_image_capture_dropped_payload_limit_count, _spot_image_capture_pending_payload_bytes
+    global _spot_image_capture_dropped_invalid_count
+    global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
         return
     mode = _spot_image_capture_mode()
@@ -1227,9 +1234,19 @@ def _maybe_enqueue_spot_image_capture(
         snapshot = get_spot_temperature_poll_snapshot()
     if not _should_enqueue_spot_image_capture(mode, snapshot):
         return
-    snapshot_payload = (json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
-                                   separators=(",", ":"), sort_keys=True).encode("utf-8")
-                        if snapshot is not None else None)
+    try:
+        snapshot_payload = (json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
+                                       separators=(",", ":"), sort_keys=True).encode("utf-8")
+                            if snapshot is not None else None)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        # Persistence cannot serialize this link; it must not fail live viewing.
+        with _spot_image_capture_lock:
+            _spot_image_capture_dropped_count += 1
+            _spot_image_capture_dropped_invalid_count += 1
+            _spot_image_capture_last_error_at = time.time()
+            _spot_image_capture_last_error_code = "snapshot_serialization_failed"
+            _spot_image_capture_last_error_message = "capture observation snapshot is not serializable"
+        return
     payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
     now = time.time()
