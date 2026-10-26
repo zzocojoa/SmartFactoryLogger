@@ -481,7 +481,7 @@ class SpotObservationFactWriter:
                 try:
                     # Any valid row can need at most 1x UTF-8 bytes plus 4x
                     # Unicode character contents. Reject before rendering it.
-                    source, payload_size, _, _ = prepare_json_payload(
+                    source, payload_size, text_characters, text_width = prepare_json_payload(
                         dict(fact), 5 * FACT_SPOOL_RECOVERY_BYTE_LIMIT)
                 except PayloadBudgetExceeded:
                     self.spool_failure_count += 1
@@ -500,17 +500,32 @@ class SpotObservationFactWriter:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_byte_limit"
                     return
-                payload = (json.dumps(source, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
-                if len(payload) != payload_size:
-                    raise ValueError("Spool payload size changed after preflight")
-                spool_path, mode = self._spool_append_target(len(payload))
-                with spool_path.open(mode) as handle:
-                    writing_path = spool_path
-                    if handle.write(payload) != len(payload):
-                        raise OSError("Incomplete SPOT observation spool write")
-                self._active_spool_segment = spool_path
-                if self._spool_pending_count_cache is not None:
-                    self._spool_pending_count_cache += 1
+                text_size = text_characters * text_width
+                # The newline join owns old/new JSON text at once; encoding
+                # owns the joined text and UTF-8 bytes at once.
+                scratch = max(2 * text_size + text_width, text_size + text_width + payload_size) + io.DEFAULT_BUFFER_SIZE
+                reservation = (self.payload_reservation(scratch, "spool_memory_byte_limit")
+                               if self.payload_reservation is not None else nullcontext())
+                with reservation:
+                    payload = b""
+                    try:
+                        payload = (json.dumps(source, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+                        if len(payload) != payload_size:
+                            raise ValueError("Spool payload size changed after preflight")
+                        spool_path, mode = self._spool_append_target(len(payload))
+                        with spool_path.open(mode) as handle:
+                            writing_path = spool_path
+                            if handle.write(payload) != len(payload):
+                                raise OSError("Incomplete SPOT observation spool write")
+                        self._active_spool_segment = spool_path
+                        if self._spool_pending_count_cache is not None:
+                            self._spool_pending_count_cache += 1
+                    finally:
+                        payload = b""
+        except FactPayloadBudgetExceeded as exc:
+            with self._spool_state_lock:
+                self.spool_failure_count += 1
+                self.spool_last_error_code = exc.reason
         except Exception:
             with self._spool_state_lock:
                 self.spool_failure_count += 1

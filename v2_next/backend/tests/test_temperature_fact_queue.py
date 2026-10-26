@@ -566,6 +566,63 @@ class FactQueueTests(unittest.TestCase):
                 self.assertFalse(owner.snapshot()["writer_alive"])
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["2"])
 
+    def test_spool_serialization_shares_owner_budget(self):
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            failed_once = False
+
+            def fail_first_append(target, mode="r", *args, **kwargs):
+                nonlocal failed_once
+                if target == path and mode == "a" and not failed_once:
+                    failed_once = True
+                    started.set()
+                    if not release.wait(15):
+                        raise TimeoutError("test write not released")
+                    raise OSError("synthetic primary write failure")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", fail_first_append):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    first = observation(1)
+                    # JSON escapes expand these characters much more than CSV.
+                    first["instrument_info"] = "\x01" * 155000
+                    self.assertTrue(owner.enqueue(first))
+                    self.assertTrue(started.wait(2))
+                    sequence = 2
+                    for size in (1024**2, 64 * 1024, 4 * 1024):
+                        while True:
+                            snapshot = observation(sequence)
+                            snapshot["source_payload_for_budget"] = "x" * size
+                            sequence += 1
+                            if not owner.enqueue(snapshot):
+                                break
+                    release.set()
+                    owner._queue.join()
+                    state = owner.snapshot()
+                    self.assertEqual(state["spool_failure_count"], 1)
+                    self.assertEqual(state["spool_last_error_code"], "spool_memory_byte_limit")
+                    self.assertEqual(state["spool_pending_count"], 0)
+                    self.assertEqual(state["pending_payload_bytes"], 0)
+                    self.assertEqual(state["processing_payload_bytes"], 0)
+                    self.assertTrue(owner.enqueue(observation(999)))
+                    self.assertFalse(owner.close(10))
+                finally:
+                    release.set()
+                    owner.close(20)
+                    self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertTrue(failed_once)
+            keys = [row["spot_observation_key"] for row in self.read_rows(path)]
+            self.assertNotIn("synthetic-A:1", keys)
+            self.assertEqual(keys[-1], "synthetic-A:999")
+            self.assertEqual(len(keys), len(set(keys)))
+            self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+            self.assertEqual(owner.snapshot()["spool_failure_count"], 1)
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

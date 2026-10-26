@@ -487,3 +487,11 @@ JSON 크기 계산을 `persistence_payload.py`로 옮겨 접수와 스풀에서 
 - `test_oversized_spool_rejects_before_serialization`:12MiB 입력의 생성은 측정에서 제외하고 스풀 거절 동안의 추가 할당을 tracemalloc로 측정했다. 기존 최고31,462,003bytes/상한16,777,216bytes의 RED(`fact-spool-preflight-red`,exit1)를 확인했다. 수정 후 상한 이하·원본 불변·명시적 행 크기 실패1·다음 실제 정상 복구를 확인했다.
 - `fact-spool-preflight-green`: fact/queue65시험 중64통과·기존 private F01자료 미제공1skip,8.735초,exit0. backend Ruff와 공통 모듈을 추가한 기본 mypy11파일 exit0.
 - 이는 초과 입력의 사전 거절이다. 허용된 스풀 행의 실제 임시 사본도 owner의 다른 대기 자료와 합산하는 예약, 복구 읽기·fact 구성 등의 남은 메모리 경계는 계속 구현한다. tracemalloc 측정은 전체 프로세스 RSS 보장이 아니다.
+
+## HTTP 1단계 — 허용 스풀 행의 owner 예산 합산
+
+허용된 JSON 행도 직렬화 문자열·줄바꿈 사본·UTF-8 bytes와 파일 버퍼 공간을 owner의 기존 대기/처리 예산에 추가 예약한다. 파일을 닫고 payload 참조를 놓은 뒤에만 반환한다. 공간이 없으면 기존 파일에 쓰기 전에 `spool_memory_byte_limit`로 실패를 기록하며, 디스크 상한 거절과 구분한다.
+
+- `test_spool_serialization_shares_owner_budget`: 실제 첫 append를 지연해 큐를 채운 뒤 해당 append에1회 오류를 주입했다. JSON escape로 커지는 유효 행에서 기존 스풀 실패0/기대1의 RED(`fact-spool-shared-budget-red`,exit1)를 확인했다. 수정 후 메모리 사유·스풀/메모리 잔량0·실패 ID의 저장 누락이 설명됨·이후 작은 ID의 실제 저장 및 중복 없음이 일치했다. 이 합성 한도 시험은 운영 데이터 손실 발생의 근거가 아니다.
+- `fact-spool-shared-budget-green-r2`: 파일 버퍼 예약까지 포함한 최종 상태의 fact/queue66시험 중65통과·기존 private F01자료 미제공1skip,9.268초,exit0. backend Ruff·기본 mypy11파일 exit0.
+- 전체 복구 읽기·fact 구성·파일 검산 임시 공간, 통합 CSV/이미지 및 영속 추적/압력 제어와17개 전체 시나리오는 계속 남아 있다. 다음 관련 회귀 범위 검증을 수행한다.
