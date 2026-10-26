@@ -358,7 +358,7 @@ class SpotObservationFactTests(unittest.TestCase):
 
             with patch.object(Path, "open", bounded_open):
                 self.assertEqual(writer.spool_pending_count(), 3)
-                self.assertEqual(_spool_pending_count(spool), 2)
+                self.assertEqual(_spool_pending_count(spool), 3)
             self.assertGreater(len(reads), 4)
             with patch.object(Path, "open", side_effect=AssertionError("cached count performed I/O")):
                 self.assertEqual(writer.spool_pending_count(), 3)
@@ -383,6 +383,33 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertEqual(manifest["spool_pending_count"], 1)
             self.assertEqual(manifest["row_count"], 0)
             self.assertEqual(spool.read_bytes(), original)
+
+    def test_manifest_counts_unresolved_spool_archives(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = output.with_name(output.name + ".failed.jsonl")
+            archive = spool.with_name(spool.stem + ".20261027T000000Z.schema-mismatch.jsonl")
+            original = (json.dumps(self.current_fact_row(1)) + "\n").encode("utf-8")
+            spool.write_bytes(original)
+            archive.write_bytes(b"unresolved-legacy-row\n")
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            writer._spool_fact(self.current_fact_row(2))
+            self.assertEqual(writer.spool_pending_count(), 3)
+            manifest = build_spot_observation_fact_manifest(fact_path=output, enabled=True)
+            self.assertEqual(manifest["spool_pending_count"], 3)
+            original_open = Path.open
+
+            def unreadable_open(path, mode="r", *args, **kwargs):
+                if path == archive and mode == "rb":
+                    raise PermissionError("injected unreadable archived spool")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", unreadable_open):
+                with self.assertRaisesRegex(OSError, "unreadable archived spool"):
+                    build_spot_observation_fact_manifest(fact_path=output, enabled=True)
+            self.assertEqual(spool.read_bytes(), original)
+            self.assertEqual(archive.read_bytes(), b"unresolved-legacy-row\n")
+            self.assertFalse(output.exists())
 
     def test_spool_byte_limit_preserves_existing_pending_files(self) -> None:
         from backend.FacilityData import spot_observation_fact as fact_module

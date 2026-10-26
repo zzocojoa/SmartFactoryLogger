@@ -408,3 +408,11 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 
 - `test_spool_rejects_rows_above_recovery_limit`: 정확히1MiB의 실제 행 뒤1바이트 초과 행을 보냈을 때 기존 실패0/기대1의 RED(`fact-spool-write-size-red`, exit1)를 확인했다. 수정 후 기존 bytes 불변·초과 행 거절·다음 정상 행 접수·두 배치의 실제 CSV 복구/내용·과거 실패1 유지·잔여0을 대조했다.
 - `fact-spool-write-size-green`: fact 모듈40시험 통과(0.816초, exit0). backend Ruff·기본 mypy10파일 exit0. 직렬화 전에 필요한 임시 메모리의 선예약과 전체 출력별 계약은 후속 범위다.
+
+## HTTP 1단계 — 미해결 보존 스풀의 독립 집계
+
+runtime writer와 독립 manifest가 같은 파일 목록으로 잔여를 계산한다. 현재 단일 파일·새 segment뿐 아니라 기존 schema-mismatch 보존 파일도 포함하고, 어느 파일이든 읽기 실패를 정상0건으로 바꾸지 않는다. 보존 파일을 자동 복구하거나 삭제하지 않는다.
+
+- `test_manifest_counts_unresolved_spool_archives`: 실제 세 종류 파일에서 독립 manifest2건/기대3건의 RED(`fact-spool-archive-count-red`, exit1)를 확인했다. 수정 후 양쪽3건·보존 파일 읽기 오류 전달·원본 불변을 대조했다.
+- 기존 bounded-read 시험의 독립 집계 기대값도 포함된 보존1행을 더한3건으로 맞췄다. 읽기 크기 제한과 runtime cache 검사는 유지했다.
+- `fact-spool-archive-count-green`: fact 모듈41시험 통과(0.834초, exit0), backend Ruff·기본 mypy10파일 exit0. 전체 백엔드 검사를 이어간다.

@@ -473,9 +473,7 @@ class SpotObservationFactWriter:
         return [spool_path, *_spool_segment_paths(spool_path)]
 
     def _spool_pending_paths(self) -> list[Path]:
-        spool_path = self._effective_spool_path()
-        archive_pattern = f"{spool_path.stem}.*.schema-mismatch{spool_path.suffix}"
-        return [*self._spool_recoverable_paths(), *sorted(spool_path.parent.glob(archive_pattern))]
+        return _spool_pending_paths(self._effective_spool_path())
 
     def spool_pending_count(self) -> int:
         with self._spool_state_lock:
@@ -993,8 +991,13 @@ def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
     return count + int(row_has_content)
 
 
+def _spool_pending_paths(spool_path: Path) -> list[Path]:
+    archive_pattern = f"{spool_path.stem}.*.schema-mismatch{spool_path.suffix}"
+    return [spool_path, *_spool_segment_paths(spool_path), *sorted(spool_path.parent.glob(archive_pattern))]
+
+
 def _spool_pending_count(spool_path: Path) -> int:
-    return sum(_count_spool_rows(path) for path in [spool_path, *_spool_segment_paths(spool_path)]
+    return sum(_count_spool_rows(path) for path in _spool_pending_paths(spool_path)
                if path.exists() and path.stat().st_size)
 
 
