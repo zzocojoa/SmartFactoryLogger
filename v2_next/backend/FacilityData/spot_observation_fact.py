@@ -35,6 +35,7 @@ SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION = "1.2.1"
 SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
 _SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
 _MANIFEST_SQL_BATCH_SIZE = 4096
+FACT_SPOOL_RECOVERY_ROW_LIMIT = 20
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -215,6 +216,7 @@ class SpotObservationFactWriter:
         init=False,
         repr=False,
     )
+    _spool_read_offsets: dict[Path, int] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.load_existing_keys:
@@ -314,10 +316,17 @@ class SpotObservationFactWriter:
             spool_path = self._effective_spool_path()
             if not spool_path.exists() or spool_path.stat().st_size == 0:
                 return
-            pending: list[dict[str, str]] = []
-            with spool_path.open("r", encoding="utf-8") as handle:
-                spool_lines = list(handle)
-            for line in spool_lines:
+            pending: list[tuple[dict[str, str], int]] = []
+            spool_lines: list[tuple[bytes, int]] = []
+            with spool_path.open("rb") as handle:
+                handle.seek(self._spool_read_offsets.get(spool_path, 0))
+                for _ in range(FACT_SPOOL_RECOVERY_ROW_LIMIT):
+                    line = handle.readline()
+                    if not line:
+                        break
+                    spool_lines.append((line, handle.tell()))
+                end_offset = handle.tell()
+            for line, row_end in spool_lines:
                 line = line.strip()
                 if not line:
                     continue
@@ -343,22 +352,23 @@ class SpotObservationFactWriter:
                         spool_path,
                         "schema-mismatch",
                     )
-                pending.append(
+                pending.append((
                     {
                         column: _text(raw.get(column))
                         for column in SPOT_OBSERVATION_FACT_COLUMNS
-                    }
-                )
-            for fact in pending:
+                    }, row_end,
+                ))
+            for fact, row_end in pending:
                 key = fact["spot_observation_key"]
                 if key and key not in self._seen_keys:
                     self._append_fact(fact)
-            spool_path.unlink(missing_ok=True)
-            if self._spool_pending_count_cache is not None:
-                self._spool_pending_count_cache = max(
-                    0,
-                    self._spool_pending_count_cache - len(pending),
-                )
+                self._spool_read_offsets[spool_path] = row_end
+                if self._spool_pending_count_cache is not None:
+                    self._spool_pending_count_cache = max(0, self._spool_pending_count_cache - 1)
+            self._spool_read_offsets[spool_path] = end_offset
+            if end_offset == spool_path.stat().st_size:
+                spool_path.unlink()
+                self._spool_read_offsets.pop(spool_path, None)
 
     def _quarantine_invalid_spool(
         self,
@@ -368,6 +378,7 @@ class SpotObservationFactWriter:
     ) -> NoReturn:
         archive_path = self._next_schema_mismatch_archive_path(spool_path)
         spool_path.rename(archive_path)
+        self._spool_read_offsets.pop(spool_path, None)
         error = ValueError(
             f"Invalid SPOT observation fact spool quarantined: {reason}: {archive_path.name}"
         )
@@ -420,6 +431,7 @@ class SpotObservationFactWriter:
                 ):
                     continue
                 with pending_path.open("r", encoding="utf-8") as handle:
+                    handle.seek(self._spool_read_offsets.get(pending_path, 0))
                     pending_count += sum(
                         1
                         for line in handle

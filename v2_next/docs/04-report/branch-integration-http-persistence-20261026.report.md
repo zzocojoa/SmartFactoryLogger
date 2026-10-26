@@ -305,3 +305,12 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_capture_interval_ignores_wall_clock_changes`: 벽시계가 앞으로 이동했을 때 기존 구현이 간격 전 이미지를 ACCEPTED로 처리하는 RED(`image-monotonic-red`, exit1)를 확인했다. 수정 후 간격 전 정책 제외, 크기 초과 거절, 벽시계 후퇴 뒤 다음 정상 접수와 실제 JPEG/원장 2개·미저장 0을 대조했다.
 - `image-monotonic-green`: 이미지 종료·SPOT API·retention·CSV 시작 245시험 모두 통과(48.689초, exit0). backend Ruff와 기본 mypy 10파일도 exit0이다.
 - 이 결과는 이미지 간격의 해당 경계 검증이다. 영속 추적·전체 저장 결과 계측·7단계 전체 구현과 최종 설치본 검증은 계속 미완료다. 기존 전체 health 실행 이후 추가된 제품 변경에는 이번 관련 회귀 결과를 적용하며, 이전 전체 health를 최신 소스 전체의 검사로 표현하지 않는다.
+
+## HTTP 1단계 — fact 복구의 한 번 처리 건수
+
+기존 fact 스풀 전체를 `list(handle)`로 올리던 복구를 한 호출당 최대20개 물리 행의
+읽기/처리로 바꿨다. 확인된 행 다음의 읽기 위치를 writer가 유지하고, 남은 건수에 반영한다.
+이 변경은 아직 bytes 제한·새 segment 형식·기존 스풀 원본 보존·독립 복구 예약의 완료가 아니다.
+
+- `test_spool_recovery_processes_at_most_twenty_rows`:23건을 준비했을 때 첫 복구의 실제 CSV23행/기대20행으로 RED(`fact-spool-rows-red`, exit1)를 확인했다. 수정 후 첫20행·미복구3건, 다음3행과 전체 키·manifest23행을 대조했다.
+- `fact-spool-rows-green`: fact/queue/종료 회귀/SPOT API268시험 중267통과·기존1skip,76.844초,exit0. backend Ruff 및 기본 mypy10파일 exit0. 전체17명세의 통과로 집계하지 않는다.

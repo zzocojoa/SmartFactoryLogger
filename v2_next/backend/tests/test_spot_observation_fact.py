@@ -225,6 +225,29 @@ class SpotObservationFactTests(unittest.TestCase):
         self.assertEqual(manifest["diagnostics_capture_status_counts"], {"async_partial": 2})
         self.assertEqual(manifest["diagnostics_binding_status_counts"], {"same_poll": 2})
 
+    def test_spool_recovery_processes_at_most_twenty_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            spool.write_text("".join(json.dumps(self.current_fact_row(seq)) + "\n"
+                                     for seq in range(1, 24)), encoding="utf-8")
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            self.assertEqual(writer.spool_pending_count(), 23)
+            writer._flush_spool()
+            with output.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 20)
+            self.assertEqual(writer.spool_pending_count(), 3)
+            self.assertEqual([row["spot_observation_key"] for row in rows],
+                             [f"svc-1:{seq}" for seq in range(1, 21)])
+            writer._flush_spool()
+            with output.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_observation_key"] for row in rows],
+                             [f"svc-1:{seq}" for seq in range(1, 24)])
+            self.assertEqual(writer.spool_pending_count(), 0)
+            self.assertEqual(writer.manifest_summary()["row_count"], 23)
+
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
             "spot_service_instance_id": "svc-1",
