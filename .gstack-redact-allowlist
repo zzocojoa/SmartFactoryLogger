@@ -1,0 +1,4 @@
+# Test-only rejected origin in v2_next/scripts/field-v1028/observe_operator_image.test.cjs.
+# resolveImageOrigin rejects credentials before any network operation.
+# Exact scanner span includes the closing quote/comma of the JavaScript literal.
+http://user:secret@127.0.0.1:8000',

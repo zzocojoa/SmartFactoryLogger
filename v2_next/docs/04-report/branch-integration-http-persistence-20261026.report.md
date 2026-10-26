@@ -172,3 +172,9 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - 기존 감사의 실패 원문은 보존하며 후속 수정으로 연결한다. 새 설치본 빌드·운영 승격 및 HTTP 전체7단계의 완료 근거는 아니다.
 
 원문4문서의 바이트 복원은 Git 전체24,035객체에서 원래 크기와 맞는 blob이0임을 추가 확인했다. 현재 본문과 보존 stash의 정규화 일치는 유지하지만 원래 SHA256 복원은 미완료다. NAS 당일 records와 REA 경로에서도 해당 이름의 사본을 찾지 못했다. 보호 stash와 기존 감사 해시를 유지한다.
+
+## 원격 작업 브랜치 사전 검사
+
+989ef1d6의 첫 push는 pre-push 비밀값 검사에서 인증정보 형태의 localhost 시험 URL1개 때문에 차단됐다. `push-auth-url-inspection.json`에서 해당 위치를 확인했고, `observe_operator_image.test.cjs`의 정확한 origin 거부 시험 입력이었다. 실제 인증정보나 네트워크 연결 값이 아니며 `resolveImageOrigin`의 username/password 검사로 즉시 거부된다. 해당 실제 시험을 다시 실행해1개 통과(exit0)를 확인했다.
+
+스캐너를 끄거나 시험 입력을 숨기는 대신 루트 `.gstack-redact-allowlist`에 검토한 정확한 scanner span1개만 기록한다. 와일드카드·규칙 비활성화·no-verify를 사용하지 않는다. 전체 health exit0은 직전 lock 수정 상태의 결과이며, 이 예외는 앱 동작이나 운영 QA 판정을 바꾸지 않는다. 원격 HEAD 확인 전까지 전달 완료로 표시하지 않는다.
