@@ -161,3 +161,14 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - 첫 편집은 보조 변수를 잘못된 함수에 넣어 정적 검사2오류와 CSV 회귀 실패를 냈다(`csv-types-mypy/ruff/regression`). 이는 TDD RED가 아닌 편집 오류이며 원문을 보존한다.
 - 위치를 수정한 `csv-types-mypy-r2`는10파일 오류0, `csv-types-ruff-r2`는 backend 오류0, `csv-types-regression-r2`는 CSV162시험 통과로 모두 exit0이다. 앞 감사의 기존9+추가2 타입 오류는 현재 남아 있지 않다.
 - 이 검사는 현재 CSV 코드 범위의 보완이며 전체 health/빌드·서버 적용을 완료 처리하지 않는다.
+
+## Windows 릴리즈 의존성 잠금 동기화
+
+완료 감사 `completion-audit-20261027-74c018f0`에서 전체 health는 backend979시험 중978통과/1skip까지 완료했으나, QA의 직접 의존성 잠금 대조에서 pytest 누락으로 exit1이었다. `lock-red`로 같은 실패를 재현한 뒤 Windows/Python3.12와 격리된 pip-tools7.6.2에서 기존 입력 `.in`을 다시 compile했다. 해시를 수동 편집하거나 검사 조건을 완화하지 않았다.
+
+- 기존 패키지의 버전·해시를 유지하고 pytest9.0.3, iniconfig2.3.1, pluggy1.7.0, pygments2.21.0을 추가했다. `raw-document-object-search.json`의 기존 pin 변경은0이다.
+- `lock-green`: workflow 계약 SelfTest exit0. `lock-dry-run`: 기존 개발 환경에서 `--dry-run --require-hashes --only-binary=:all:` 해석 exit0. 기존 환경의 일부 버전은 lock과 다르며 실제 변경은 하지 않았다. 이 dry-run을 새 clean 설치 검증으로 확대하지 않는다.
+- `lock-health-result.json`: 수정된 lock SHA256 `e2d83ec488859f78737e13ee086352f41864ffe383a82e874d940ed0e529b0b6`에서 전체 `npm run health` exit0. 의존성15·Electron103·화면Node9/Vitest442·backend979 중978통과/기존1skip·Ruff/mypy10파일·QA 자체 검사 모두 완료했다.
+- 기존 감사의 실패 원문은 보존하며 후속 수정으로 연결한다. 새 설치본 빌드·운영 승격 및 HTTP 전체7단계의 완료 근거는 아니다.
+
+원문4문서의 바이트 복원은 Git 전체24,035객체에서 원래 크기와 맞는 blob이0임을 추가 확인했다. 현재 본문과 보존 stash의 정규화 일치는 유지하지만 원래 SHA256 복원은 미완료다. NAS 당일 records와 REA 경로에서도 해당 이름의 사본을 찾지 못했다. 보호 stash와 기존 감사 해시를 유지한다.
