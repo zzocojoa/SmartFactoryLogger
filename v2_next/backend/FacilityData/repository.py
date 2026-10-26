@@ -513,6 +513,8 @@ class CSVLoggerService:
             }
             if not self.running:
                 return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
+            if not write_config.auto_save:
+                return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
             try:
                 self.queue.put_nowait(envelope)
             except queue.Full:

@@ -430,6 +430,23 @@ class CSVLoggerServiceTests(unittest.TestCase):
             files = self.list_v1_files(log_dir)
             self.assertEqual(files, [])
 
+    def test_disabled_admission_has_no_pending_work(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, False)
+            service.start()
+            try:
+                result = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                self.assertEqual(result["status"], "DISABLED")
+                self.assertEqual(result["reason"], "auto_save_disabled")
+                self.assertEqual(result["producer_seq"], 1)
+                self.assertEqual(result["producer_instance_id"], service.logger_service_instance_id)
+                self.assertEqual(result["required_sinks"], ())
+                self.assertEqual(service.get_runtime_state()["queue_size"], 0)
+                self.assertEqual(service.get_runtime_state()["drop_count"], 0)
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            self.assertEqual(list(tmp_dir.iterdir()), [])
+
     def test_v1_enabled_v2_disabled_creates_v1_only(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=False)

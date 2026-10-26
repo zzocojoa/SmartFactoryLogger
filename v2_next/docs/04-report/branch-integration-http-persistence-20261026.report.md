@@ -122,3 +122,10 @@ CSV 접수 전에 canonical JSON bytes와 source payload hash를 만들고, `log
 - `test_config_flush_error_preserves_next_generation_event`: 실제 파일 write에서 데이터 쓰기 전 한 번 OSError를 주입. `tdd/csv-config-failure-red`에서 새 경로의 파일0개라는 예상 실패(exit1), 수정 후 이전·새 경로에 각각 원래 행 한 개가 저장됨을 확인.
 - `tdd/csv-config-failure-green`: CSV158시험 통과, exit0. 변경 Ruff 및 프로젝트 mypy9파일 exit0.
 - 이번 오류는 bytes가 쓰이기 전의 실패다. 일부 행 쓰기 후의 중복 방지·불확실 파일 중단은 여전히 3단계의 별도 미완료 계약이다.
+
+## HTTP 1단계 — CSV 비활성 접수의 구분
+
+자동 저장 OFF일 때 `DISABLED/auto_save_disabled`를 반환하고 큐·drop 집계에 넣지 않는다. 생산 순번과 당시 세대는 영수증에 유지한다.
+
+- `test_disabled_admission_has_no_pending_work`의 ACCEPTED/DISABLED 불일치로 RED(exit1), 수정 후 CSV service/runtime58시험 통과(exit0), Ruff·프로젝트 mypy exit0.
+- 비활성만 돌려주는 빈 구현은 같은 모듈의 실제 저장·불변 원본·세대 전환 시험을 통과할 수 없다. 입력 오류·현재 저장 불가·합산 예산 등의 남은 접수 경계는 계속 구현한다.
