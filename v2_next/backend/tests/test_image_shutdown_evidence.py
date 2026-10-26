@@ -188,6 +188,46 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.assertEqual(final['pending_payload_bytes'], 0)
             self.assertTrue(final['accounting_consistent'])
 
+    def test_distinct_acquisitions_with_same_time_and_bytes_keep_both_images(self):
+        import httpx
+
+        image = io.BytesIO()
+        Image.new('RGB', (2, 2), (31, 2, 3)).save(image, format='JPEG')
+        payload = image.getvalue()
+        for name in ('_img_cache_entry', '_img_refresh_success_count',
+                     '_img_upstream_request_count', '_img_last_upstream_started_at',
+                     '_img_last_upstream_completed_at', '_img_failure_count',
+                     '_img_last_error_code', '_img_last_error_message', '_img_last_success_at'):
+            self.stack.enter_context(patch.object(spot, name, getattr(spot, name)))
+
+        async def receive():
+            async with httpx.AsyncClient() as client:
+                with patch.object(spot, '_http_client', client), \
+                     patch.object(spot, '_request_spot_image', return_value=payload) as request, \
+                     patch.object(spot.time, 'time', return_value=1790640000.):
+                    first = await spot._refresh_spot_image_cache('http://synthetic.invalid/image.jpg')
+                    second = await spot._refresh_spot_image_cache('http://synthetic.invalid/image.jpg')
+                    self.assertEqual(request.await_count, 2)
+                    self.assertEqual(first.captured_at_epoch, second.captured_at_epoch)
+                    self.assertEqual(first.image_bytes, second.image_bytes)
+
+        self.loop.run_until_complete(receive())
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 2, 'separate acquisitions must not collapse into one fact')
+        self.assertEqual(len({row['spot_image_capture_id'] for row in rows}), 2)
+        images = list((self.root / 'images').rglob('*.jpg'))
+        self.assertEqual(len(images), 2)
+        for row in rows:
+            stored = self.root / row['spot_image_path']
+            self.assertEqual(stored.read_bytes(), payload)
+            self.assertEqual(hashlib.sha256(stored.read_bytes()).hexdigest(), row['spot_image_sha256'])
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 2)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertTrue(final['accounting_consistent'])
+
     def test_capture_pending_limit_includes_inflight(self):
         self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_QUEUE_MAX', 2))
         self.stack.enter_context(patch.object(spot._SPOT_IMAGE_CAPTURE_QUEUE, 'maxsize', 2))

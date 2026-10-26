@@ -119,6 +119,7 @@ class _SpotImageCacheEntry:
     captured_at_monotonic: float
     upstream_latency_ms: float
     image_url: str = ""
+    capture_id: Optional[str] = None
 
 
 _img_fetch_lock = asyncio.Lock()
@@ -254,6 +255,7 @@ class _SpotImageCaptureEvent:
     observation_snapshot: Optional[Dict[str, Any] | bytes]
     reserved_payload_bytes: int = 0
     writer_signature: Optional[tuple[Path, Path, int, float]] = None
+    capture_id: Optional[str] = None
 
 
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
@@ -647,8 +649,9 @@ def _spot_image_capture_failure_evidence(
         "event": "spot_image_capture_failure",
         "error_at": error_at,
         "captured_at": captured_dt.isoformat().replace("+00:00", "Z") if captured_dt is not None else None,
-        "capture_id": (f"spotimg_{captured_dt.strftime('%Y%m%dT%H%M%S%fZ')}_{sha256[:12]}"
-                       if captured_dt is not None else None),
+        "capture_id": event.capture_id or (
+            f"spotimg_{captured_dt.strftime('%Y%m%dT%H%M%S%fZ')}_{sha256[:12]}"
+            if captured_dt is not None else None),
         "image_sha256": sha256,
         "image_bytes": len(event.image_bytes),
         "spot_service_instance_id": _spot_service_instance_id,
@@ -704,6 +707,7 @@ def _spot_image_capture_worker() -> None:
                 writer = current_writer
                 failure_stage = "write_capture"
                 fact = writer.write_capture(
+                    capture_id=event.capture_id,
                     image_bytes=event.image_bytes,
                     captured_at=event.captured_at,
                     source_url=event.source_url,
@@ -1214,6 +1218,7 @@ def _maybe_enqueue_spot_image_capture(
     image_url: str,
     source: str,
     image_age_ms: Optional[float] = None,
+    capture_id: Optional[str] = None,
 ) -> None:
     # The publisher holds the same lock only while swapping prepared values.
     # Capture policy, limits, and writer settings therefore belong to one state.
@@ -1221,6 +1226,7 @@ def _maybe_enqueue_spot_image_capture(
         _enqueue_spot_image_capture_locked(
             image_bytes=image_bytes, captured_at=captured_at, image_url=image_url,
             source=source, image_age_ms=image_age_ms,
+            capture_id=capture_id,
         )
 
 
@@ -1231,6 +1237,7 @@ def _enqueue_spot_image_capture_locked(
     image_url: str,
     source: str,
     image_age_ms: Optional[float],
+    capture_id: Optional[str],
 ) -> None:
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
@@ -1303,6 +1310,7 @@ def _enqueue_spot_image_capture_locked(
             observation_snapshot=snapshot_payload,
             reserved_payload_bytes=payload_size,
             writer_signature=_spot_image_capture_config_signature(),
+            capture_id=capture_id,
         )
         try:
             _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
@@ -3581,6 +3589,10 @@ async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
         captured_at_monotonic=captured_at_monotonic,
         upstream_latency_ms=max(0.0, (captured_at_monotonic - started_at_monotonic) * 1000.0),
         image_url=image_url,
+        # One identity per successful upstream acquisition, including equal
+        # bytes and equal wall-clock timestamps. Cache readers reuse this ID.
+        capture_id=(f"spotimg_{datetime.fromtimestamp(captured_at_epoch, timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}_"
+                    f"{uuid4().hex}"),
     )
     _img_cache_entry = entry
     _img_refresh_success_count += 1
@@ -3592,6 +3604,7 @@ async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
         image_url=image_url,
         source="official_image_jpg",
         image_age_ms=0.0,
+        capture_id=entry.capture_id,
     )
     return entry
 

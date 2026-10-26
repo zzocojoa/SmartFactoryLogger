@@ -263,3 +263,15 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 `CHANGELOG.md`에는 승인된 1.0.32와 이전 1.0.30/1.0.31 후보 이력, 미출시 후속 개선을
 구분해 추가했다. 현재 package의 1.0.32 표기가 이 후속 소스의 운영 승인까지 뜻하지 않는다.
 남은 완료 조건은 HTTP 계획 전체 구현·17개 시나리오, 최종 빌드/검증, master 통합이다.
+
+## HTTP 1단계 — 새 이미지 취득의 고유 ID
+
+실제 upstream 취득이 끝날 때 capture ID를 한 번 발급해 cache entry와 불변 저장 이벤트에
+전달한다. 같은 JPEG와 같은 벽시계 시각을 가진 별도 취득도 서로 다른 ID로 저장한다.
+캐시 응답은 기존 entry를 사용하며 새 저장 후보를 만들지 않는다. 기존 직접 writer 호출과
+과거 12자리 hash 파일명은 유지하고, 새 32자리 취득 ID도 같은 날짜별 보존 관리에 포함한다.
+
+- `test_distinct_acquisitions_with_same_time_and_bytes_keep_both_images`: 외부 HTTP 응답과 벽시계만 고정하고 실제 refresh·writer를 사용했다. 원래 원장1행/기대2행의 실패를 `image-acquisition-id-red`에서 확인(exit1). 수정 후 JPEG2개·서로 다른 ID2개·내용/hash·미저장0을 대조했다.
+- `image-acquisition-id-green`: 실제 229시험은 통과했으나 제가 마지막 모듈 이름을 잘못 적어 import 오류1개로 exit1이었다. 제품 실패와 구분해 보존했다. 정확한 `test_csv_image_startup`의 별도 실행 `image-acquisition-id-startup`은 13시험 exit0이다. 합계 해당 242시험의 실제 통과를 확인했다.
+- backend Ruff와 기본 mypy10파일은 exit0. 기존 single-flight/캐시 재사용과 이미지 retention 검사를 포함했다.
+- 취득 ID 전달은 동일 ID의 부분 쓰기 복구·내용 충돌 판정 완료를 뜻하지 않는다. 상세 이미지 접수 결과, 설정 세대/출력 계약과 영속 추적은 계속 남은 필수 범위다.

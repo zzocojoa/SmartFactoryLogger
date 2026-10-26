@@ -135,12 +135,17 @@ class SpotImageCaptureWriter:
         image_age_ms: Optional[float],
         link_checked_at: Optional[float],
         observation_snapshot: Optional[Mapping[str, Any]],
+        capture_id: Optional[str] = None,
     ) -> dict[str, str]:
         sha256 = hashlib.sha256(image_bytes).hexdigest()
         captured_dt = datetime.fromtimestamp(captured_at, timezone.utc)
         captured_iso = captured_dt.isoformat().replace("+00:00", "Z")
-        sha12 = sha256[:12]
-        capture_id = f"spotimg_{captured_dt.strftime('%Y%m%dT%H%M%S%fZ')}_{sha12}"
+        if capture_id is None:
+            # Preserve the historical direct-writer contract. The live HTTP
+            # producer supplies its immutable acquisition ID explicitly.
+            capture_id = f"spotimg_{captured_dt.strftime('%Y%m%dT%H%M%S%fZ')}_{sha256[:12]}"
+        elif not _is_managed_capture_stem(capture_id):
+            raise ValueError("Invalid SPOT image capture identity")
         mime, width, height, extension = image_metadata(image_bytes)
         relative_path = self._relative_image_path(captured_dt, capture_id, extension)
         output_path = self.capture_root / captured_dt.strftime("%Y") / captured_dt.strftime("%m") / captured_dt.strftime("%d")
@@ -662,7 +667,7 @@ def _is_managed_capture_stem(stem: str) -> bool:
         and timestamp[8] == "T"
         and timestamp[21] == "Z"
         and timestamp_digits.isdigit()
-        and len(digest) == 12
+        and len(digest) in {12, 32}
         and all(char in "0123456789abcdef" for char in digest.lower())
     )
 
