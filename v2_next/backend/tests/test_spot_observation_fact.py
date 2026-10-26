@@ -526,7 +526,9 @@ class SpotObservationFactTests(unittest.TestCase):
             writer = SpotObservationFactWriter(path)
             self.assertTrue(writer.ensure_initialized())
             fact = build_spot_observation_fact({"spot_service_instance_id": "legacy",
-                                                "spot_poll_seq": 1, "spot_poll_status": "success"})
+                                                "spot_poll_seq": 1, "spot_poll_status": "success",
+                                                "spot_last_poll_completed_at": "2026-06-26T00:00:00Z"})
+            self.assertEqual(fact["spot_observation_key"], "legacy:1")
             value = {"nested": "'" * 40000 + '\"\U0001f600'}
             fact["instrument_info"] = value
             writer._spool_fact(fact)
