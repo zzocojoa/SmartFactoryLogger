@@ -6,6 +6,7 @@ import os
 import tempfile
 import threading
 import time
+import tracemalloc
 import unittest
 from contextlib import ExitStack
 from datetime import datetime, timezone
@@ -420,6 +421,50 @@ class FactQueueTests(unittest.TestCase):
                     owner.close(30)
                     self.assertFalse(owner.snapshot()["writer_alive"])
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "3"])
+
+    def test_json_encoder_growth_stays_within_owner_budget(self):
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def blocked_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    started.set()
+                    if not release.wait(30):
+                        raise TimeoutError("test did not release fact encoder-budget write")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    first, second = observation(1), observation(2)
+                    first["source_payload_for_budget"] = "a" * (2 * 1024**2)
+                    second["source_payload_for_budget"] = "b" * (5 * 1024**2)
+                    self.assertTrue(owner.enqueue(first))
+                    self.assertTrue(started.wait(3))
+                    before = owner.snapshot()
+                    available = before["pending_payload_byte_limit"] - before["pending_payload_bytes"]
+                    tracemalloc.start()
+                    try:
+                        admitted = owner.enqueue_detailed(second)
+                        _, peak = tracemalloc.get_traced_memory()
+                    finally:
+                        tracemalloc.stop()
+                    self.assertTrue(admitted.accepted)
+                    self.assertLessEqual(peak, available, "Fact JSON encoding exceeded available payload budget")
+                    self.assertEqual(admitted.observation_key, "synthetic-A:2")
+                    self.assertTrue(owner.enqueue(observation(3)))
+                finally:
+                    release.set()
+                    self.assertTrue(owner.close(30))
+            state = owner.snapshot()
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            self.assertEqual(state["completed_count"], 3)
+            self.assertEqual(state["write_failure_count"], 0)
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "2", "3"])
 
     def test_serialization_budget_accounts_for_wide_unicode_text(self):
         with tempfile.TemporaryDirectory() as tmp:

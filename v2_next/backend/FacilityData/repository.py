@@ -24,7 +24,7 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
 )
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
-    PayloadBudgetExceeded, decoded_string_bytes, prepare_json_payload,
+    PayloadBudgetExceeded, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
@@ -561,11 +561,7 @@ class CSVLoggerService:
                     # potentially mutable model. The temporary model and JSON
                     # copies are released when the estimator returns.
                     payload_bytes = self._estimate_factory_data_bytes(FactoryData.model_construct(**snapshot))
-                    encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False,
-                                               sort_keys=True, separators=(",", ":"))
-                    # Avoid the one-shot encoder's growing aggregate buffer;
-                    # join bounded chunks within the two-copy reservation.
-                    payload = "".join(encoder.iterencode(snapshot)).encode("utf-8")
+                    payload = encode_json_payload(snapshot, sort_keys=True, compact=True)
                 except PayloadBudgetExceeded:
                     with self._runtime_lock:
                         self._drop_count += 1

@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterator, Literal, Mapping
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded as _PayloadBudgetExceeded, prepare_json_payload as _prepare_json_payload,
     decoded_string_bytes as _decoded_string_bytes,
+    encode_json_payload as _encode_json_payload,
 )
 from backend.FacilityData.spot_observation_fact import (
     FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
@@ -111,15 +112,17 @@ class SpotObservationQueue:
                 return self._reject_locked("REJECTED_LIMIT", "pending_byte_limit", observation_key)
             except (TypeError, ValueError, OverflowError):
                 return self._reject_locked("INVALID", "snapshot_serialization_failed", observation_key)
-            # Reserve both the serialized text and final UTF-8 bytes before
-            # either allocation. Containers are detached while leaves share
-            # immutable source strings; queued bytes own the final snapshot.
-            reservation = payload_size + text_characters * text_width
+            # Joining encoded chunks owns two text copies; UTF-8 allocation
+            # owns text and bytes. Detached containers share immutable leaves.
+            text_bytes = text_characters * text_width
+            reservation = max(2 * text_bytes, payload_size + text_bytes)
+            if reservation > available:
+                return self._reject_locked("REJECTED_LIMIT", "pending_byte_limit", observation_key)
             self._state["pending_payload_bytes"] += reservation
             accepted = False
             payload = b""
             try:
-                payload = json.dumps(source, ensure_ascii=False, allow_nan=False).encode("utf-8")
+                payload = _encode_json_payload(source)
                 if len(payload) != payload_size:
                     raise ValueError("JSON payload size changed after reservation")
                 self._queue.put_nowait(_FactEvent(payload, text_characters * text_width,
