@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from itertools import chain
 from typing import Any
 
 
@@ -9,7 +10,8 @@ class PayloadBudgetExceeded(ValueError):
     pass
 
 
-def encode_json_payload(value: Any, *, sort_keys: bool = False, compact: bool = False) -> bytes:
+def encode_json_payload(value: Any, *, sort_keys: bool = False, compact: bool = False,
+                        newline: bool = False) -> bytes:
     """Encode a preflighted snapshot without a growing aggregate text buffer.
 
     The caller reserves the larger of two text copies and text plus UTF-8
@@ -18,7 +20,7 @@ def encode_json_payload(value: Any, *, sort_keys: bool = False, compact: bool = 
     """
     encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, sort_keys=sort_keys,
                                separators=(",", ":") if compact else (", ", ": "))
-    return "".join(encoder.iterencode(value)).encode("utf-8")
+    return "".join(chain(encoder.iterencode(value), ("\n",) if newline else ())).encode("utf-8")
 
 
 def decoded_string_bytes(value: Any, seen: set[int] | None = None) -> int:

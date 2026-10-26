@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, NoReturn, Optional
 from uuid import uuid4
 
-from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, prepare_json_payload
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
 from backend.FacilityData.spot_low_signal import (
     LOW_SIGNAL_ALARM_BIT,
     LOW_SIGNAL_COMPARATORS,
@@ -536,16 +536,16 @@ class SpotObservationFactWriter:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_byte_limit"
                     return
-                text_size = text_characters * text_width
-                # The newline join owns old/new JSON text at once; encoding
-                # owns the joined text and UTF-8 bytes at once.
-                scratch = max(2 * text_size + text_width, text_size + text_width + payload_size) + io.DEFAULT_BUFFER_SIZE
+                text_size = (text_characters + 1) * text_width
+                # Join JSON chunks and the newline in one text allocation;
+                # then encode within the larger two-copy workspace phase.
+                scratch = max(2 * text_size, text_size + payload_size) + io.DEFAULT_BUFFER_SIZE
                 reservation = (self.payload_reservation(scratch, "spool_memory_byte_limit")
                                if self.payload_reservation is not None else nullcontext())
                 with reservation:
                     payload = b""
                     try:
-                        payload = (json.dumps(source, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+                        payload = encode_json_payload(source, sort_keys=True, newline=True)
                         if len(payload) != payload_size:
                             raise ValueError("Spool payload size changed after preflight")
                         spool_path, mode = self._spool_append_target(len(payload))

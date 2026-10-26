@@ -508,6 +508,41 @@ class SpotObservationFactTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1", "svc-1:3"])
 
+    def test_spool_encoder_growth_stays_within_two_copy_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "facts.csv"
+            spool = Path(tmp) / "facts.failed.jsonl"
+            writer = SpotObservationFactWriter(output, spool_path=spool)
+            writer._spool_fact(self.current_fact_row(1))
+            segment = next(spool.with_name(spool.name + ".segments-v1").glob("*.jsonl"))
+            original = segment.read_bytes()
+            fact = self.current_fact_row(2, instrument_info="x" * 900000)
+            expected = (json.dumps(fact, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+            self.assertLess(len(expected), 1024**2)
+            tracemalloc.start()
+            try:
+                writer._spool_fact(fact)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            # Allow bounded path/container/file overhead in addition to the
+            # two payload copies. Input and expected bytes predate measurement.
+            self.assertLessEqual(peak, 2 * len(expected) + 64 * 1024,
+                                 "Spool JSON encoding exceeded two-copy budget")
+            self.assertEqual(segment.read_bytes(), original + expected)
+            self.assertEqual(writer.spool_failure_count, 0)
+            writer._spool_fact(self.current_fact_row(3))
+            writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 0)
+            previous_limit = csv.field_size_limit(1024**2)
+            try:
+                with output.open(encoding="utf-8-sig", newline="") as handle:
+                    rows = list(csv.DictReader(handle))
+            finally:
+                csv.field_size_limit(previous_limit)
+            self.assertEqual([row["spot_observation_key"] for row in rows], ["svc-1:1", "svc-1:2", "svc-1:3"])
+            self.assertEqual(rows[1]["instrument_info"], fact["instrument_info"])
+
     def test_recovery_reserves_expanded_container_text(self) -> None:
         reserved = 0
 
