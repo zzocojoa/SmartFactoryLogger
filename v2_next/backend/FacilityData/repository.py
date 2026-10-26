@@ -412,6 +412,7 @@ class CSVLoggerService:
         self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=CSV_PENDING_EVENT_LIMIT)
         self._pending_events: dict[int, tuple[CSVEventEnvelope, set[str]]] = {}
         self._pending_row_events: dict[int, tuple[list, int]] = {}
+        self._pending_row_copies: dict[int, list[str]] = {}
         self._pending_source_payload_bytes = 0
         self._pending_processing_payload_bytes = 0
         self._pending_decoded_payloads: dict[int, tuple[int, set[int]]] = {}
@@ -723,6 +724,7 @@ class CSVLoggerService:
         with self._runtime_lock:
             self._pending_processing_payload_bytes -= reservation - retained
             self._pending_decoded_payloads[sequence] = (retained, identities)
+        self._writer_context.decoded_sequence = sequence
         return data
 
     @contextmanager
@@ -763,14 +765,20 @@ class CSVLoggerService:
 
     def _finish_csv_decode(self, sequence: Optional[int]) -> None:
         """Call only after dropping decoded-item and local row references."""
+        self._writer_context.decoded_sequence = None
         with self._runtime_lock:
+            # Bound rows retain their copies; discard temporary-only copies
+            # before returning any string reservation. Keeping them until here
+            # prevents their identities from being reused during row building.
+            if sequence is not None:
+                self._pending_row_copies.pop(sequence, None)
             reservation = self._pending_decoded_payloads.get(sequence) if sequence is not None else None
             if reservation is not None:
                 rows = [binding[0] for binding in self._pending_row_events.values() if binding[1] == sequence]
                 row_ids: set[int] = set()
                 decoded_string_bytes(rows, row_ids)
-                # New row-rendering strings have a separate output reservation
-                # contract; keep only original decoded strings referenced here.
+                # Retain original or explicitly reserved derived strings still
+                # referenced by output rows, sharing v1/v2 references once.
                 retained = decoded_string_bytes(rows, row_ids - reservation[1])
                 self._pending_processing_payload_bytes -= reservation[0] - retained
                 assert sequence is not None
@@ -2739,7 +2747,24 @@ class CSVLoggerService:
 
     def _escape_csv_text(self, value: str) -> str:
         if value and value[0] in CSV_INJECTION_PREFIXES:
-            return "'" + value
+            sequence = getattr(self._writer_context, "decoded_sequence", None)
+            if sequence is None:
+                return "'" + value  # Legacy direct formatting has no owner.
+            width = decoded_string_bytes(value) // len(value)
+            required = (len(value) + 1) * width
+            header_workspace = self._write_settings().header_workspace_bytes
+            with self._runtime_lock:
+                if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
+                        + required + header_workspace > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                    raise CSVOutputBudgetExceeded("csv_row_byte_limit")
+                reserved, identities = self._pending_decoded_payloads[sequence]
+                self._pending_processing_payload_bytes += required
+                self._pending_decoded_payloads[sequence] = (reserved + required, identities)
+            escaped = "'" + value
+            with self._runtime_lock:
+                identities.add(id(escaped))
+                self._pending_row_copies.setdefault(sequence, []).append(escaped)
+            return escaped
         return value
 
     def _to_local_timestamp(self, timestamp: datetime) -> datetime:
@@ -3366,6 +3391,9 @@ class CSVLoggerService:
                             )
                             v2_buffer.clear()
                     last_flush_time = now
+            except CSVOutputBudgetExceeded:
+                if envelope is not None:
+                    self._record_csv_processing_failure(envelope, "csv_row_byte_limit")
             except Exception as exc:
                 self.logger.error("Error in CSV logger loop: %s", exc)
                 if envelope is not None and envelope.write_config.generation != current_config_version:
@@ -3490,6 +3518,9 @@ class CSVLoggerService:
                         else:
                             shutdown_flush_succeeded = False
                             self.logger.warning("CSV deferred shutdown v2 row was not written.")
+                except CSVOutputBudgetExceeded:
+                    shutdown_flush_succeeded = False
+                    self._record_csv_processing_failure(deferred_item, "csv_row_byte_limit")
                 except Exception as exc:
                     shutdown_flush_succeeded = False
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)

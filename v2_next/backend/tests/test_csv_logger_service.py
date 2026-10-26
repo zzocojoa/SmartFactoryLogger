@@ -539,6 +539,47 @@ class CSVLoggerServiceTests(unittest.TestCase):
             rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
             self.assertEqual([float(row[3]) for row in rows[1:]], [31.0])
 
+    def test_csv_escaped_row_copy_remains_in_pending_budget(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        previous_field_limit = csv.field_size_limit(4 * 1024**2)
+        self.addCleanup(csv.field_size_limit, previous_field_limit)
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+            data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            data.Die_ID = "=" + "D" * (2 * 1024**2)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(30):
+                        raise TimeoutError("test did not release escaped-row CSV writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                tracemalloc.start()
+                try:
+                    receipt = service.enqueue_detailed(data)
+                    self.assertEqual(receipt["status"], "ACCEPTED")
+                    self.assertTrue(started.wait(5))
+                    allocated, _ = tracemalloc.get_traced_memory()
+                    pending = service.get_runtime_state()["pending_payload_bytes"]
+                finally:
+                    tracemalloc.stop()
+                    release.set()
+                    stopped = service.stop(timeout_sec=30)
+            # Object/thread overhead is separate from the payload byte budget.
+            self.assertLessEqual(allocated, pending + 1024**2, "escaped CSV row copy is outside the pending budget")
+            self.assertTrue(stopped)
+            self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
+            files = self.list_v1_files(tmp_dir) + self.list_v2_files(tmp_dir)
+            self.assertEqual(len(files), 2)
+            for path in files:
+                rows = self.read_rows(path)
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[1][rows[0].index("DIE_ID")], "'" + data.Die_ID)
+
     def test_csv_header_pressure_does_not_strand_admitted_rows(self) -> None:
         started, release = threading.Event(), threading.Event()
         original_open = Path.open
