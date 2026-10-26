@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1단계 착수. fact 큐의 inflight 포함 건수 상한부터 구현. 전체 범위 유지 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `62da5867` 전체 backend1,013시험 중1,012통과·1skip, backend Ruff·기본 mypy11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e9d9a6f8` 전체 backend1,007시험의 시간 계측 실패를 재현·수정했다. 최신 `5a8a0b69` 전체 backend1,016시험 중1,015통과·1skip, backend Ruff·기본 mypy11파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -580,3 +580,21 @@ CSV worker의 JSON 해석 전 원본 예약과 작업 공간을 합산하고, �
 - `completion-audit-62da-20261027/verification.json`: RED/GREEN·정적 검사·전체 stdout/stderr를 읽고 로그 해시·최종 소스 해시를 결합했다. unittest FAIL/ERROR0. 새 Pydantic 경고는 위 잘못된 Status 시험에 대응하고, manifest traceback과 shutdown 오류 문구는 기존 오류 주입 시험과 대조했다.
 - 같은 폴더의 `audit.json`/`review.md`:109경로 모두 추적, 원본4문서·승격4자료 해시 일치, 작업 트리 clean, master 미통합을 확인했다. 감사 당시 최신2커밋은 로컬에만 있었으며 이 감사 기록은 이후 push로 재작성하지 않는다.
 - 전체7단계/17명세·최종 설치본과 master 통합은 미완료다. 새 개발 코드는 서버에 적용하지 않았다.
+
+## HTTP 1단계 — EMA 사본과 JSON 인코더 내부 버퍼 확장
+
+CSV의 기존 EMA 계산을 canonical bytes 생성 전에 끝내 같은 예약 공간을 재사용한다. EMA는 접수 때 분리한 snapshot으로 만든 모델을 사용하며 기존 계산식·필드 제외 규칙을 유지한다. JSON 일괄 인코더의 내부 버퍼 확장도 실측에서 예약을 넘었으므로, CSV·fact 접수와 fact 스풀에 공통 조각 인코더를 적용했다. 조각/합친 문자열 및 문자열/UTF-8 bytes가 공존하는 두 단계 중 큰 공간을 먼저 예약한다. 스풀의 줄바꿈도 한 번에 합친다.
+
+- `test_csv_ema_workspace_reuses_serialization_reservation`: 실제 첫 CSV 쓰기를 지연했다. 수정 전 추가 할당53,494,487bytes가 가용44,033,866bytes를 넘는 RED(exit1)를 확인했다. 수정 후 같은 기준·기존 EMA 값·실제30/31/32 행 저장·예약0이 일치했다. 최종 관련111시험·Ruff·mypy11파일 exit0. commit `e7ba8899`.
+- 첫 CSV fixture는 별도의 후속 decode 공간까지 넘어서 cleanup도 실패했다. 제품을 바꾸기 전에 입력을11/17MiB로 조정해 위 직렬화 실패만 재현했다. 첫 GREEN 시도는 내부 버퍼 확장 실패와 존재하지 않는 history 시험 모듈을 지정한 오류가 있었다. 수정된 실행은 `test_history_cursor`를 사용했고 가용 공간 기준은 완화하지 않았다. 중간 실패 원문을 보존한다.
+- `test_json_encoder_growth_stays_within_owner_budget`: 온도 fact의 실제 파일 쓰기를 지연한 상태에서13,109,025bytes/가용12,307,449bytes의 RED(exit1)를 확인했다. 공통 인코더 적용 후 세 원래 관측 ID의 실제 CSV 저장·예약0·오류0이 일치했다. 관련135시험 중134통과·기존 F01 1skip, Ruff·mypy exit0. commit `e6afe1c9`.
+- `test_spool_encoder_growth_stays_within_two_copy_budget`:1MiB 이내 행의 실제 스풀 쓰기가2,255,351bytes/검사상한1,870,198bytes로 RED(exit1)였다. 이 상한은 두 payload 사본과 별도64KiB 객체/경로 여유다. 수정 후 기존 segment 앞부분·전체 추가 bytes 불변, 실제 세 ID와 큰 필드의 복구·잔량0을 확인했다. 관련136시험 중135통과·기존 F01 1skip, Ruff·mypy11파일 exit0. commit `5a8a0b69`.
+- `json-workspace/encoding-verification.json`:266자료×3출력 형식,798경우의 변경 전후 bytes/hash 일치. ASCII·escape·한글·넓은 혼합 문자열의12계측도 예약과 별도 객체 여유 안에서 일치했다. 관찰된 payload 이외 추가 할당은 최대2,324bytes다. 이는 해당 인코더 계측이며 전체 객체 상한이나 프로세스 RSS 보장이 아니다.
+
+## 2026-10-27 JSON 작업 공간 보완 후 전체 회귀
+
+제품 commit `5a8a0b69`에서 격리 AppData/설정의 `python -m unittest discover -s backend/tests`가 **1,016개 중1,015통과·기존 private F01자료 미제공1skip**,325.671초,exit0으로 완료됐다. 실행 중 제품·시험·문서를 변경하지 않았다.
+
+- `json-workspace/verification.json`에 세 변경의 최초 실패·수정 결과·정적 검사·전체 stdout/stderr 해시·최종 소스 해시를 연결했다. 전체 로그를 읽어 unittest FAIL/ERROR0과 직전1,013시험 대비 새로운 정규화 오류 문구0을 확인했다.
+- 앞 CSV 해석 변경과 기록은 `200bf264`에서 원격 반영을 확인했다. 현재 변경도 원격 HEAD를 대조한 뒤 완료로 보고하며, master 병합이나 운영 서버 적용으로 확대하지 않는다.
+- 남은 CSV 출력 렌더링·이미지/fact 구성/검산 예산, 실제 목적지/설정 세대 결합, 영속 대조·부분 쓰기 복구·압력 제어·화면 연동, 전체7단계/17명세 및 최종 설치본 검증을 계속 유지한다.

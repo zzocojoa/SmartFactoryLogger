@@ -39,8 +39,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Reserve integrated CSV decoding workspace before allocation and retain decoded
   strings referenced by pending output rows. Preserve the admitted identity and
   failure history when decoding is invalid or exceeds the shared budget.
-- Fact construction/readback, CSV EMA sizing/row rendering, and image workspace
-  reservations remain unfinished.
+- Complete legacy CSV EMA sizing on the detached input before retaining the
+  canonical JSON bytes, reusing the serialization reservation without changing
+  the EMA formula. Bound JSON chunk joining and UTF-8 encoding in CSV admission,
+  fact admission, and spool output; preserve their existing bytes and hashes.
+- Fact construction/readback, CSV row rendering, and image workspace reservations
+  remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify
