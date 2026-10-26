@@ -383,3 +383,119 @@ TemperatureFast 열이 정확히 `-`인지 그 밖의 문자열인지만 구분�
 다음 검토 순서는 원문 유형별 역사 생성·시계·센서 의미와 영향 확인, USER_SELF의 과거 실패
 처리 결정, 현재 후보의 별도 데이터/성능/정상 종료 QA다. 구조 오류 33행·원인 미확정 항목을
 해결 처리하지 않았고 `full_data_gate=NOT_EVALUATED`, 출시/승격 HOLD를 유지한다.
+
+
+## 2026-10-17 후속 — Rect CSV 70개 형식 재현과 값 검토
+
+보존 ZIP `abs.zip`의 69개와 `abs_1.zip`의 1개, 총 70 CSV의 249,252행을 전수 재확인했다.
+9열 제목과 4열 본문이 일치하지 않는다. 같은 ZIP의 비교 파일 1개 43,749행을 포함한
+총 71파일 293,001행을 검사했고, 9열 비교 파일도 Rect_4~8은 전 행 빈 문자열이었다.
+누락된 제목 칸을 0으로 채우거나 실제 값 5개가 유실됐다고 해석하지 않았다.
+
+clean 보존 소스 `OCR-raspberry/OCR-raspberry.py`의 commit은
+`da2f129263a771946a7b2c1389dee1f6dfbd6a4c`(2024-05-23 10:52:32 +09:00)다.
+Git blob과 현재 파일 바이트가 일치하며 SHA256은
+`75978c25e2c3ab0168abb1dc0f74ea30cea366c4ab887fc1167a962b2affe0e9`다.
+353행은 항상 Date와 Rect_1~8을 제목으로 기록하고, 370행은 실제 영역 수+1만큼 본문을 만든다.
+387~392행은 OCR 결과에서 영문자·숫자·마침표를 허용하며, 361행은 현재 길이 그대로 저장한다.
+
+해당 구문만 추출해 메모리 안에서 실행했다. GUI·카메라·OCR·원본 파일 쓰기는 실행하지 않았다.
+3개 영역은 4열, 8개 영역은 9열을 만들며, 기존 값·시각을 입력하면 71파일 전체의
+제목·본문·개행 바이트가 동일하게 재현된다. 이것은 저장 형식의 기전 재현이다.
+일부 CSV가 commit 시각보다 이르고 당시 배포/실행 기록도 없어 실제 생산자 실행을 확정하지 않는다.
+원본 화면의 OCR 정답, 영역 설정, 각 Rect의 물리량·단위도 미확정이다.
+
+| 범위 | 파일 | 행 | 숫자가 아닌 비어 있지 않은 값이 있는 행 | 앞 3값 중 빈 값이 있는 행 |
+|---|---:|---:|---:|---:|
+| 4열 본문 | 70 | 249,252 | 6,093 | 1,807 |
+| 9열 비교 본문 | 1 | 43,749 | 480 | 0 |
+| 합계 | 71 | 293,001 | 6,573 | 1,807 |
+
+마지막 두 열의 행 집합은 배타적이지 않을 수 있어 더하지 않는다. 비수치 비어 있지 않은 셀은
+Rect_1 6,349 / Rect_2 456 / Rect_3 2,171, 총 8,976개다. `Z.1`, `C.` 등도 포함된다.
+빈 문자열은 앞 3열 각각 21/1,782/42개다. 숫자 문법 통과가 실제 계기값 정확성을 뜻하지 않는다.
+모든 파일의 NUL, 파일 내 시각 역전, 인접 동일 시각은 0개다. 실제 시계와 파일 사이 연속성은 별도다.
+
+member CRC·크기·SHA256은 종전 구조 검사 71개와 일치했고 입력 파일 전후 해시도 일치했다.
+`0435.zip`과 `0436.zip`이 분석 대상이며, `새 폴더.zip`인 `0437.zip`은 0435와 같은 바이트로
+다시 확인했다. 이를 별도 고유 자료나 정상 복구본으로 집계하지 않았다. 외부 추가 사본 없음이라는
+사용자 답변을 유지한다. 원본 수정·복구·새 전체 백업·서버 호출·제품 코드 변경은 0건이다.
+
+`inspect_rect_r2.py`(5가지 실제 구문 fixture 포함) 7.269초/exit 0,
+`review_rect.py` 3.617초/exit 0(1,011 비교), 최종 3개 Python helper Ruff E9/F exit 0이다.
+독립 검산은 CSV/AST 생산자 구현을 쓰지 않고 CRLF 줄·쉼표 분할로 전수 대조했다.
+R1은 같은 해시의 중복 ZIP을 경로로 구분하지 못해 member 검사 전 exit 1로 중단됐고 보존했다.
+R2는 고유 사본 경로와 해시를 함께 확인한다. 제품 변경이 없어 전체 health/build와 기존 현장
+15/120분 시험·설치는 반복하지 않았다.
+
+처리 기준: 원본을 보존하고, 영역의 물리적 의미·단위·OCR 정확성을 확인하기 전에는 검증된
+수치 추세나 품질 판정에 편입하지 않는다. 헤더·값을 자동 수정하지 않는다.
+분류는 `CODE_REPRODUCED_HISTORICAL_DEPLOYMENT_UNCONFIRMED`이며 데이터 PASS가 아니다.
+78개 BOM-only CSV와 손상 ZIP 2개 내부 미상 범위, 다른 손상/원인 미확정 자료는 남아 있다.
+전체 R4와 R1/R2·R3 물리·R5 drop15·R6 최종 QA는 미완료, 목표 active/이번 단계 PROGRESS/출시 HOLD다.
+
+확인 예: `result-r2/records.json`의 archive/member_index → column_kinds/nonnumeric_tokens →
+`source-excerpts.json`/`replay-fixtures.json` → `independent-review.json` 순서로 확인한다.
+근거: [상세 검토](C:/Users/user/Desktop/SmartFactory/R4RECT_20261017_c8e4a210/review.md).
+전체 결과 SHA256: `c058cee9214245a563c3186769d9b234c08e11d85e192a2cff5b68f809834368`.
+독립 검산 SHA256: `649ed892bdd508f5897a5e8ad8b5d497952c24c312fffcf634abe13147ddab03`.
+closeout SHA256: `53eec466e307333470698d090406f23a80f7a9c614c230ec099910ca15f33b8c`.
+
+
+## 2026-10-17 후속 — BOM-only 78개 출처와 손상 ZIP 자체의 온전한 앞부분
+
+78개 BOM-only CSV를 60개 ZIP의 원본 member 바이트와 같은 묶음의 실행 메타데이터로 대조했다.
+모두 UTF-8 BOM EF BB BF 3바이트이며, raw Windows 시스템 이벤트 32개와 redacted 46개다.
+30개 실제 run_id에 연결됐고 온도·PLC 측정 파일로 분류하지 않는다. 중복 보관 member 수를 실행 수로
+세지 않는다. 연결된 메타데이터 사본 상태는 COLLECTED 3/FAILED 10/PARTIAL 65이며, 이는 시스템
+이벤트 조회의 성공 상태가 아니다. 개별 조회 성공/실패 기록은 모든 관련 메타데이터에서 찾지 못했다.
+
+실행별 collection_script_sha256 13종을 전부 보존 소스와 연결했다. 12종은 Git blob/CRLF와,
+1종은 보존 현장 도구 ZIP member와 일치했다. 13종 모두 Get-WinEvent의 오류를 SilentlyContinue로
+처리한 뒤 Export-Csv -Encoding utf8로 저장한다. 조회 오류를 별도 기록하는 변수가 해당 구문에 없다.
+Windows PowerShell 5.1에서 빈 입력(오류0)과 존재하지 않는 로그 조회(오류1)를 시험했으며,
+둘 다 raw/redacted 각각 동일한 3바이트 BOM을 만들었다(exit 0). 과거 실제 조회를 재실행한 것은 아니다.
+과거 파일의 분류는 DIAGNOSTIC_SYSTEM_EVENT_EXPORT_WITH_NO_RECORDS, 빈 원인은 UNDETERMINED다.
+이벤트가 없었다거나 측정 데이터가 유실됐다고 확정하지 않는다. 향후 현행 수집기에 조회 범위·성공
+상태·오류 ID/유형·건수를 구분하는 증거를 추가하되, 기존 해시가 고정된 도우미와 결과는 보존한다.
+
+손상 ZIP 2개는 자체 local header부터 순서대로 해석하고 완전한 payload를 EOF·CRC·크기·SHA로
+검증했다. 정상 대조본의 이전 검증 member 원장과도 모두 일치했다. 파일로 추출하거나 복구하지 않았다.
+
+| 손상 사본 | 온전한 항목 | 파일 수 | 검증한 압축 해제 바이트 | 부분만 남은 다음 항목 |
+|---|---:|---:|---:|---|
+|0084.zip Portable|21|19|371,052,442|dxcompiler.dll|
+|0431.zip OCR|15,769|14,779|2,074,149,335|cublasLt64_12.dll|
+|합계|15,790|14,798|2,445,201,777|2개|
+
+Portable은 offset220,200,960부터160,824,015바이트, OCR은 offset860,880,896부터
+2,272,588,647바이트가 모두0임을 재확인했다. 자체 중앙 디렉터리와 원래 뒷부분은 미복구다.
+정상 대조 ZIP의618/17,304항목을 사라진 원래 뒷부분의 확정 목록으로 사용하지 않는다.
+원래 tail 내용과0채움 발생 원인은 미확정이며, 대조본 존재를 원본 덮어쓰기 승인으로 사용하지 않는다.
+
+온전한 앞부분의 CSV3개는 matplotlib 예제다. data_x_x2_x3.csv는 제목 없는 공백 구분11행·3열이며
+x/x²/x³관계를 확인했다. msft.csv는7열·65행, Stocks.csv는 출처 주석 다음11열 제목·524행이다.
+독립 검산의 첫 파일 header/body_rows는 일반 쉼표 파서의 미리보기였으며,
+library-sample-contracts.json의 실제 공백 구분 형식을 최종 판단으로 쓴다. 금융값의 외부 사실검증은
+하지 않았다. 함께 있는 프로그램/라이브러리 PNG25·JPEG2는 Pillow verify·전체 load를 통과했다.
+이 결과를 공장 측정 스키마나 ZIP 미확인 뒷부분의 통과 근거로 사용하지 않는다.
+
+BOM 검사R2, 실제 PowerShell 재현, ZIP 앞부분 검사R2와6개 payload fixture, 독립48,193개 비교,
+예제형식 확인, Python5개 명시 Ruff E9/F는 모두 실제exit0이다. BOM R1의 ZIP루트 경로 처리,
+ZIP R1의 이름 구분자 정규화 오류, Git 소스1종 미발견은 실패 기록을 보존하고 해결했다.
+최초 디렉터리 지정 Ruff는 파일을 찾지 못해 검사로 세지 않고 명시적5파일 검사를 수행했다.
+원본 변경·새 전체 백업·복구파일 작성·서버 호출·제품 코드 변경은0건이다. 제품 코드가 같아
+전체health/build와 기존 현장15/120분 검사·설치는 반복하지 않았다.
+
+확인 예: bom-records.json의 member/run_id → collector-source-map.json → powershell-export-result.json.
+ZIP은 badzip-prefix-summary.json의 경계 → badzip-prefix-records.json의 자체 header와SHA → independent-review.json.
+근거: [상세 검토](C:/Users/user/Desktop/SmartFactory/R4ARC_20261017_94c9d2af/review.md).
+BOM 결과 SHA256: `cc4964f3e14dc12988e22e38010828999b1f34b5c6fa59de1cf404d47a6b62d6`.
+ZIP 결과 SHA256: `ea3692df8f7a508584a5b55faa6f3be0f58a45604c048c630cc4b1f0436d29a4`.
+독립 검산 SHA256: `5ea98d7d65139b3bdf382acfce5d3e3482ab7197c67cbead1062069d0f88cb33`.
+closeout SHA256: `43f3fa816ce2b74a32a2273eb016cdb0656d2842554b2d496785a8461d0e9818`.
+
+전체 R4의 다른 손상·의미 미확정 자료, R1/R2 성능원인·200ms기준, R3물리, R5drop15, R6최종QA는
+계속 미완료다. 목표active/이번단계PROGRESS/full_data_gate NOT_EVALUATED/출시HOLD를 유지한다.
+실행 중 진단이나 사용자 입력 대기는 없다. 다음에는 현행 비고정 진단 수집기의 이벤트 조회 결과
+기록을 보완하고, 과거 증거의 미확정 범위는 최종 영향·처리 원장에 남긴다.

@@ -1,5 +1,39 @@
 # 운영본과 다음 개선 작업의 롤백 기준
 
+## 현재 기준 — 2026-10-26 운영 승격 완료
+
+최종 통합 QA, 실제 서버 적용 상태, 로컬/원격 `v1.0.32` 태그 검산을 완료했다.
+판정: **승인된 제약을 포함한 미서명 내부 운영 승격** (`PROMOTED_WITH_DOCUMENTED_LIMITATIONS`).
+아래 과거 표의 “검증 중인 후보”, “1.0.26 등록 운영본”은 당시 이력이다. 현재 기준은 이 표다.
+
+| 역할 | 버전 / build commit | installer bytes / SHA256 |
+|---|---|---|
+| 현재 승인 운영본 및 다음 변경의 롤백 기준 | 1.0.32 / `cd46692ac9c551080c57d8168fa9ea5abd530206` | 164158258 / `558658cf02d59cb6b66468e4e191c447efdc7cc24518b5a69647cc2409eb232f` |
+| 이번 승격 전 등록 롤백본 — 보존 | 1.0.26 / `541d701d544eea6a8a4e4836047077eaf9cfaf30` | 163826264 / `08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c` |
+| C32 설치 직전 현장 후보 — 보존 | 1.0.31 / `a7e5149b718f56d7dfa75df73bfba4a21d16a758` | 164158074 / `a10a59aa544a7bfa60e40778f05b89e3cc5be6da8ca284f94f740b6e6ae4a1dc` |
+
+- C32 서버 설치본: `C:\Users\user\Desktop\SmartFactory\FIELD32_20261023_cd46692a\install\candidate.exe`
+- C32 개발 PC 보존 설치본: `C:\Users\user\Desktop\SmartFactory\C32BUILD_20261023_eac4b615\source\v2_next\dist\smart-factory-logger-v2 Setup 1.0.32.exe`
+- Annotated tag object: `65045dd6fe018130bc0088cee90420e99bc477b2`. 원격 peeled commit은 위 C32와 일치한다.
+- [승격 영수증](C:/Users/user/Desktop/SmartFactory/PROMOTE32_20261026_780e4d2a/promotion.json) · [최종 보고서](../../04-report/production-release-risk-validation.report.md)
+
+운영 범위는 서버 포함3대·각 화면1개, 온도/이미지 수집·저장·조회, Low Signal OFF다.
+기존 FAIL/INCOMPLETE, 원인 미확정 timeout, 초기15분 health6건·PC_2 화면 가림의 한 실행 예외,
+과거 자료 학습 사용 보류, comparator false/물리 NOT_TESTED를 유지한다.
+복구는 향후 변경 시 별도 승인된 정상 종료·저장 검산·호환성 확인 절차로 수행한다.
+기준 갱신만으로 자동 설치·복구·재시작하거나 이전 설치본/증거를 삭제하지 않는다.
+이번 승격은 이미 설치·검증된 동일 바이트의 운영 등록이며 새 빌드·설치는 없다.
+
+
+## 2026-10-23 승인된 출시 범위와 복구 제약 처리
+
+[사용자 승인 정책](approved_release_policy_20261023.md)에 따라 Low Signal OFF의 물리 시험 미실시와 보류된 과거 자료의 전체 복구는 이번 수집·저장·조회 출시의 선행 조건에서 제외한다. 기존 실패와 미검증 사실은 그대로 보존한다.
+
+등록 롤백본 1.0.26의 정상 UI 종료 요청 뒤 `/api/spot/live_image.jpg`에 발생한 502/reason shutdown은 정상 exit0·강제 종료 없음·미저장0·데이터 검산 통과를 모두 확인한 경우에만 `ACCEPTED_KNOWN_LIMITATION`으로 수용한다. 정상 수집 중 오류나 저장 실패는 제외하지 않는다. 원 179/180 결과는 재작성하지 않는다.
+
+C32의 최종 필수 검증·운영 승격·실제 적용 확인을 마친 뒤에만 아래 등록 운영본/다음 롤백 기준을 C32로 갱신한다. 이 정책 편집 자체로 등록 버전은 바꾸지 않는다.
+
+
 기준일: 2026-10-09 KST. 이 문서는 운영본·다음 개선의 복귀 기준·이번 교체 전 이전본을
 구분하고 갱신하는 기준이다. 특정 commit의 영구 사용 지시가 아니다.
 
@@ -16,6 +50,106 @@
 상세 현재 조건은 [출시 계획](../../01-plan/features/production-release-risk-validation-codex-production-release-risk-validation-20261010.plan.md#r6-최종-미서명-내부-운영-설치본과-정식-qa-검증)을 따른다.
 이번 정책 반영으로 아래 실제 운영본·롤백 기준의 build commit/installer SHA256을 갱신하지 않는다.
 과거 서명·기술 QA·승인 판정과 해시 결합 자료는 당시 기록으로 보존한다.
+
+## 2026-10-23 1.0.32 현장 적용·재시작 확인
+
+1.0.32의 실제 설치 종료 0, 설치 전후 원본 보존과 payload 1,867파일 검산,
+일반 사용자 실행·정상 종료 및 CSV 493행 순번 검사를 완료했다. 기존 승인 설정의
+확인 항목 네 개를 새 build에 연결한 뒤 재시작했고, 실제 수집과 대시보드 전면 표시를 확인했다.
+이 적용 확인은 정식 운영 승격이 아니다. 15분 R2와 120분의 실제 종료·원시 재계산은
+수집/세대 결합 범위 PASS다. 120분 후 정상 종료·CSV/원장 참조·이미지 파일 검산과
+일반 사용자 재시작을 마쳤다. 현재 CSV 상세 소비자, 전체 필수 QA·물리 경계의 남은
+조건은 별도 확인한다. 운영본과 아래 롤백 기준은 이번 진행 기록으로 갱신하지 않는다.
+
+| 역할 | 버전 / build commit | installer bytes / SHA256 |
+| --- | --- | --- |
+| 현장에 적용해 검증 중인 후보 | 1.0.32 / `cd46692ac9c551080c57d8168fa9ea5abd530206` | 164158258 / `558658cf02d59cb6b66468e4e191c447efdc7cc24518b5a69647cc2409eb232f` |
+| 이번 교체 직전의 현장 후보 | 1.0.31 / `a7e5149b718f56d7dfa75df73bfba4a21d16a758` | 164158074 / `a10a59aa544a7bfa60e40778f05b89e3cc5be6da8ca284f94f740b6e6ae4a1dc` |
+| 마지막 승인·등록 운영본 및 다음 변경의 롤백 기준 | 1.0.26 / `541d701d544eea6a8a4e4836047077eaf9cfaf30` | 163826264 / `08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c` |
+
+실제 설치본은 서버 `C:/Users/user/Desktop/SmartFactory/FIELD32_20261023_cd46692a/install/candidate.exe`다.
+설치 결과 `J9f4b09c5`, 정상 종료 `Rd257d0f58a96`, 승인 확인 기록 갱신 `A696aaa98`,
+재시작 `ST32_b73f3b70`의 해시와 독립 검토를
+[현장 적용 기록](../../04-report/production-release-risk-validation-c32-field-preparation-20261023.report.md)에 연결했다.
+새 전체 백업은 만들지 않았다. Low Signal OFF, 과거 자료 사용 보류, 등록 롤백본의 종료 제약을 유지한다.
+기존 C31의 완료 결과를 C32 결과로 바꾸지 않으며 등록 롤백 기준은 갱신하지 않았다.
+
+## 2026-10-22 1.0.31 현장 적용 — 당시 기록
+
+1.0.31의 실제 설치·설치 전후 원본 보존 검산, 일반 사용자 실행, 정상 종료와 현재 CSV
+검토, 기존 승인 설정의 네 확인 항목 연결 및 재시작을 완료했다. 재시작 후 대시보드·작업 정보와
+전면 상태도 사용자가 확인했다. 아래 2026-10-20 표는 당시 현장 설치 이력으로 보존한다.
+
+| 역할 | 버전 / build commit | installer bytes / SHA256 |
+| --- | --- | --- |
+| 현장에 적용해 검증 중인 후보 | 1.0.31 / `a7e5149b718f56d7dfa75df73bfba4a21d16a758` | 164158074 / `a10a59aa544a7bfa60e40778f05b89e3cc5be6da8ca284f94f740b6e6ae4a1dc` |
+| 이번 교체 직전의 현장 후보 | 1.0.30 / `240a49522da5d59e9e823f62612e3d4207b497a9` | 164158434 / `56ec126261970efbcee26fa22789d57c313dc8d27e5a71bb6b9296c3cab891b4` |
+| 마지막 승인·등록 운영본 및 다음 변경의 롤백 기준 | 1.0.26 / `541d701d544eea6a8a4e4836047077eaf9cfaf30` | 163826264 / `08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c` |
+
+새 후보 설치본의 실제 서버 경로는
+`C:/Users/user/Desktop/SmartFactory/FIELD31_20261022_a7e5149b/install/candidate.exe`다.
+설치 결과 `Jc4d79976`과 새 버전 종료 결과 `R575b518825b1`, 승인 설정 연결 결과
+`A4e537c18` 및 재시작 결과 `ST31_e5b547e9`를 각각 독립 검토했다.
+상세 범위·해시·검사 명령은 [새 버전 적용·종료·재시작 기록](../../04-report/production-release-risk-validation-c31-close-readiness-20261022.report.md)에 있다.
+
+이 표는 현장에 실제 설치된 후보 식별의 갱신이다. 운영 승격이나 다음 롤백 기준 변경은 아니다.
+2026-10-23에는 C31 자체의 15/120분 수집·세대 결합, 닫힌 CSV105,816행·이미지23,022개,
+최초CSV3,047행 검산 및 실제4기기 관찰의 확인된 범위가 추가 완료됐다. PC4곳의 계속 갱신은
+교체 후 약555초 구간에 대한 사용자 확인이며 전체 성능·물리 경계·정식QA는 미완료다.
+[최신 완료 범위·남은 조건](../../04-report/production-release-risk-validation-goal-alignment-20261022.report.md)을 따른다.
+기존 240a의 120분 결과를 C31 통과로 재표시하지 않는다. 미서명 내부 정책과
+Low Signal OFF 조건, 과거 데이터 사용 보류 및 541d 종료 제약도 유지한다.
+
+## 2026-10-22 완료 증거 연결 — 등록 기준 변경 없음
+
+240a/56ec 후보의 120분 수집·세대결합과 해당 닫힌 실행 CSV41,487행·JPEG8,912개 검산은
+완료됐다. VM 동시 조회3조건의 자료 검토도 완료했지만 실제3PC·전체 성능·물리 경계·과거 원인·
+전체 데이터와 정식 QA는 미완료다. 설치/복구 matrix의 등록541d 종료502 오류1건도 유지한다.
+운영 승격이나 다음 롤백 기준 갱신은 하지 않았다. 아래 표의 역할과 SHA는 그대로다.
+
+[등록 롤백본 종료502 대조](../../04-report/production-release-risk-validation-rollback-shutdown-attribution-20261022.report.md)에서
+541d의 내부 종료 요청 거절과240a의 기존 종료 순서 수정 적용을 확인했다. 해당541d 실행의 이미지
+105건은 저장 완료됐지만 무오류 검사 실패는 유지한다. 구버전 복귀 시 종료 제약의 처리 결정은
+미완료이며, 이 원인 확인을 이유로 기존 설치본을 재작성하거나 자동 복구하지 않는다.
+
+[목표 정합성 점검](../../04-report/production-release-risk-validation-goal-alignment-20261022.report.md)에
+완료 범위와 남은 R1–R6 조건을 연결했다. 아래 2026-10-20 시점의 ‘관찰 진행 중’ 문구는
+당시 이력이며 현재 실행 상태를 뜻하지 않는다. 완료된 같은120분 검사를 자동 반복하지 않는다.
+
+## 2026-10-20 현장 검증 설치본과 등록된 복귀 기준
+
+아래는 보존된 설치 영수증과 2026-10-20 17:54:31 KST의 실행 조회를 대조한 상태다.
+같은 실행을 대상으로 한 120분 관찰과 새 데이터 검증은 진행 중이다.
+이 절은 현재 설치된 현장 후보를 식별하며 운영 승격이나 등록된 롤백 기준 변경이 아니다.
+아래 과거 기록의 “현재 운영본”은 당시 승인·등록된 기준을 뜻한다. 실제 현장 설치본과 구분한다.
+
+| 역할 | 버전 / build commit | installer bytes / SHA256 |
+| --- | --- | --- |
+| 현장에 적용해 검증 중인 후보 | 1.0.30 / `240a49522da5d59e9e823f62612e3d4207b497a9` | 164158434 / `56ec126261970efbcee26fa22789d57c313dc8d27e5a71bb6b9296c3cab891b4` |
+| 이번 교체 직전의 현장 후보 | 1.0.30 / `8de064317d6de42d321afb8395f7a30a1f31cd55` | 164150064 / `f1b6d4d843504e09410cd90dcd309a0e485e9fd7a59a524b64941c61719f5a32` |
+| 마지막 승인·등록 운영본 및 다음 변경의 롤백 기준 | 1.0.26 / `541d701d544eea6a8a4e4836047077eaf9cfaf30` | 163826264 / `08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c` |
+
+두 1.0.30 후보는 표시 버전이 같아 commit과 installer SHA로 구분한다.
+8de를 교체 직전 후보로 기록한 것은 승인된 복귀 기준으로 승격했다는 뜻이 아니다.
+설치 영수증의 원래 서버 경로는 다음과 같다. 이 문서 검토에서는 서버 파일을 다시 읽거나
+설치·복구·정리하지 않았으며, 실제 사용 전에는 대상 파일과 승인된 복구 절차를 재확인한다.
+
+- 240a: `C:\Users\user\Desktop\SmartFactory\FIELD240A_20261020_d2cbfa10\install\candidate.exe`
+- 8de: `C:\Users\user\Desktop\SmartFactory\FIELD8DE_20261019_f62a1c90\install\candidate.exe`
+- 541d: `C:\Users\user\Desktop\SmartFactory\H30_20261016_b5d184c2\install\rollback.exe`
+
+240a 설치는 실제 종료 코드0이며 당시 설치 payload1,867파일과 원본 보존을 검산했다.
+17:54 실행 조회 및 초기 관찰은 main7528/backend20088,
+logger `551b463e-79f4-4d74-b8bd-a0ae922f207f`,
+CSV `Factory_Integrated_Log_v2_20261020_172326.csv`에 결합돼 있다.
+관찰 완료 후 동일 실행의 최종 검토·정상 종료·저장 검증을 계속해야 한다.
+물리 경계, 과거 데이터/누락 원인 및 전체 필수 QA가 남아 있어 출시 HOLD를 유지한다.
+새 운영본·다음 롤백 기준 갱신은 별도의 실제 승격·적용 확인이 끝난 뒤 수행한다.
+
+근거: [설치·원본 보존 검토](C:/Users/user/Desktop/SmartFactory/F20READY_20261020_d2cbfa10/installation-final-review/review.json),
+[설치본 3종 식별 영수증](C:/Users/user/Desktop/SmartFactory/F20READY_20261020_d2cbfa10/installation-final-review/returned/installer-inputs.json),
+[120분 초기 결합 검증](C:/Users/user/Desktop/SmartFactory/OP120R2_20261020_61be7c90/started-phase/verification.json).
+기존 해시 결합 증거와 아래 과거 승인 기록은 보존한다.
 
 ## 기준을 갱신하는 원칙
 
@@ -242,3 +376,20 @@ PASS/true로 편집하지 않는다. 수용한 한계를 새 필수 시험으로
 관련 문서: [서명 운영](windows_authenticode_signing.md),
 [배포 체크리스트](../DEPLOYMENT_CHECKLIST.md),
 [과거 Temperature 상태](../../../TEMPERATURE_BRANCH_STATUS.md).
+
+## 2026-10-19 중복 정리 후 서버 보존 경로
+
+사용자가 승인한 Desktop SmartFactory 정리로 중복 설치본을 삭제했다. 위 운영/롤백 build와 SHA256은 변경하지 않는다.
+이전 절의 서버 경로는 당시 기록이며, 새 작업에서는 아래 보존본을 사용한다. 2026-10-19 14:10 KST 후검산에서
+파일 크기·SHA256을 다시 확인했다. 기존 helper·manifest 내용은 수정하지 않았다.
+
+| 설치본 | 현재 서버 보존 위치 | SHA256 |
+|---|---|---|
+| 등록 운영/롤백 541d701d | `C:\Users\user\Desktop\SmartFactory\H30_20261016_b5d184c2\install\rollback.exe` | `08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c` |
+| 이전 4c97d4a0 | `C:\Users\user\Desktop\SmartFactory\S1_CAND_20261009_R1\installers\ROLLBACK_4c97d4a_UNSIGNED.exe` | `d453c1d17efc706d3e21fe6f8d09f739f159ebf9f3f24f2eb2349e92d4ef84fb` |
+| 더 이전 d7a1b20f | `C:\Users\user\Desktop\SmartFactory\SFL_TRC_STAGE_20260920_R1\rollback-d7a1b20\smart-factory-logger-v2 Setup 1.0.26.exe` | 보존 대응표 및 후검산의 해당 파일 SHA256 참조 |
+
+예전 절차를 재실행하려면 대표 설치본을 당시의 정확한 경로로 복원하고 기존 외부 해시와 대조해야 한다.
+개발 PC의 동일 바이트 사본도 보존했다. 이 경로 정리는 앱 설치·자동 복구·운영 승격이 아니다.
+[정리 및 복원 대응표](C:/Users/user/Desktop/SmartFactory/CLEAN_SERVER_20261019_A/cleanup-report.md),
+[대표 설치본 후검산](C:/Users/user/Desktop/SmartFactory/CLEAN_SERVER_20261019_A/postcheck-r2.json).

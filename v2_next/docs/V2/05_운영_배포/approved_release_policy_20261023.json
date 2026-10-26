@@ -1,0 +1,84 @@
+{
+  "schema": "sfl-approved-release-policy-v1",
+  "policy_id": "c32-disabled-low-signal-20261023",
+  "approval": {
+    "approved": true,
+    "date_local": "2026-10-23",
+    "user_statement": "제안에 맞춰 진행 승인",
+    "scope": "User approved the four-part proposal quoted in this conversation: disabled alarm exclusion, separate historical data disposition, numerical operational criteria, and the narrowly defined old rollback shutdown limitation."
+  },
+  "candidate": {
+    "version": "1.0.32",
+    "build_commit": "cd46692ac9c551080c57d8168fa9ea5abd530206",
+    "installer_sha256": "558658cf02d59cb6b66468e4e191c447efdc7cc24518b5a69647cc2409eb232f",
+    "config_fingerprint_sha256": "e5039ec665ae5d79c8d2aa1f15ee9d9d180abb37a9478afae89e24ea6c82c049",
+    "signature_requirement": "NOT_REQUIRED_BY_APPROVED_UNSIGNED_POLICY"
+  },
+  "low_signal": {
+    "scope_disposition": "NOT_APPLICABLE_DISABLED_BY_APPROVED_SCOPE",
+    "required_alarm_enabled": false,
+    "required_comparator_verified": false,
+    "physical_test_status": "NOT_TESTED",
+    "activation_requires_separate_test_and_approval": true
+  },
+  "operational_criteria": {
+    "percentile_method": "nearest_rank",
+    "startup_max_seconds_inclusive": 30,
+    "image_display_interval_p95_ms_inclusive": 500,
+    "image_display_interval_p99_ms_inclusive": 1000,
+    "image_display_gap_failure_ms_inclusive": 2000,
+    "white_screen_events_max": 0,
+    "temperature_receipt_interval_p99_ms_inclusive": 1500,
+    "temperature_receipt_gap_failure_ms_inclusive": 3000,
+    "health_latency_p99_ms_inclusive": 200,
+    "data_latency_p99_ms_inclusive": 500,
+    "request_errors_max": 0,
+    "request_timeouts_max": 0,
+    "unexplained_storage_loss_max": 0,
+    "corrupt_accepted_records_max": 0,
+    "storage_failures_max": 0,
+    "shutdown_pending_records_max": 0
+  },
+  "observation_contract": {
+    "physical_clients": 4,
+    "server_included": true,
+    "dashboards_per_client": 1,
+    "image_display_window_seconds": 900,
+    "existing_15_and_120_minute_evidence_reused": true,
+    "whole_120_minute_repeat_required_by_policy_change": false,
+    "missing_or_incomplete_measurement": "INCOMPLETE",
+    "image_load_event_alone_is_display_evidence": false,
+    "fresh_receipt_is_not_physical_sensor_sample_completeness": true,
+    "learning_suitability": "NOT_EVALUATED"
+  },
+  "historical_data": {
+    "policy_path": "historical_data_use_policy.json",
+    "policy_sha256": "b3340a61fad2df15ec366661e703e46444f72bd101ee5036cdca648b7831c0a2",
+    "disposition": "SEPARATE_LEGACY_DATA_HOLD_NOT_CURRENT_RELEASE_REPAIR_PREREQUISITE",
+    "originals_and_failures_preserved": true,
+    "training_use_hold_preserved": true,
+    "all_historical_repair_and_root_causes_required_for_current_release": false,
+    "early_candidate_evidence_gaps": [
+      "Factory_Integrated_Log_v2_20261023_170227.csv",
+      "Factory_Integrated_Log_v2_20261023_170713.csv"
+    ],
+    "early_candidate_disposition": "DISCLOSED_EVIDENCE_GAPS_NOT_RELABELED_PASS",
+    "current_release_generation": "9a245aa0-46ad-4ac3-b908-69c334f49835",
+    "current_release_csv": "Factory_Integrated_Log_v2_20261023_172545.csv",
+    "new_or_unexplained_current_loss_is_allowed": false
+  },
+  "rollback": {
+    "build_commit": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+    "installer_sha256": "08c061ee35a1a01788f05b00ee7395aa40774150c92c06726a92f3df1bf75c3c",
+    "disposition": "ACCEPTED_KNOWN_LIMITATION",
+    "request_path": "/api/spot/live_image.jpg",
+    "http_status": 502,
+    "reason": "shutdown",
+    "after_normal_ui_close_requested_only": true,
+    "normal_native_exit_required": true,
+    "forced_exit_allowed": false,
+    "pending_writes_max": 0,
+    "data_validation_required": true,
+    "baseline_update_only_after_final_promotion": true
+  }
+}

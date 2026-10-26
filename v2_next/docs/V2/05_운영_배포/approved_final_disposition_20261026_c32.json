@@ -1,0 +1,62 @@
+{
+  "schema": "sfl-approved-c32-final-disposition-v1",
+  "approved": true,
+  "approved_date_kst": "2026-10-26",
+  "user_reply": "세 항목 처리안 승인",
+  "question_id": "call_d8980a6c640c444d8e3b6e81f4a7e1ce",
+  "recorded_utc": "2026-10-26T06:09:26.612790+00:00",
+  "candidate": {
+    "version": "1.0.32",
+    "build_commit": "cd46692ac9c551080c57d8168fa9ea5abd530206",
+    "installer_sha256": "558658cf02d59cb6b66468e4e191c447efdc7cc24518b5a69647cc2409eb232f",
+    "config_fingerprint_sha256": "e5039ec665ae5d79c8d2aa1f15ee9d9d180abb37a9478afae89e24ea6c82c049",
+    "signature_requirement": "NOT_REQUIRED_BY_APPROVED_UNSIGNED_POLICY"
+  },
+  "proposal": {
+    "path": "C:\\Users\\user\\Desktop\\SmartFactory\\R1QA32_20261026_c18b42f6\\proposed-disposition.json",
+    "bytes": 2319,
+    "sha256": "29a2e517287298e2918645f4181a49e759d18e22830b0ce8e907b896273c716b"
+  },
+  "review": {
+    "path": "C:\\Users\\user\\Desktop\\SmartFactory\\R1QA32_20261026_c18b42f6\\decision-review.md",
+    "bytes": 5871,
+    "sha256": "9af903500240f7d80ad9feec93d0929fbab0cfb2b0d53ac02f3080062725a852"
+  },
+  "dispositions": {
+    "oct09_initial_apply_timeout": {
+      "run": "r-20261009-220826-a3fbbb",
+      "original_result_sha256": "e1bc2d79194c71a92d8fd188f4415e18081fade3206cc84cae66c042d8d9952a",
+      "root_cause_status_unchanged": "UNCONFIRMED",
+      "covers_other_incidents": false,
+      "approved_disposition": "PRESERVE_UNCONFIRMED_AS_SEPARATE_HISTORICAL_INCIDENT_NOT_A_CURRENT_RELEASE_PREREQUISITE"
+    },
+    "oct23_initial15_health": {
+      "audit_sha256": "5d8c3bfdfc8397753eb4c6ceaa83993924b4c879b4540618d5c8d0f796718f7a",
+      "technical_verdict_unchanged": "FAIL",
+      "p99_ms": 228.7438,
+      "limit_ms_unchanged": 200,
+      "max_ms": 1495.1224,
+      "over_reference_requests": 6,
+      "covers_request_errors_timeouts_storage_failures_or_other_runs": false,
+      "approved_disposition": "ACCEPT_ONE_MEASURED_RUN_KNOWN_LATENCY_LIMITATION"
+    },
+    "retained_field_qa": {
+      "qa_review_sha256": "4a1034f5736ffb2621ed1fafdaff90488be11544b9164a6ff274b81a9721ac48",
+      "replace_only_new_one_command_execution_requirement": true,
+      "claim_new_live_execution_or_literal_original_FINAL_PASS": false,
+      "preserve_technical_checks_and_original_evidence": true,
+      "approved_disposition": "USE_VERIFIED_RETAINED_RUNTIME_CLOSEOUT_AND_VALIDATOR_EVIDENCE_IN_FINAL_CONSOLIDATED_QA"
+    }
+  },
+  "unchanged_conditions": [
+    "Change performance thresholds",
+    "Erase original FAIL/INCOMPLETE",
+    "Enable Low Signal",
+    "Accept current storage loss",
+    "Approve unmeasured future failures",
+    "Promote before final consolidated checks"
+  ],
+  "release_decision": "REQUIRES_FINAL_CONSOLIDATED_QA_AND_ACTUAL_APPLICATION_VERIFICATION",
+  "other_runs_or_builds_covered": false,
+  "original_records_mutated": false
+}

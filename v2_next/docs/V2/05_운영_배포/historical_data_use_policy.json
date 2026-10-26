@@ -1,0 +1,242 @@
+{
+  "schema": "sfl-approved-historical-data-use-policy-v1",
+  "policy_status": "APPROVED_USE_HOLD",
+  "approval": {
+    "user_response": "원본 보존·해당 자료 사용 보류 승인",
+    "question_item_id": "[\"request_user_input_async\",\"call_5d0a92cec8504af4861d744e02a784c4\",0]",
+    "recorded_at_utc": "2026-10-21T00:28:47.1257598Z",
+    "review_path": "C:\\Users\\user\\Desktop\\SmartFactory\\HIST_USE_20261021_d582ac91\\review-r2.md",
+    "review_sha256": "e814601f4b63b32ba9139796ca856b662d50c4334c67818bd7ac4e2bf30df612",
+    "proposal_path": "C:\\Users\\user\\Desktop\\SmartFactory\\HIST_USE_20261021_d582ac91\\proposed-disposition-final-r2.json",
+    "proposal_sha256": "a1d78fa8f8824f700b863c677bfbb48dedea3c62b3697b897b12337fc86eefd6",
+    "scope": "PRESERVE_ORIGINALS_AND_WITHHOLD_IDENTIFIED_TRAINING_AND_VALIDATED_QUALITY_INPUTS"
+  },
+  "temperature_sources": [
+    {
+      "original_relative_path": "출구부 온도\\2호기\\Archive\\LandData 2024-11-21-00-00-000.csv",
+      "sha256": "2b984ffe1cf0510dc5283e6226d54ec1ca19a68571a73343d3a73f09c2c765e9",
+      "affected_records": [
+        934361
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2025년도 raw data\\LandData 2025-06-16-08-27-25.csv",
+      "sha256": "2415e9717c2b15ef615e320b28d04c74b9815c183ef2f025d906ab702dd85c45",
+      "affected_records": [
+        570143,
+        575791,
+        576995,
+        587573,
+        589251,
+        590471,
+        590564,
+        595097,
+        595493,
+        612084,
+        701110,
+        702145,
+        702238,
+        702836,
+        703636
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2024년도 raw data\\LandData 2024-03-11-07-36-27.csv",
+      "sha256": "dc1e82127bf138061b8e1d4ba2ef53690431d64170ff3604f5cade2ed4f2a057",
+      "affected_records": [
+        93323
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-08-17-11-13-39.csv",
+      "sha256": "29245712e01db38acfe18145fd5a34fa766c7dbd495f2233074595608b44dd08",
+      "affected_records": [
+        86978
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-08-21-08-39-20.csv",
+      "sha256": "9483ed1b1535dca6aee5b2752ed32419539d137edd1bdebcbfe75a3d7bafa35b",
+      "affected_records": [
+        389287
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-08-24-18-12-32.csv",
+      "sha256": "39dd2f027369dbbd747b295594ba7b1d47db865cae79d6e17f96737284d4c80c",
+      "affected_records": [
+        84622
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-08-24-21-47-44.csv",
+      "sha256": "d9e390951fc6f66329d7f7b5195af473328f4ddc40c1865bb38b9303c5353242",
+      "affected_records": [
+        134986
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-08-31-18-48-13.csv",
+      "sha256": "2f81dde754750606efb4aec3ec89bd87d171481087dad9746ab8be86f3ab6992",
+      "affected_records": [
+        278884
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-09-09-08-44-57.csv",
+      "sha256": "cea45ae29f7d23ec0544a510f4e975cce1e3b32f9ee75e1f5afe60f2f8c26875",
+      "affected_records": [
+        32734
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-09-11-08-00-48.csv",
+      "sha256": "db2144482f6fbbc40453e5c3ce0dc49912963ec3e4d7648d668577f82ab48278",
+      "affected_records": [
+        99826
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-09-13-16-40-30.csv",
+      "sha256": "3be986ec83b68f627daf1b2e334af97082e158fe4335399fc92f1a853d853149",
+      "affected_records": [
+        74770
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-09-13-22-54-22.csv",
+      "sha256": "5283f90fa994581b5892836dd89b19f22c7a631affa30caf82588826e9f99a1a",
+      "affected_records": [
+        89910
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-09-20-04-32-18.csv",
+      "sha256": "38deb8dac46b531aadcf278952f94e64b3042d6340fe2081dfb6a54bec4b366b",
+      "affected_records": [
+        67239
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-09-23-16-09-27.csv",
+      "sha256": "b4b096e0899ace05703c4bb2254bdc793288fd78d7b23c446fa7b7002d93d8ba",
+      "affected_records": [
+        190427
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-10-04-14-46-05.csv",
+      "sha256": "efbce6be9ef536fbbad8fcb48b495f15db3b53b375097822d0fd464b3df6396e",
+      "affected_records": [
+        247996
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-10-31-07-44-22.csv",
+      "sha256": "e41037b9078f8558762206061a16af795a31004654fe70bd5c4834867ffe56a0",
+      "affected_records": [
+        156895
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-11-16-15-27-46.csv",
+      "sha256": "2d08773fe9313a381450a05ff754e0d5fe407215fa89e889b912ff887a99e73f",
+      "affected_records": [
+        3869
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\2호기\\2023년도 raw data\\LandData 2023-12-13-15-03-20.csv",
+      "sha256": "370257393f223603daed14df1a3cf2d9f965ea4a3927df1badc7aca247f1af7f",
+      "affected_records": [
+        4569
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    },
+    {
+      "original_relative_path": "출구부 온도\\1호기\\1호기 2024년 raw data\\LandData 2024-12-12-03-21-34.csv",
+      "sha256": "10370c182af91256d91e813df6b08fedea834f7bb2dbead58ac0f2164900d7cc",
+      "affected_records": [
+        105488
+      ],
+      "approved_usage_scope": "whole identified file and its not-yet-cleared derivatives"
+    }
+  ],
+  "plc_members": [
+    {
+      "id": "PLC-NUL",
+      "evidence": [
+        "recovery"
+      ],
+      "scope": "One historical Documents.zip member, 108 NUL tail bytes",
+      "status": "CORRUPTION_PRESERVED_RECOVERY_UNPROVEN",
+      "impact": "Selected alternate member has identical damaged bytes.",
+      "action": "Retain the complete file and boundary; no replacement with the identical damaged archive.",
+      "unresolved": "Original tail values and cause.",
+      "original_relative_path": "PLC 모니터링/Documents.zip!/250516052348_압출기.csv",
+      "approved_usage_scope": "whole identified CSV member and its not-yet-cleared derivatives"
+    }
+  ],
+  "image_runs": [
+    {
+      "build_commit": "4c97d4a00d79ae0d3da70b2e82af227345e21040",
+      "spot_service_id": "d5e16e1b-7de0-4460-869e-460b3960fa92",
+      "same_pid_start_ticks": 639270294886678438,
+      "drop_interval": {
+        "last_zero": "2026-10-09T18:56:03.440548+09:00",
+        "first_fifteen": "2026-10-09T19:56:59.7290672+09:00",
+        "envelope_gap_seconds": 3656.288519,
+        "continuous_observation": false
+      },
+      "rejected_attempts": 15,
+      "unique_missing_images": "UNKNOWN",
+      "scope": "image material from the identified R5 run as a whole; rejected payload IDs were not recorded",
+      "approved_usage_scope": "withhold the identified run's image-derived training/validated-quality inputs pending specific coverage review"
+    }
+  ],
+  "archive_evidence_only": {
+    "id": "ZIP-TAIL",
+    "evidence": [
+      "archive_findings"
+    ],
+    "scope": "Two damaged ZIPs;15790 intact entries verified",
+    "status": "INTACT_PREFIX_VERIFIED_TAIL_UNRECOVERED",
+    "impact": "2433412662 bytes of original tail region are zero-filled.",
+    "action": "Retain originals and counterpart identities; do not label counterpart tails as recovered originals.",
+    "unresolved": "Original zero-filled tail contents and corruption cause.",
+    "reason": "Known intact contents are software/library assets, not factory measurement data; unknown tail contents remain unknown.",
+    "owner_use_decision_scope": false
+  },
+  "limits": [
+    "No claim that 33 detected malformed records equal all missing temperature samples.",
+    "No conversion of 15 rejected enqueue attempts into 15 unique images or products.",
+    "The missing source bytes, cause and physical/business impact remain unconfirmed.",
+    "Accepting a usage policy is not accepting the missing data as correct or closing R4/R5 technical gates.",
+    "Unlisted historical inputs are not declared fit for training.",
+    "No originals, archives, datasets or production settings are moved, deleted or rewritten."
+  ],
+  "policy_recorded": true,
+  "automated_pipeline_enforcement_implemented": false,
+  "source_data_modified": false,
+  "release_gate": "HOLD",
+  "promotion_allowed": false,
+  "r4_status": "NOT_PASSED",
+  "r5_status": "INCOMPLETE"
+}

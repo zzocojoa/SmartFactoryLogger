@@ -1,0 +1,22 @@
+{
+  "schema": "sfl-pc2-screen-exception-v1",
+  "approved": true,
+  "approved_by": "user",
+  "date_local": "2026-10-26",
+  "user_statement": "이번 화면 가림 예외 수용",
+  "scope": "ONE_USER_CONFIRMED_OCCLUSION_ONLY",
+  "policy_sha256": "d6eadd712409f0a707eb10af0c1d1ae8adf655b2b8e5acca8d29bb41a42eab99",
+  "client_id": "PC_2",
+  "run_id": "BROWSER_1792987537592_e339ce977a5fef71",
+  "capture_sha256": "7516bb6ae9eda64666474e7cd1c1b8e9228e9792489e987fa1ec50f3f010c705",
+  "focus_interval_relative_ms": [3986.7999999523163, 32111.19999998808],
+  "occlusion_user_statement": "이 대화 창 등으로 대시보드가 가려졌음",
+  "three_screen_user_statement": "세 화면 유지·멈춤·흰 화면 없음",
+  "original_incomplete_preserved": true,
+  "repeat_measurement_required": false,
+  "uninterrupted_physical_screen_pass": false,
+  "numerical_criteria_unchanged": true,
+  "applies_to_other_runs": false,
+  "waives_request_or_storage_failures": false,
+  "automatic_release_promotion": false
+}
