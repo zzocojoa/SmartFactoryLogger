@@ -7,7 +7,7 @@ $library=[IO.File]::Open((Join-Path $PSScriptRoot 'observe-health-runtime-close.
 try{
     $hasher=[Security.Cryptography.SHA256]::Create()
     try{$pin=[BitConverter]::ToString($hasher.ComputeHash($library)).Replace('-','').ToLowerInvariant()}finally{$hasher.Dispose()}
-    if($pin -cne 'bee27ed50771fe231b4f197ab4f1de9eb6a1d94c1daab688767669a3653f7b3d'){throw 'runtime-library-pin'}
+    if($pin -cne '94f458788bb1eea2fbd0a44c20ca092e85a3fc4a9f6a832709edb3182301a170'){throw 'runtime-library-pin'}
     $library.Position=0;$reader=[IO.StreamReader]::new($library,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
     try{$source=$reader.ReadToEnd()}finally{$reader.Dispose()}
     $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)

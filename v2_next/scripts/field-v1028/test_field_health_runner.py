@@ -3,6 +3,7 @@ from copy import deepcopy
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -61,13 +62,18 @@ class RunnerTests(unittest.TestCase):
             contract = json.loads(Path(spec.trace_contract_path).read_bytes())
             self.assertEqual(contract['package_sha256'], self.trace_sha)
             self.assertEqual(contract['backend_created_filetime'], self.request['spec']['backend_created_filetime'])
-            outlier = self.request['schema'] != runner.SCHEMA
+            outlier = self.request['schema'] not in (runner.SCHEMA, runner.PYTHON_SCHEMA, runner.PYTHON_BASELINE_SCHEMA)
             self.assertEqual(contract['duration_seconds'], 900 if outlier else 6)
             self.assertEqual(contract['guard_seconds'], 960 if outlier else 30)
             self.assertEqual(spec.outlier_capture, outlier)
             self.assertEqual(spec.cpu_samples, self.request['schema'] in (runner.CPU_OUTLIER_SCHEMA, runner.CPU_CONCURRENT_SCHEMA))
             self.assertEqual(spec.concurrent_api, self.request['schema'] in (runner.CPU_CONCURRENT_SCHEMA, runner.READY_CONCURRENT_SCHEMA))
             self.assertEqual(spec.ready_stacks, self.request['schema'] == runner.READY_CONCURRENT_SCHEMA)
+            self.assertEqual(spec.python_frames, self.request['schema'] == runner.PYTHON_SCHEMA)
+            self.assertEqual(spec.python_baseline, self.request['schema'] == runner.PYTHON_BASELINE_SCHEMA)
+            if spec.python_frames or spec.python_baseline:
+                self.assertEqual(spec.tool, str(self.archive/'sfl_qpc_reader.exe'))
+                with self.assertRaises(OSError): Path(spec.tool).write_bytes(b'replacement')
             self.assertEqual(hashlib.sha256(Path(spec.trace_contract_path).read_bytes()).hexdigest(), spec.trace_contract_sha256)
             with self.assertRaises(OSError):
                 (self.archive/'configuration.json').write_text('attempted replacement')
@@ -222,6 +228,80 @@ class RunnerTests(unittest.TestCase):
         result, saved, seen = self.invoke(mutate=lambda: (self.archive/'candidate-payload.json').write_text('{}'))
         self.assertEqual((result['status'], seen), ('FAIL', []))
         self.assertIn('health-archived-input-pin:candidate-payload.json', str(saved['errors']))
+
+    def prepare_python(self):
+        self.request.update(schema=runner.PYTHON_SCHEMA, duration_seconds=6,
+                            candidate_commit=runner.binding.CANDIDATE_1030.commit)
+        self.request['spec']['candidate_commit'] = runner.binding.CANDIDATE_1030.commit
+        self.request['spec']['reference_sha256'] = runner.binding.REFERENCE_SHA_1030
+        shutil.copyfile(os.environ['SFL_PYTHON_STREAM_TOOL'], self.archive/'sfl_qpc_reader.exe')
+
+    def test_python_request_locks_package_reader_and_keeps_distinct_contract(self):
+        self.prepare_python()
+        runner.validate_request(self.request)
+        result, saved, seen = self.invoke()
+        self.assertEqual(result['status'], 'PASS', saved)
+        self.assertEqual(saved['mode'], 'python-health-trace')
+        self.assertEqual(saved['archived_inputs']['sfl_qpc_reader.exe'], runner.trace.python_stream.TOOL_FACT)
+        contract = json.loads(Path(seen[0].trace_contract_path).read_bytes())
+        self.assertEqual(contract['schema'], 'sfl-python-health-trace-contract-v1')
+        self.assertEqual(contract['scope'], runner.trace.PYTHON_SCOPE)
+
+    def test_python_reader_pin_failure_prevents_trace_or_collection(self):
+        self.prepare_python()
+        result, saved, seen = self.invoke(mutate=lambda: (self.archive/'sfl_qpc_reader.exe').write_bytes(b'wrong'))
+        self.assertEqual((result['status'], seen), ('FAIL', []))
+        self.assertIn('health-python-tool-pin', str(saved['errors']))
+        self.assertFalse((self.output/'session/trace-channel').exists())
+
+    def test_baseline_keeps_same_locked_reader_package_without_enabling_observer(self):
+        self.prepare_python()
+        self.request['schema'] = runner.PYTHON_BASELINE_SCHEMA
+        runner.validate_request(self.request)
+        result, saved, seen = self.invoke()
+        self.assertEqual(result['status'], 'PASS', saved)
+        self.assertEqual(saved['mode'], 'python-health-baseline-trace')
+        self.assertEqual(saved['scope'], 'PYTHON_HTTP_BASELINE_NOT_FIELD_PERFORMANCE')
+        self.assertEqual(saved['archived_inputs']['sfl_qpc_reader.exe'], runner.trace.python_stream.TOOL_FACT)
+        self.assertFalse(seen[0].python_frames)
+        self.assertTrue(seen[0].python_baseline)
+        contract = json.loads(Path(seen[0].trace_contract_path).read_bytes())
+        self.assertEqual(contract['schema'], 'sfl-python-health-baseline-contract-v1')
+        self.assertEqual(contract['scope'], runner.trace.PYTHON_BASELINE_SCOPE)
+        self.assertFalse(saved['promotion_allowed'])
+
+    def test_baseline_reader_pin_failure_still_prevents_collection(self):
+        self.prepare_python()
+        self.request['schema'] = runner.PYTHON_BASELINE_SCHEMA
+        result, saved, seen = self.invoke(mutate=lambda: (self.archive/'sfl_qpc_reader.exe').write_bytes(b'wrong'))
+        self.assertEqual((result['status'], seen), ('FAIL', []))
+        self.assertIn('health-python-tool-pin', str(saved['errors']))
+        self.assertFalse((self.output/'session/trace-channel').exists())
+
+    def test_baseline_rejects_old_candidate_duration_and_hidden_options(self):
+        self.prepare_python()
+        self.request['schema'] = runner.PYTHON_BASELINE_SCHEMA
+        for name in ('python_baseline', 'python_frames', 'outlier_capture'):
+            changed = deepcopy(self.request)
+            changed['spec'][name] = True
+            with self.assertRaisesRegex(ValueError, 'health-request-spec-members'):
+                runner.validate_request(changed)
+        for duration in (0, 30, 900, True, 6.0):
+            with self.assertRaises(ValueError):
+                runner.validate_request(dict(self.request, duration_seconds=duration))
+        with self.assertRaisesRegex(ValueError, 'health-python-candidate'):
+            runner.validate_request(dict(self.request, candidate_commit=runner.binding.CANDIDATE_1029.commit))
+
+    def test_python_request_forbids_extra_options_duration_and_old_candidate(self):
+        self.prepare_python()
+        for name, value in [('tool', 'C:/other.exe'), ('python_frames', True), ('outlier_capture', True)]:
+            changed = deepcopy(self.request)
+            changed['spec'][name] = value
+            with self.assertRaisesRegex(ValueError, 'health-request-spec-members'): runner.validate_request(changed)
+        for duration in (900, 30, True, 6.0):
+            with self.assertRaises(ValueError): runner.validate_request(dict(self.request, duration_seconds=duration))
+        with self.assertRaisesRegex(ValueError, 'health-python-candidate'):
+            runner.validate_request(dict(self.request, candidate_commit=runner.binding.CANDIDATE_1029.commit))
 
     def test_archived_references_used_and_locked_before_collection(self):
         result, saved, seen = self.invoke()

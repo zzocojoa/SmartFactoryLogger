@@ -12,6 +12,16 @@ $ProgressPreference='SilentlyContinue'
 $fieldRunManifestSha256='@@MANIFEST_SHA256@@'
 
 function Assert-RunCondition([bool]$Value,[string]$Reason) { if(-not $Value){throw $Reason} }
+function Get-RunBudget($Request) {
+    if($Request.mode -ceq 'python-frames' -or $Request.mode -ceq 'python-health'){
+        Assert-RunCondition ($Request.schema -ceq 'sfl-field-run-request-v1' -and
+            $Request.signature_policy -ceq 'UNSIGNED_INTERNAL' -and
+            $Request.candidate_commit -ceq '0732c8e810be3c46096b397812f53a9767354229' -and
+            $Request.duration_seconds -is [int] -and $Request.duration_seconds -eq 6) 'frame-request-budget'
+        return 600
+    }
+    return 9000
+}
 function Get-RunPath([string]$Path) {
     Assert-RunCondition ($Path -cmatch '^[A-Za-z]:[\\/]' -and $Path -notmatch '[\x00-\x1f]') 'absolute-local-path'
     $full=[IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -361,7 +371,9 @@ try{
     $resultRoot=Get-RunPath ($parent+'\run-'+[Guid]::NewGuid().ToString('N').Substring(0,12))
     Assert-RunCondition (-not [IO.Directory]::Exists($resultRoot) -and -not [IO.File]::Exists($resultRoot)) 'result-already-exists'
     [void][IO.Directory]::CreateDirectory($resultRoot,(New-RunAcl $OperatorSid));Assert-RunAcl $resultRoot $OperatorSid
-    $child=Invoke-RunNative ($root+'\field_runner.exe') @('--request',$request,'--request-sha256',$ExpectedRequestSha256,'--output-root',$resultRoot,'--package-root',$root) $resultRoot 9000
+    $requestStream.Position=0;$requestReader=[IO.StreamReader]::new($requestStream,[Text.UTF8Encoding]::new($false,$true),$false,4096,$true)
+    try{$runBudget=Get-RunBudget ($requestReader.ReadToEnd()|ConvertFrom-Json)}finally{$requestReader.Dispose()}
+    $child=Invoke-RunNative ($root+'\field_runner.exe') @('--request',$request,'--request-sha256',$ExpectedRequestSha256,'--output-root',$resultRoot,'--package-root',$root) $resultRoot $runBudget
     Assert-RunAcl $resultRoot $OperatorSid
     Write-RunJson ($resultRoot+'\native-child.json') $child
     $childReceipt=Get-RunFact ($resultRoot+'\native-child.json')

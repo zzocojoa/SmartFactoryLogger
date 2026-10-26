@@ -34,7 +34,8 @@ def control_identity(value, backend, expected_generation):
                 backend_session_id=session, started_at=started)
 
 
-def capture_generation(payload, main, backend, port, *, expected_identity=None):
+def capture_generation(payload, main, backend, port, *, expected_identity=None, enforce_legacy_latency=True):
+    binding.require(type(enforce_legacy_latency) is bool, 'control-latency-policy')
     result = dict(generation_status='FAIL', started_ns=time.perf_counter_ns(),
                   observed_at=datetime.now(timezone.utc).isoformat(), errors=[],
                   field_gate='NOT_EVALUATED', release_gate='HOLD', promotion_allowed=False)
@@ -63,7 +64,11 @@ def capture_generation(payload, main, backend, port, *, expected_identity=None):
         binding.require(result['process_after'] == result['process_before'], 'control-process-changed')
         if expected_identity is not None:
             binding.require(result['identity'] == expected_identity, 'control-session-changed')
-        binding.require(record['client_request_and_body_ms'] <= 200, 'control-health-latency')
+        if enforce_legacy_latency:
+            binding.require(record['client_request_and_body_ms'] <= 200, 'control-health-latency')
+        else:
+            result['latency_policy'] = 'DIAGNOSTIC_REFERENCE_ONLY'
+            result['over_200ms'] = record['client_request_and_body_ms'] > 200
         result['generation_status'] = 'PASS'
     except Exception as error:
         # Environment/provider exceptions can contain sensitive strings. This

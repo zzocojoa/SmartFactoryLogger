@@ -4,9 +4,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import field_health_trace as trace
 from field_resource_sampling import ProcessIdentity
@@ -92,7 +93,7 @@ class TraceTests(unittest.TestCase):
         directory = self.root/'SmartFactory'/('T'+'d'*12)
         directory.mkdir(parents=True)
         policy = trace.capture_policy(self.spec.outlier_capture, self.spec.cpu_samples, self.spec.concurrent_api,
-                                      self.spec.ready_stacks)
+                                      self.spec.ready_stacks, self.spec.python_frames, self.spec.python_baseline)
         lease = dict(schema=policy['lease_schema'], scope=policy['scope'], run_id=self.contract['run_id'],
             run_path=str(directory), instance='SFLTrace_'+'e'*32, guard_seconds=policy['guard'], capture_seconds=policy['duration'],
             stop_timeout_seconds=60, profile_sha256=policy['profile_sha256'],
@@ -165,6 +166,33 @@ class TraceTests(unittest.TestCase):
                 with self.path.open('w'):
                     pass
 
+    def test_python_contract_profile_and_legacy_scope_cannot_be_mixed(self):
+        policy = trace.capture_policy(False, python_frames=True)
+        self.assertEqual((policy['duration'], policy['guard'], policy['profile_sha256']),
+                         (6, 30, trace.READY_PROFILE_SHA256))
+        tool = self.root/'sfl_qpc_reader.exe'
+        tool.write_bytes(b'contract-only fixture; never executed')
+        self.contract.update(schema=policy['contract_schema'], scope=policy['scope'])
+        self.path.write_text(json.dumps(self.contract))
+        self.spec = replace(self.spec, python_frames=True, tool=str(tool),
+            candidate_commit=trace.binding.CANDIDATE_1030.commit,
+            trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(ValueError, 'trace-contract-schema'):
+            with trace.HealthTraceHandshake(replace(self.spec, python_frames=False, tool=''), 6, self.evidence): pass
+        with trace.HealthTraceHandshake(self.spec, 6, self.evidence) as h:
+            bound = self.bind(h)
+            self.assertEqual(bound['lease']['schema'], policy['lease_schema'])
+            with patch.object(h, 'wait', side_effect=lambda *args: self.stopped(h)):
+                self.assertGreater(h.finish({}, self.stop)['etl']['bytes'], 0)
+        for flags in ((True, False, False, False, True), (False, True, False, False, True),
+                      (False, False, True, False, True), (False, False, False, True, True),
+                      (False, False, False, False, 1)):
+            with self.assertRaises(ValueError): trace.capture_policy(*flags)
+        with self.assertRaisesRegex(ValueError, 'trace-python-candidate'):
+            replace(self.spec, candidate_commit=trace.binding.CANDIDATE_1029.commit).validate()
+        with self.assertRaisesRegex(ValueError, 'trace-unexpected-python-tool'):
+            replace(self.spec, python_frames=False).validate()
+
     def test_concurrent_contract_cannot_be_substituted_for_solo_cpu_contract(self):
         policy = trace.capture_policy(True, True, True)
         self.assertEqual((policy['duration'], policy['guard'], policy['profile_sha256']),
@@ -185,6 +213,74 @@ class TraceTests(unittest.TestCase):
         for flags in ((False, False, True), (True, False, True), (True, True, 1), (True, True, None)):
             with self.assertRaises(ValueError):
                 trace.capture_policy(*flags)
+
+    def test_baseline_policy_keeps_profile_and_limits_but_rejects_mixed_modes(self):
+        off = trace.capture_policy(False, python_baseline=True)
+        on = trace.capture_policy(False, python_frames=True)
+        for key in ('duration', 'guard', 'profile_sha256'):
+            self.assertEqual(off[key], on[key])
+        self.assertEqual(off['profile_sha256'], trace.READY_PROFILE_SHA256)
+        self.assertNotEqual(off['scope'], on['scope'])
+        self.assertNotEqual(off['contract_schema'], on['contract_schema'])
+        self.assertNotEqual(off['lease_schema'], on['lease_schema'])
+        for flags in ((True, False, False, False, False, True), (False, True, False, False, False, True),
+                      (False, False, True, False, False, True), (False, False, False, True, False, True),
+                      (False, False, False, False, True, True), (False, False, False, False, False, 1)):
+            with self.assertRaises(ValueError):
+                trace.capture_policy(*flags)
+
+    def test_baseline_binds_its_own_contract_and_rejects_on_or_legacy_contract(self):
+        policy = trace.capture_policy(False, python_baseline=True)
+        (self.root/'sfl_qpc_reader.exe').write_bytes(b'contract-only fixture; never executed')
+        self.contract.update(schema=policy['contract_schema'], scope=policy['scope'])
+        self.path.write_text(json.dumps(self.contract))
+        self.spec = replace(self.spec, python_baseline=True, tool=str(self.root/'sfl_qpc_reader.exe'),
+            candidate_commit=trace.binding.CANDIDATE_1030.commit,
+            trace_contract_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest())
+        for alternate in (replace(self.spec, python_baseline=False, python_frames=True),
+                          replace(self.spec, python_baseline=False, tool='')):
+            with self.assertRaisesRegex(ValueError, 'trace-contract-schema'):
+                with trace.HealthTraceHandshake(alternate, 6, self.evidence):
+                    pass
+        with trace.HealthTraceHandshake(self.spec, 6, self.evidence) as handshake:
+            bound = self.bind(handshake)
+            self.assertEqual(bound['lease']['profile_sha256'], trace.READY_PROFILE_SHA256)
+            with patch.object(handshake, 'wait', side_effect=lambda *args: self.stopped(handshake)):
+                self.assertGreater(handshake.finish({}, self.stop)['etl']['bytes'], 0)
+        with self.assertRaisesRegex(ValueError, 'trace-python-candidate'):
+            replace(self.spec, candidate_commit=trace.binding.CANDIDATE_1029.commit).validate()
+
+    def test_worker_only_starts_python_observer_in_on_condition(self):
+        for enabled in (False, True):
+            output = self.root/('on' if enabled else 'off')
+            output.mkdir()
+            spec = replace(self.spec, python_frames=enabled, python_baseline=not enabled,
+                           candidate_commit=trace.binding.CANDIDATE_1030.commit,
+                           tool=str(self.root/'sfl_qpc_reader.exe'))
+            sender = Mock()
+            before = sys.stdout, sys.stderr
+            with patch.object(trace, 'HealthTraceHandshake') as handshake, \
+                    patch.object(trace.python_stream, 'companion') as companion, \
+                    patch.object(trace.observation, 'ObservationStop') as stop, \
+                    patch.object(trace.collection, 'collect', return_value=dict(collection_status='BOUND_WINDOW_CAPTURED')) as collect:
+                try:
+                    with self.assertRaises(SystemExit) as ended:
+                        trace._worker_entry(spec, output, 6, self.stop, sender)
+                finally:
+                    sys.stdout, sys.stderr = before
+                self.assertEqual(ended.exception.code, 0)
+                args, keywords = collect.call_args
+                self.assertEqual(args[:3], (spec, output, 6))
+                self.assertIs(keywords['_trace'], handshake.return_value.__enter__.return_value)
+                self.assertFalse(any(keywords[key] for key in ('_outlier', '_concurrent_api', '_ready_stacks')))
+                if enabled:
+                    companion.assert_called_once_with(spec, output/'python-stream', stop.return_value, allow_read_gaps=True)
+                    self.assertIs(keywords['_python_frames'], companion.return_value.__enter__.return_value)
+                else:
+                    companion.assert_not_called()
+                    self.assertIsNone(keywords['_python_frames'])
+                stop.return_value.close.assert_called_once()
+                sender.close.assert_called_once()
 
     def test_ready_contract_rejects_cpu_substitution_and_binds_terminal_trace(self):
         policy = trace.capture_policy(True, False, True, True)

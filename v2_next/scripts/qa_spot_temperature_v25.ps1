@@ -6,7 +6,9 @@ param(
     [int]$SampleIntervalSeconds = 5,
     [string]$OutputPath = "",
     [switch]$SkipStopPrompt,
-    [int]$GracefulShutdownTimeoutSeconds = 330
+    [int]$GracefulShutdownTimeoutSeconds = 330,
+    [string]$ReleasePolicyPath = "",
+    [string]$ExpectedReleasePolicySha256 = ""
 )
 
 Set-StrictMode -Version Latest
@@ -19,6 +21,8 @@ $warnings = New-Object "System.Collections.Generic.List[string]"
 $samples = New-Object "System.Collections.Generic.List[object]"
 $attestationCanBeApplied = $false
 $operatorShutdownRequested = $false
+$approvedReleasePolicy = $null
+$scopeExclusions = New-Object "System.Collections.Generic.List[object]"
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     if (-not [string]::IsNullOrWhiteSpace($env:SFL_CONFIG_PATH)) {
@@ -143,6 +147,61 @@ function Convert-ToBoolean {
         return [bool]$Value
     }
     return [string]$Value -match "^(?i:true|1|yes|on)$"
+}
+
+function Read-ApprovedReleasePolicy {
+    param([string]$Path, [string]$ExpectedSha256)
+    if ([string]::IsNullOrWhiteSpace($Path) -and [string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+        return $null
+    }
+    if ([string]::IsNullOrWhiteSpace($Path) -or $ExpectedSha256 -cnotmatch '^[a-f0-9]{64}$') {
+        throw 'Explicit policy path and SHA256 are both required'
+    }
+    $item = Get-Item -LiteralPath $Path
+    if ($item.PSIsContainer -or $item.Length -gt 65536 -or
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Policy must be a bounded regular file'
+    }
+    $bytes = [IO.File]::ReadAllBytes($item.FullName)
+    if ($bytes.Length -gt 65536) { throw 'Policy exceeded size limit' }
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { $actual = [BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $hasher.Dispose() }
+    if ($actual -cne $ExpectedSha256) { throw 'Release policy SHA256 mismatch' }
+    $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $policy = $utf8.GetString($bytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if ($policy.schema -cne 'sfl-approved-release-policy-v1' -or
+        $policy.policy_id -cne 'c32-disabled-low-signal-20261023' -or
+        $policy.approval.approved -isnot [bool] -or -not $policy.approval.approved -or
+        $policy.candidate.build_commit -cne 'cd46692ac9c551080c57d8168fa9ea5abd530206' -or
+        $policy.candidate.installer_sha256 -cne '558658cf02d59cb6b66468e4e191c447efdc7cc24518b5a69647cc2409eb232f' -or
+        $policy.candidate.config_fingerprint_sha256 -cne 'e5039ec665ae5d79c8d2aa1f15ee9d9d180abb37a9478afae89e24ea6c82c049' -or
+        $policy.low_signal.scope_disposition -cne 'NOT_APPLICABLE_DISABLED_BY_APPROVED_SCOPE' -or
+        $policy.low_signal.required_alarm_enabled -isnot [bool] -or $policy.low_signal.required_alarm_enabled -or
+        $policy.low_signal.required_comparator_verified -isnot [bool] -or $policy.low_signal.required_comparator_verified -or
+        $policy.low_signal.physical_test_status -cne 'NOT_TESTED' -or
+        $policy.low_signal.activation_requires_separate_test_and_approval -isnot [bool] -or
+        -not $policy.low_signal.activation_requires_separate_test_and_approval) {
+        throw 'Unsupported or unapproved release policy'
+    }
+    return $policy
+}
+
+function Test-ApprovedDisabledLowSignalScope {
+    param([object]$Snapshot, [object]$Policy, [string]$RuntimeBuild)
+    if ($null -eq $Policy -or $null -eq $Snapshot) { return $false }
+    foreach ($name in @('low_signal_alarm_enabled', 'low_signal_comparator_verified',
+                       'low_signal_comparator_configured_verified', 'config_drift_detected')) {
+        $value = Get-ObjectProperty $Snapshot $name
+        if ($value -isnot [bool] -or $value) { return $false }
+    }
+    $operatorVerified = Get-ObjectProperty $Snapshot 'config_operator_verified'
+    return ($operatorVerified -is [bool] -and $operatorVerified -and
+        (Get-ObjectProperty $Snapshot 'config_attestation_status') -ceq 'verified' -and
+        $RuntimeBuild -ceq $Policy.candidate.build_commit -and
+        (Get-ObjectProperty $Snapshot 'build_git_commit') -ceq $RuntimeBuild -and
+        (Get-ObjectProperty $Snapshot 'spot_config_fingerprint_sha256') -ceq $Policy.candidate.config_fingerprint_sha256 -and
+        (Get-ObjectProperty $Snapshot 'spot_config_verified_fingerprint_sha256') -ceq $Policy.candidate.config_fingerprint_sha256)
 }
 
 function Convert-ToInt64 {
@@ -352,6 +411,10 @@ function Save-QaArtifact {
         samples = $samples
         files = $FileSummary
         validator_output = $ValidatorOutput
+        release_scope = if ($null -eq $approvedReleasePolicy) { "STANDARD_COMPARATOR_REQUIRED" } else { $approvedReleasePolicy.policy_id }
+        release_policy_sha256 = if ($null -eq $approvedReleasePolicy) { $null } else { $ExpectedReleasePolicySha256 }
+        scope_exclusions = @($scopeExclusions.ToArray())
+        whole_release_promotion = "NOT_EVALUATED_BY_THIS_QA"
     }
     $outputDirectory = Split-Path -Parent $OutputPath
     if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
@@ -361,6 +424,7 @@ function Save-QaArtifact {
 }
 
 Write-Host ""
+$approvedReleasePolicy = Read-ApprovedReleasePolicy -Path $ReleasePolicyPath -ExpectedSha256 $ExpectedReleasePolicySha256
 Write-Host "SPOT Temperature v2.5 one-command QA" -ForegroundColor Cyan
 Write-Host "This tool does not change SPOT device or application settings."
 Write-Host "It requires a normal UI close to finalize CSV metadata before validation."
@@ -642,9 +706,26 @@ if ($null -eq $metadataFile) {
         -Passed ($fingerprint -match "^[0-9a-f]{64}$" -and $fingerprint -eq $verifiedFingerprint) `
         -Actual $fingerprintStatus `
         -Expected "matched"
-        Add-QaCheck -Name "Low-signal comparator verification" `
-        -Passed (Convert-ToBoolean (Get-ObjectProperty $configSnapshot "low_signal_comparator_verified" $false)) `
-        -Actual ([string](Get-ObjectProperty $configSnapshot "low_signal_comparator_verified" "missing")) -Expected "true"
+        if ($null -eq $approvedReleasePolicy) {
+            Add-QaCheck -Name "Low-signal comparator verification" `
+            -Passed (Convert-ToBoolean (Get-ObjectProperty $configSnapshot "low_signal_comparator_verified" $false)) `
+            -Actual ([string](Get-ObjectProperty $configSnapshot "low_signal_comparator_verified" "missing")) -Expected "true"
+        } else {
+            $disabledScopeValid = Test-ApprovedDisabledLowSignalScope -Snapshot $configSnapshot `
+                -Policy $approvedReleasePolicy -RuntimeBuild $expectedBuildCommit
+            Add-QaCheck -Name "Approved disabled Low Signal release scope" -Passed $disabledScopeValid `
+                -Actual ([string]$disabledScopeValid) -Expected "approved C32, alarm OFF, comparator false, verified unchanged config"
+            if ($disabledScopeValid) {
+                $scopeExclusions.Add([ordered]@{
+                    name = "Low-signal comparator verification"
+                    disposition = "NOT_APPLICABLE_DISABLED_BY_APPROVED_SCOPE"
+                    physical_test = "NOT_TESTED"
+                    actual_comparator_verified = $false
+                    policy_id = $approvedReleasePolicy.policy_id
+                })
+                Write-Host "[NOT_APPLICABLE] Disabled Low Signal: physical comparator remains NOT_TESTED."
+            }
+        }
         $readbackStatus = [string](Get-ObjectProperty $configSnapshot "device_config_readback_status" "missing")
         Add-QaCheck -Name "Device readback policy" -Passed ($readbackStatus -in @("matched", "not_supported")) `
         -Actual $readbackStatus -Expected "matched or not_supported"
@@ -755,6 +836,9 @@ Write-Host ""
 if ($verdict -eq "PASS") {
     Write-Host "FINAL RESULT: PASS" -ForegroundColor Green
     Write-Host "The v2.5 runtime, attestation, CSV, fact, and validator checks passed."
+    if ($null -ne $approvedReleasePolicy) {
+        Write-Host "Scope: $($approvedReleasePolicy.policy_id); physical comparator NOT_TESTED; full release requires separate performance and disposition evidence."
+    }
     Write-Host "You can now close any remaining SmartFactoryLogger window."
 } else {
     Write-Host "FINAL RESULT: FAIL" -ForegroundColor Red

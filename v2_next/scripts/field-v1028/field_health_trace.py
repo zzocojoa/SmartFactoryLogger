@@ -4,7 +4,7 @@ Local integration API only. The outer administrator coordinator is separate from
 the owned collector job; this consumer never launches WPR or controls the app.
 File/ETL provenance and scheduling coverage remain separate verification steps.
 """
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass
 import json
 import os
@@ -16,6 +16,7 @@ import time
 import field_health_collection as collection
 import field_installation_binding as binding
 import field_observation as observation
+import field_python_stream as python_stream
 from field_host_sampling import WindowsProcessReader
 
 
@@ -27,16 +28,32 @@ OUTLIER_SCOPE = 'LOCAL_HEALTH_OUTLIER_TRACE_DIAGNOSTIC'
 CPU_OUTLIER_SCOPE = 'LOCAL_HEALTH_CPU_OUTLIER_TRACE_DIAGNOSTIC'
 CPU_CONCURRENT_SCOPE = 'LOCAL_HEALTH_CPU_CONCURRENT_TRACE_DIAGNOSTIC'
 READY_CONCURRENT_SCOPE = 'LOCAL_HEALTH_READY_CONCURRENT_TRACE_DIAGNOSTIC'
+PYTHON_SCOPE = 'LOCAL_PYTHON_HEALTH_TRACE_DIAGNOSTIC'
+PYTHON_BASELINE_SCOPE = 'LOCAL_PYTHON_HEALTH_BASELINE_TRACE_DIAGNOSTIC'
 
 
-def capture_policy(outlier, cpu_samples=False, concurrent_api=False, ready_stacks=False):
+def capture_policy(outlier, cpu_samples=False, concurrent_api=False, ready_stacks=False, python_frames=False,
+                   python_baseline=False):
     binding.require(type(outlier) is bool, 'trace-outlier-mode-type')
+    binding.require(type(python_baseline) is bool and (not python_baseline or
+                    not any((outlier, cpu_samples, concurrent_api, ready_stacks, python_frames))),
+                    'trace-python-baseline-fixed-mode')
+    binding.require(type(python_frames) is bool and (not python_frames or
+                    not any((outlier, cpu_samples, concurrent_api, ready_stacks))), 'trace-python-fixed-mode')
     binding.require(type(cpu_samples) is bool and (not cpu_samples or outlier), 'trace-cpu-outlier-mode')
     binding.require(type(ready_stacks) is bool
                     and (not ready_stacks or (outlier and concurrent_api and not cpu_samples)),
                     'trace-ready-concurrent-mode')
     binding.require(type(concurrent_api) is bool and (not concurrent_api or cpu_samples or ready_stacks),
                     'trace-concurrent-api-mode')
+    if python_baseline:
+        return dict(scope=PYTHON_BASELINE_SCOPE, contract_schema='sfl-python-health-baseline-contract-v1',
+                    lease_schema='sfl-python-health-baseline-lease-v1', duration=6, guard=30,
+                    profile_sha256=READY_PROFILE_SHA256)
+    if python_frames:
+        return dict(scope=PYTHON_SCOPE, contract_schema='sfl-python-health-trace-contract-v1',
+                    lease_schema='sfl-python-health-trace-lease-v1', duration=6, guard=30,
+                    profile_sha256=READY_PROFILE_SHA256)
     if ready_stacks:
         return dict(scope=READY_CONCURRENT_SCOPE, contract_schema='sfl-health-ready-concurrent-contract-v1',
                     lease_schema='sfl-health-ready-concurrent-lease-v1', duration=900, guard=960,
@@ -99,18 +116,28 @@ class TracedHealthCollectionSpec(collection.HealthCollectionSpec):
     cpu_samples: bool = False
     concurrent_api: bool = False
     ready_stacks: bool = False
+    python_frames: bool = False
+    tool: str = ''
+    python_baseline: bool = False
 
     def validate(self):
         super().validate()
         binding.plain_path(self.trace_contract_path)
         binding.require(digest(self.trace_contract_sha256), 'trace-contract-sha256')
-        capture_policy(self.outlier_capture, self.cpu_samples, self.concurrent_api, self.ready_stacks)
+        capture_policy(self.outlier_capture, self.cpu_samples, self.concurrent_api, self.ready_stacks,
+                       self.python_frames, self.python_baseline)
+        if self.python_frames or self.python_baseline:
+            binding.require(self.candidate == binding.CANDIDATE_1030, 'trace-python-candidate')
+            binding.require(binding.plain_path(self.tool).name == python_stream.TOOL_NAME, 'trace-python-tool')
+        else:
+            binding.require(self.tool == '', 'trace-unexpected-python-tool')
 
 
 class HealthTraceHandshake:
     def __init__(self, spec, duration, evidence_directory):
         spec.validate()
-        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api, spec.ready_stacks)
+        self.policy = capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api, spec.ready_stacks,
+                                     spec.python_frames, spec.python_baseline)
         binding.require(duration == self.policy['duration'] and type(duration) in (int, float),
                         'trace-capture-fixed-duration')
         self.spec = spec
@@ -264,11 +291,13 @@ def _worker_entry(spec, output, duration, stop, sender):
             sys.stdout, sys.stderr = stdout, stderr
             local_stop = observation.ObservationStop(stop)
             try:
-                with HealthTraceHandshake(spec, duration, Path(output)/'evidence') as trace:
+                with HealthTraceHandshake(spec, duration, Path(output)/'evidence') as trace, \
+                (python_stream.companion(spec, Path(output)/'python-stream', local_stop, allow_read_gaps=True)
+                         if spec.python_frames else nullcontext(None)) as frames:
                     result = collection.collect(spec, output, duration, local_stop,
                         lambda item: sender.send_bytes(json.dumps(item).encode()), _trace=trace,
                         _outlier=spec.outlier_capture, _concurrent_api=spec.concurrent_api,
-                        _ready_stacks=spec.ready_stacks)
+                        _ready_stacks=spec.ready_stacks, _python_frames=frames)
             finally:
                 local_stop.close()
             fact = observation.write_json(Path(output)/'worker-result.json', result)
@@ -283,5 +312,6 @@ def supervise(spec, output, *, stop_event=None):
     binding.require(type(spec) is TracedHealthCollectionSpec, 'traced-diagnostic-spec-type')
     spec.validate()
     return observation.supervise_observation(spec, output,
-        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api, spec.ready_stacks)['duration'],
+        duration_seconds=capture_policy(spec.outlier_capture, spec.cpu_samples, spec.concurrent_api,
+                                        spec.ready_stacks, spec.python_frames, spec.python_baseline)['duration'],
         preparation_timeout=180, finalization_timeout=180, stop_event=stop_event, _worker_target=_worker_entry)

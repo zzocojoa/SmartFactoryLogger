@@ -38,7 +38,7 @@ class CollectionTests(unittest.TestCase):
 
     def run_collection(self, *, configuration=None, control=None, probes=None, native=None,
                        closeout_error=False, stop=None, duration=.01, trace=None, outlier=False, concurrent=False,
-                       event_query=None, ready_stacks=False):
+                       event_query=None, ready_stacks=False, python_frames=None):
         @contextmanager
         def reference(*args, **kwargs):
             self.assertEqual(kwargs['candidate'], self.spec.candidate)
@@ -68,7 +68,7 @@ class CollectionTests(unittest.TestCase):
                     events=[], matched_record_count=0, errors=[]))))
             result = collection.collect(self.spec, self.folder, duration, stop or threading.Event(), events.append,
                                         _trace=trace, _outlier=outlier, _concurrent_api=concurrent,
-                                        _ready_stacks=ready_stacks)
+                                        _ready_stacks=ready_stacks, _python_frames=python_frames)
             if payload.called:
                 self.assertEqual(payload.call_args.kwargs['candidate'], self.spec.candidate)
         self.assertEqual(result['field_gate'], 'NOT_EVALUATED')
@@ -221,6 +221,38 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual((result['collection_status'], count, phases), ('BOUND_WINDOW_CAPTURED', 1, ['begin', 'finish']))
         for name in ('trace-binding.json', 'trace-completion.json'):
             self.assertTrue((self.folder/'evidence'/name).is_file())
+
+    def test_python_stream_is_inside_trace_and_cleanup_precedes_trace_abort(self):
+        self.spec = replace(self.spec, candidate_commit=collection.binding.CANDIDATE_1030.commit)
+        for failure in (None, 'start', 'finish'):
+            if failure is not None: self.setUp(); self.spec = replace(self.spec, candidate_commit=collection.binding.CANDIDATE_1030.commit)
+            phases = []
+            def step(name, value):
+                phases.append(name)
+                if failure == name: raise ValueError('injected-python-'+name)
+                return value
+            companion = SimpleNamespace(start=lambda: step('start', {}),
+                finish=lambda probes, origin_ns: step('finish', dict(status='CAPTURED', count=len(probes), origin_ns=origin_ns)),
+                abort=lambda: step('python-abort', dict(background_closed=True)))
+            trace = SimpleNamespace(begin=lambda *args: step('trace-begin', {}),
+                finish=lambda *args: step('trace-finish', {}), abort=lambda *args: step('trace-abort', {}))
+            fake_time = {'ns': 1_000_000_000}
+            def wait(seconds): fake_time['ns'] += round(seconds*1e9); return False
+            stop = SimpleNamespace(is_set=lambda: False, wait=wait, set=lambda: None)
+            probe = dict(status='REQUEST_AND_RUNTIME_BOUND', health_record={}, probe_id='a'*32)
+            with patch.object(collection.time, 'perf_counter_ns', side_effect=lambda: fake_time['ns']):
+                result, _, count = self.run_collection(duration=6, stop=stop, probes=[probe]*3,
+                                                       trace=trace, python_frames=companion)
+            if failure is None:
+                self.assertEqual(phases, ['trace-begin', 'start', 'finish', 'trace-finish'])
+                self.assertEqual((result['collection_status'], count), ('BOUND_WINDOW_CAPTURED', 3))
+                completion = json.loads((self.folder/'evidence/python-completion.json').read_bytes())
+                self.assertEqual(completion['count'], 3)
+            else:
+                self.assertEqual(result['collection_status'], 'INCOMPLETE')
+                self.assertEqual(phases[-2:], ['python-abort', 'trace-abort'])
+                self.assertNotIn('trace-finish', phases)
+                self.assertTrue((self.folder/'evidence/python-abort.json').is_file())
 
     def run_outlier(self, latencies, *, bound=True, concurrent=False, fail_at=None,
                     notice_at=None, late_notice=False, ready_stacks=False):

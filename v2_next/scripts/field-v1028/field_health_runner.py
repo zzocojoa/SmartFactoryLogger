@@ -26,18 +26,24 @@ OUTLIER_SCHEMA = 'sfl-health-outlier-request-v1'
 CPU_OUTLIER_SCHEMA = 'sfl-health-cpu-outlier-request-v1'
 CPU_CONCURRENT_SCHEMA = 'sfl-health-cpu-concurrent-request-v1'
 READY_CONCURRENT_SCHEMA = 'sfl-health-ready-concurrent-request-v1'
+PYTHON_SCHEMA = 'sfl-python-health-trace-request-v1'
+PYTHON_BASELINE_SCHEMA = 'sfl-python-health-baseline-request-v1'
 
 
 def validate_request(value):
     binding.require(isinstance(value, dict) and set(value) == {
         'schema', 'candidate_commit', 'signature_policy', 'duration_seconds', 'spec'}, 'health-request-members')
     candidate = binding.candidate_from_commit(value['candidate_commit'])
-    binding.require(value['schema'] in (SCHEMA, OUTLIER_SCHEMA, CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA, READY_CONCURRENT_SCHEMA)
+    binding.require(value['schema'] in (SCHEMA, OUTLIER_SCHEMA, CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA,
+                                      READY_CONCURRENT_SCHEMA, PYTHON_SCHEMA, PYTHON_BASELINE_SCHEMA)
                     and candidate in collection.HEALTH_CANDIDATES
                     and value['signature_policy'] == 'UNSIGNED_INTERNAL', 'health-request-identity-policy')
-    policy = trace.capture_policy(value['schema'] != SCHEMA,
+    binding.require(value['schema'] not in (PYTHON_SCHEMA, PYTHON_BASELINE_SCHEMA) or candidate == binding.CANDIDATE_1030,
+                    'health-python-candidate')
+    policy = trace.capture_policy(value['schema'] not in (SCHEMA, PYTHON_SCHEMA, PYTHON_BASELINE_SCHEMA),
         value['schema'] in (CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA),
-        value['schema'] in (CPU_CONCURRENT_SCHEMA, READY_CONCURRENT_SCHEMA), value['schema'] == READY_CONCURRENT_SCHEMA)
+        value['schema'] in (CPU_CONCURRENT_SCHEMA, READY_CONCURRENT_SCHEMA), value['schema'] == READY_CONCURRENT_SCHEMA,
+        value['schema'] == PYTHON_SCHEMA, value['schema'] == PYTHON_BASELINE_SCHEMA)
     binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] == policy['duration'],
                     'health-request-fixed-duration')
     data = value['spec']
@@ -99,11 +105,13 @@ def run(output_root, request_sha256, trace_package_sha256):
 
             request = hold('request.json', request_sha256, 65536)
             data = validate_request(request)
-            outlier = request['schema'] != SCHEMA
+            outlier = request['schema'] not in (SCHEMA, PYTHON_SCHEMA, PYTHON_BASELINE_SCHEMA)
             cpu_samples = request['schema'] in (CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA)
             concurrent_api = request['schema'] in (CPU_CONCURRENT_SCHEMA, READY_CONCURRENT_SCHEMA)
             ready_stacks = request['schema'] == READY_CONCURRENT_SCHEMA
-            policy = trace.capture_policy(outlier, cpu_samples, concurrent_api, ready_stacks)
+            python_frames = request['schema'] == PYTHON_SCHEMA
+            python_baseline = request['schema'] == PYTHON_BASELINE_SCHEMA
+            policy = trace.capture_policy(outlier, cpu_samples, concurrent_api, ready_stacks, python_frames, python_baseline)
             if outlier:
                 result.update(mode='health-outlier-trace', scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE')
             if cpu_samples:
@@ -112,6 +120,15 @@ def run(output_root, request_sha256, trace_package_sha256):
                 result.update(mode='health-cpu-concurrent-trace', scope='CPU_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
             if ready_stacks:
                 result.update(mode='health-ready-concurrent-trace', scope='READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
+            tool = ''
+            if python_frames or python_baseline:
+                result.update(mode='python-health-baseline-trace' if python_baseline else 'python-health-trace',
+                    scope='PYTHON_HTTP_BASELINE_NOT_FIELD_PERFORMANCE' if python_baseline else 'PYTHON_HTTP_TRACE_NOT_FIELD_PERFORMANCE')
+                tool = str(root/'inputs'/trace.python_stream.TOOL_NAME)
+                stream = locks.enter_context(binding.locked_read(tool))
+                fact = binding.stream_fact(stream)
+                binding.require(fact == trace.python_stream.TOOL_FACT, 'health-python-tool-pin')
+                archived[trace.python_stream.TOOL_NAME] = (stream, fact)
             candidate = binding.candidate_from_commit(request['candidate_commit'])
             hold('candidate-payload.json', binding.candidate_reference_sha256(candidate), 1024**2)
             hold('configuration.json', data['configuration_reference_sha256'], 1024**2)
@@ -127,7 +144,8 @@ def run(output_root, request_sha256, trace_package_sha256):
             fact = observation.write_json(channel/'contract.json', contract)
             selected = trace.TracedHealthCollectionSpec(**{f.name: getattr(spec, f.name) for f in fields(spec)},
                 trace_contract_path=str(channel/'contract.json'), trace_contract_sha256=fact['sha256'],
-                outlier_capture=outlier, cpu_samples=cpu_samples, concurrent_api=concurrent_api, ready_stacks=ready_stacks)
+                outlier_capture=outlier, cpu_samples=cpu_samples, concurrent_api=concurrent_api, ready_stacks=ready_stacks,
+                python_frames=python_frames, tool=tool, python_baseline=python_baseline)
             result['phase'] = trace.supervise(selected, session/'collection')
             binding.require(result['phase'].get('release_gate') == 'HOLD'
                             and result['phase'].get('promotion_allowed') is False, 'health-phase-gates')
@@ -156,6 +174,8 @@ def main(argv=None):
         if args.describe:
             binding.require(not any(supplied), 'health-describe-with-run-arguments')
             print(json.dumps(dict(schema=SCHEMA, candidate_commit=binding.CANDIDATE_1029.commit,
+                supported_request_schemas=[SCHEMA, OUTLIER_SCHEMA, CPU_OUTLIER_SCHEMA, CPU_CONCURRENT_SCHEMA,
+                                           READY_CONCURRENT_SCHEMA, PYTHON_SCHEMA, PYTHON_BASELINE_SCHEMA],
                 supported_candidate_commits=[item.commit for item in collection.HEALTH_CANDIDATES],
                 frozen=bool(getattr(sys, 'frozen', False)), signature_policy='UNSIGNED_INTERNAL', duration_seconds=6,
                 release_gate='HOLD', promotion_allowed=False)))

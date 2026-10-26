@@ -63,7 +63,9 @@ function Assert-HealthEntryPackage($Document){
  }
  $required=@('health_diagnostic_runner.exe','invoke-health-diagnostic.ps1','candidate-payload.json','helper-source.zip','helper-build.json',
   'trace/manifest.json','trace/invoke-field-run.template.ps1','trace/invoke-trace-validation.ps1','trace/invoke-health-trace.ps1','trace/SFLThreadScheduling.wprp')
- Assert-HealthEntry ($Document.schema -ceq 'sfl-health-diagnostic-package-v1' -and $Document.signature_policy -ceq 'UNSIGNED_INTERNAL' -and
+ $pythonPackage=$Document.schema -ceq 'sfl-python-health-diagnostic-package-v1'
+ if($pythonPackage){$required+=@('sfl_qpc_reader.exe')}
+ Assert-HealthEntry ($Document.schema -cin @('sfl-health-diagnostic-package-v1','sfl-python-health-diagnostic-package-v1') -and $Document.signature_policy -ceq 'UNSIGNED_INTERNAL' -and
   $Document.candidate_commit -is [string] -and $Document.candidate_commit -cin @($payloadPins.Keys)) 'health-package-identity'
  Assert-HealthEntry (@($Document.files.PSObject.Properties).Count -eq $required.Count) 'health-package-members'
  foreach($name in $required){
@@ -72,10 +74,23 @@ function Assert-HealthEntryPackage($Document){
   Assert-HealthEntry ($fact.bytes -is [int] -and $fact.bytes -gt 0 -and $fact.bytes -le 128MB -and $fact.sha256 -cmatch '^[0-9a-f]{64}$') 'health-package-fact'
  }
  Assert-HealthEntry ($Document.files.'candidate-payload.json'.sha256 -ceq $payloadPins[$Document.candidate_commit]) 'health-package-payload-pin'
+ if($pythonPackage){
+  Assert-HealthEntry ($Document.candidate_commit -ceq '0732c8e810be3c46096b397812f53a9767354229' -and
+   $Document.files.'sfl_qpc_reader.exe'.bytes -eq 7373774 -and
+   $Document.files.'sfl_qpc_reader.exe'.sha256 -ceq '03c2c8f803baec73f09a4cce57f31afaaec8840c23cc2830f4be584c7f9f6630') 'health-python-tool-pin'
+ }
  Assert-HealthEntry ($Document.release_gate -ceq 'HOLD' -and $Document.promotion_allowed -is [bool] -and -not $Document.promotion_allowed) 'health-package-gates'
 }
 function Get-HealthEntryBudget($Request){
  Assert-HealthEntry ($Request.duration_seconds -is [int]) 'health-request-duration-type'
+ if($Request.schema -ceq 'sfl-python-health-baseline-request-v1'){
+  Assert-HealthEntry ($Request.duration_seconds -eq 6) 'health-request-identity-budget'
+  return @{seconds=600;scope='PYTHON_HTTP_BASELINE_NOT_FIELD_PERFORMANCE'}
+ }
+ if($Request.schema -ceq 'sfl-python-health-trace-request-v1'){
+  Assert-HealthEntry ($Request.duration_seconds -eq 6) 'health-request-identity-budget'
+  return @{seconds=600;scope='PYTHON_HTTP_TRACE_NOT_FIELD_PERFORMANCE'}
+ }
  if($Request.schema -ceq 'sfl-health-ready-concurrent-request-v1'){
   Assert-HealthEntry ($Request.duration_seconds -eq 900) 'health-request-identity-budget'
   return @{seconds=1500;scope='READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE'}
@@ -94,6 +109,10 @@ function Get-HealthEntryBudget($Request){
  }
  Assert-HealthEntry ($Request.schema -ceq 'sfl-health-outlier-request-v1' -and $Request.duration_seconds -eq 900) 'health-request-identity-budget'
  return @{seconds=1500;scope='OUTLIER_CAPTURE_NOT_FIELD_PERFORMANCE'}
+}
+function Assert-HealthEntryRequestPackage($Request,$Document){
+ $pythonRequest=$Request.schema -cin @('sfl-python-health-trace-request-v1','sfl-python-health-baseline-request-v1')
+ Assert-HealthEntry ($pythonRequest -eq ($Document.schema -ceq 'sfl-python-health-diagnostic-package-v1')) 'health-python-package-request-mismatch'
 }
 function Invoke-HealthEntryChild([string]$Executable,[string[]]$Arguments,[string]$Directory,[scriptblock]$OnTick,[ValidateRange(1,1500)][int]$TimeoutSeconds=600){
  # The callback starts the coordinator from this outside-job administrator.
@@ -183,6 +202,7 @@ try{
  Assert-HealthEntry ($request.Length -gt 0 -and $request.Length -le 64KB -and (Get-HealthEntryHash $request) -ceq $ExpectedRequestSha256) 'health-request-pin'
  $requestValue=Read-HealthEntryStream $request
  Assert-HealthEntry ($requestValue.candidate_commit -ceq $document.candidate_commit -and $requestValue.signature_policy -ceq 'UNSIGNED_INTERNAL') 'health-request-identity-budget'
+ Assert-HealthEntryRequestPackage $requestValue $document
  $budget=Get-HealthEntryBudget $requestValue;$record.scope=$budget.scope
  $configuration=[IO.File]::Open((Get-HealthEntryPath $requestValue.spec.configuration_reference),'Open','Read','Read');$held.Add($configuration)
  Assert-HealthEntry ($configuration.Length -gt 0 -and $configuration.Length -le 1MB -and (Get-HealthEntryHash $configuration) -ceq $requestValue.spec.configuration_reference_sha256) 'health-configuration-reference-pin'

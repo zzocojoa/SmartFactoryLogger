@@ -319,8 +319,13 @@ def _prepare_output(output):
 def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3,
                         origin_ns=None, pending_byte_budget=64 * 1024**2, pending_record_budget=256,
-                        include_native_timing=True, diagnostic_timing=False, _record_observer=None):
+                        include_native_timing=True, diagnostic_timing=False, _record_observer=None,
+                        operational_assessment=False):
     """Collect a bounded component window. Caller owns installation/session binding."""
+    if type(operational_assessment) is not bool:
+        raise ValueError('Operational assessment must be explicit boolean')
+    if operational_assessment and tuple(e.name for e in endpoints) != ('health', 'data'):
+        raise ValueError('Operational observation uses health/data; images belong to the actual UI')
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
     if not math.isfinite(duration_seconds) or not 0 < duration_seconds <= 7200:
@@ -542,6 +547,15 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                                'server_or_scheduling_cause_established': False}
     summary['http_component_status'] = 'PASS' if not errors and not persistence_errors and not stop.is_set() and all(
         row['http_component_status'] == 'PASS' for row in summary['channels'].values()) else 'FAIL'
+    if operational_assessment:
+        from field_operational_assessment import assess_channel, combine
+        summary['legacy_http_component_status'] = summary['http_component_status']
+        summary['operational_assessment'] = combine({
+            e.name: assess_channel(e, rows[e.name], counts[e.name],
+                                   legacy_summary=summary['channels'][e.name]) for e in endpoints
+        }, collector_errors=bool(errors or persistence_errors or stop.is_set()))
+        summary['http_component_status'] = summary['operational_assessment']['collection_status']
+        summary['scope'] = 'OPERATIONAL_HTTP_EVIDENCE_NO_SYNTHETIC_IMAGE_REQUESTS'
     if diagnostic_timing:
         write_json('progress.json', dict(schema='sfl-http-worker-progress-v1', channels=progress,
             scope='WALL_CLOCK_BOUNDARIES_NOT_LOCK_OR_SCHEDULER_CAUSATION', release_gate='HOLD', promotion_allowed=False))

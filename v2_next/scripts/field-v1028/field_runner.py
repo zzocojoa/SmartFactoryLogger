@@ -14,6 +14,8 @@ import field_csv_inputs as inputs
 import field_installation_binding as binding
 import field_observation as observation
 import field_host_diagnostic as host_diagnostic
+import field_python_frames as python_frames
+import field_python_stream as python_stream
 from field_resource_sampling import ProcessIdentity, error_record
 
 
@@ -21,8 +23,11 @@ SCHEMA = 'sfl-field-run-request-v1'
 COMMON = {'schema', 'mode', 'candidate_commit', 'signature_policy'}
 MODE_FIELDS = {
     'observe': {'spec', 'duration_seconds'},
+    'operational-observe': {'spec', 'duration_seconds'},
     'host-diagnostic': {'spec', 'duration_seconds'},
     'timing-observe': {'spec', 'duration_seconds'},
+    'python-frames': {'spec', 'duration_seconds'},
+    'python-health': {'spec', 'duration_seconds'},
     'closed-data': {'data_root', 'roles', 'expected_files', 'image_files', 'shutdown_expectation',
                     'configuration_reference', 'configuration_reference_sha256', 'validator_timeout_seconds'},
 }
@@ -35,23 +40,25 @@ def validate_request(value):
     mode = value.get('mode')
     binding.require(isinstance(mode, str) and mode in MODE_FIELDS
                     and set(value) == COMMON | MODE_FIELDS[mode], 'request-mode-fields')
-    if mode in ('observe', 'host-diagnostic', 'timing-observe'):
-        durations = (300,) if mode == 'host-diagnostic' else (900,) if mode == 'timing-observe' else (900, 7200)
+    if mode in ('observe', 'operational-observe', 'host-diagnostic', 'timing-observe', 'python-frames', 'python-health'):
+        durations = (6,) if mode in ('python-frames', 'python-health') else (300,) if mode == 'host-diagnostic' else (900,) if mode == 'timing-observe' else (900, 7200)
         binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] in durations,
                         'duration-does-not-match-request-mode')
         data = value['spec']
-        spec_type = observation.TimingObservationSpec if mode == 'timing-observe' else observation.ObservationSpec
+        spec_type = observation.TimingObservationSpec if mode in ('timing-observe', 'python-frames', 'python-health') else observation.ObservationSpec
         spec_fields = {f.name for f in fields(spec_type)}
         binding.require(isinstance(data, dict) and set(data) in (spec_fields, spec_fields - {'candidate_commit'}),
                         'observation-spec-fields')
         binding.require(data.get('candidate_commit', binding.BUILD) == candidate.commit,
                         'observation-candidate-mismatch')
-        if mode == 'timing-observe':
+        if mode in ('timing-observe', 'python-frames', 'python-health'):
             binding.require(candidate in (binding.CANDIDATE_1029, binding.CANDIDATE_1030,
                                           binding.CANDIDATE_1030_FINAL, binding.CANDIDATE_1030_RENDERER_FIX),
                             'timing-observation-candidate')
             native = data['backend_created_filetime']
             binding.require(type(native) is int and 0 < native < 2**64, 'timing-observation-native-generation')
+        if mode in ('python-frames', 'python-health'):
+            binding.require(candidate == binding.CANDIDATE_1030, 'frame-candidate-required')
         reference_sha = binding.candidate_reference_sha256(candidate)
         binding.require(data['reference_sha256'] == reference_sha, 'production-payload-reference-pin')
         for role in ('main', 'backend'):
@@ -70,14 +77,26 @@ def validate_request(value):
 def execute_phase(request, folder, package):
     mode = validate_request(request)
     candidate = binding.candidate_from_commit(request['candidate_commit'])
-    if mode in ('observe', 'host-diagnostic', 'timing-observe'):
+    if mode in ('observe', 'operational-observe', 'host-diagnostic', 'timing-observe', 'python-frames', 'python-health'):
         data = dict(request['spec'])
         data['main'] = ProcessIdentity(**data['main'])
         data['backend'] = ProcessIdentity(**data['backend'])
         spec_type = observation.TimingObservationSpec if mode == 'timing-observe' else observation.ObservationSpec
+        if mode == 'operational-observe':
+            spec_type = observation.OperationalObservationSpec
+        if mode == 'python-frames':
+            spec_type = python_frames.PythonFrameSpec
+            data['tool'] = str(package / 'py-spy.exe')
+        if mode == 'python-health':
+            spec_type = python_stream.PythonHealthSpec
+            data['tool'] = str(package / python_stream.TOOL_NAME)
         spec = spec_type(**data)
         spec.validate()
         options = {'_worker_target': host_diagnostic.worker_entry} if mode == 'host-diagnostic' else {}
+        if mode == 'python-frames':
+            options['_worker_target'] = python_frames.worker_entry
+        if mode == 'python-health':
+            options['_worker_target'] = python_stream.worker_entry
         result = observation.supervise_observation(spec, folder / 'observation',
                                                    duration_seconds=request['duration_seconds'], **options)
         return result, result['supervisor_status'] == 'PASS'
@@ -112,14 +131,16 @@ def run(request_path, request_sha256, output_root, package):
             request = binding.strict_json(raw)
             result['mode'] = validate_request(request)
             input_paths = ([request['spec']['root'], request['spec']['configuration_reference'], request['spec']['reference']]
-                           if result['mode'] in ('observe', 'host-diagnostic', 'timing-observe')
+                           if result['mode'] in ('observe', 'operational-observe', 'host-diagnostic', 'timing-observe', 'python-frames', 'python-health')
                            else [request['data_root'], request['configuration_reference']])
             for path in input_paths:
                 path = binding.plain_path(path)
                 binding.require(path != output_root and output_root not in path.parents
                                 and path not in output_root.parents, 'output-input-boundary')
             result['phase'], passed = execute_phase(request, folder, package)
-            for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate'):
+            for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate',
+                        'assessment_policy', 'status_scope', 'operational_performance',
+                        'operational_assessment', 'observation_status', 'incomplete_evidence'):
                 if key in result['phase']:
                     result[key] = result['phase'][key]
             binding.require(result['phase'].get('release_gate') == 'HOLD'
@@ -136,7 +157,10 @@ def run(request_path, request_sha256, output_root, package):
     qa.write_json(folder / 'manifest.json', dict(schema='sfl-field-run-files-v1', files=facts,
                                                 release_gate='HOLD', promotion_allowed=False))
     with binding.locked_read(folder / 'manifest.json') as stream: manifest = inputs.file_fact(stream)
-    scope = {key: result[key] for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate') if key in result}
+    scope = {key: result[key] for key in (
+        'validation_scope', 'physical_device_gate', 'formal_qa_gate', 'assessment_policy',
+        'status_scope', 'operational_performance', 'observation_status', 'incomplete_evidence')
+        if key in result}
     return dict(status=result['status'], mode=result.get('mode'), result_path=str(folder), manifest=manifest,
                 request_sha256=request_sha256, release_gate='HOLD', promotion_allowed=False, **scope)
 
@@ -155,6 +179,8 @@ def main(argv=None):
             binding.require(not any(supplied), 'describe-with-run-arguments')
             print(json.dumps(dict(schema=SCHEMA, modes=list(MODE_FIELDS), candidate_commit=binding.BUILD,
                 supported_candidate_commits=[candidate.commit for candidate in binding.CANDIDATES],
+                recommended_observation_mode='operational-observe',
+                legacy_load_test_mode='observe',
                 frozen=bool(getattr(sys, 'frozen', False)), signature_policy='UNSIGNED_INTERNAL',
                 release_gate='HOLD', promotion_allowed=False)))
             return 0

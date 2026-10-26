@@ -65,6 +65,11 @@ class ObservationSpec:
 
 
 @dataclass(frozen=True)
+class OperationalObservationSpec(ObservationSpec):
+    """Approved v2 evidence contract; never a release/performance PASS."""
+
+
+@dataclass(frozen=True)
 class TimingObservationSpec(ObservationSpec):
     """Opt-in diagnostic only; the ordinary observation contract stays unchanged."""
     backend_created_filetime: int = 0
@@ -234,16 +239,41 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
     summary = {name: read_json(output / name / 'summary.json')[0]
                for name in ('http', 'resources', 'processes')}
     issues, health_records, resource_rows, timing_records = [], [], 0, []
+    periodic_health_records = []
+    operational = isinstance(spec, OperationalObservationSpec)
+    incomplete = []
     if any(value.get('origin_ns') != origin_ns for value in summary.values()):
         issues.append('origin-mismatch')
-    if summary['http']['http_component_status'] != 'PASS':
+    if operational:
+        from field_operational_assessment import assess_channel, combine
+        channel_assessments = {}
+        for endpoint in http.ENDPOINTS[:2]:
+            count = math.ceil(duration_seconds / endpoint.interval_seconds)
+            rows = [read_json(path)[0] for n in range(count)
+                    if (path := output / 'http' / f'{endpoint.name}-{n:05d}.json').is_file()]
+            channel_assessments[endpoint.name] = assess_channel(endpoint, rows, count)
+        recomputed = combine(channel_assessments, collector_errors=bool(
+            summary['http']['worker_errors'] or summary['http']['persistence_errors']
+            or summary['http']['stop_requested']))
+        binding.require(recomputed == summary['http'].get('operational_assessment'),
+                        'operational-assessment-replay')
+        if recomputed['measurement_status'] != 'COMPLETE':
+            incomplete.append('http-measurement-incomplete')
+        if recomputed['collection_status'] == 'FAIL':
+            issues.append('http-request-or-collector-failed')
+    elif summary['http']['http_component_status'] != 'PASS':
         issues.append('http-component-failed')
     if (summary['resources']['recording_status'] != 'COMPLETE'
             or summary['resources']['unmeasured_intervals'] != 0
             or (duration_seconds >= 420 and summary['resources']['resource_coverage_status'] != 'SUFFICIENT')):
-        issues.append('resource-component-incomplete')
+        (incomplete if operational else issues).append('resource-component-incomplete')
     if summary['processes']['status'] != 'PASS':
-        issues.append('process-component-failed')
+        process_rows = ([read_json(p)[0] for p in (output / 'processes').glob('process-*.json')]
+                        if operational else [])
+        if operational and not any(r.get('status') == 'FAIL' for r in process_rows):
+            incomplete.append('process-measurement-incomplete')
+        else:
+            issues.append('process-component-failed')
     if isinstance(spec, TimingObservationSpec):
         review_progress(output / 'http', origin_ns, duration_seconds)
     for index, boundary in enumerate(boundaries):
@@ -253,7 +283,13 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
         if record is not None:
             health_records.append(record)
     for sequence in range(math.ceil(duration_seconds / 2)):
-        row, _ = read_json(output / 'http' / f'health-{sequence:05d}.json')
+        health_path = output / 'http' / f'health-{sequence:05d}.json'
+        if operational and not health_path.is_file():
+            incomplete.append(f'health-{sequence}-missing-record')
+            periodic_health_records.append(None)
+            continue
+        row, _ = read_json(health_path)
+        periodic_health_records.append(row)
         if row.get('kind') == 'cancelled_remaining':
             remaining = row.get('remaining_slots')
             binding.require(type(remaining) is int and remaining == math.ceil(duration_seconds / 2) - sequence
@@ -263,7 +299,7 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
             issues.append(f'health-{sequence}-cancelled-remaining:{remaining}')
             break  # One durable marker represents the uncollected tail; it never counts as requests.
         if row.get('kind') != 'request':
-            issues.append(f'health-{sequence}-not-request')
+            (incomplete if operational else issues).append(f'health-{sequence}-not-request')
             continue
         raw = (output / 'http' / f'health-{sequence:05d}.body').read_bytes()
         binding.require(len(raw) <= http.ENDPOINTS[0].max_body_bytes, 'health-body-size')
@@ -284,7 +320,11 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
             if timed['status'] != 'REQUEST_AND_NATIVE_CLOCK_BOUND':
                 issues.append(f'health-{sequence}-timing-not-bound')
     for sequence in range(math.floor(duration_seconds / 5) + 1):
-        row, _ = read_json(output / 'resources' / f'resource-{sequence:05d}.json')
+        resource_path = output / 'resources' / f'resource-{sequence:05d}.json'
+        if operational and not resource_path.is_file():
+            incomplete.append(f'resource-{sequence}-missing-record')
+            continue
+        row, _ = read_json(resource_path)
         if row.get('kind') == 'cancelled_remaining':
             remaining = row.get('remaining_slots')
             binding.require(type(remaining) is int and remaining == math.floor(duration_seconds / 5) + 1 - sequence
@@ -294,22 +334,78 @@ def review_window(spec, output, origin_ns, duration_seconds, sessions, boundarie
             issues.append(f'resource-{sequence}-cancelled-remaining:{remaining}')
             break
         records = row.get('process', {}).get('records', [])
-        if not any(p.get('pid') == spec.backend.pid and p.get('created') == spec.backend.created
-                   and os.path.normcase(p.get('exe', '')) == spec.backend.exe for p in records):
+        if operational:
+            backend_status = resource_backend_status(row, spec.backend)
+            if backend_status == 'INCOMPLETE':
+                incomplete.append(f'resource-{sequence}-backend-not-measured')
+            elif backend_status == 'FAIL':
+                issues.append(f'resource-{sequence}-backend-identity-failed')
+        elif not any(p.get('pid') == spec.backend.pid and p.get('created') == spec.backend.created
+                     and os.path.normcase(p.get('exe', '')) == spec.backend.exe for p in records):
             issues.append(f'resource-{sequence}-backend-absent')
         resource_rows += 1
     # Both boundary requests are included; the first request is never discarded.
     valid_latency = all(type(r.get('client_request_and_body_ms')) in (int, float)
                         and math.isfinite(r['client_request_and_body_ms'])
-                        and 0 <= r['client_request_and_body_ms'] <= 200
+                        and 0 <= r['client_request_and_body_ms']
+                        and (operational or r['client_request_and_body_ms'] <= 200)
                         and r.get('request_success') is True for r in health_records)
-    if len(health_records) != math.ceil(duration_seconds / 2) + 2 or not valid_latency:
+    if operational:
+        if len(health_records) != math.ceil(duration_seconds / 2) + 2:
+            incomplete.append('health-including-boundaries-incomplete')
+        if any(r.get('request_success') is not True for r in health_records):
+            issues.append('health-including-boundaries-request-failed')
+        if any(not numeric_latency(r.get('client_request_and_body_ms')) for r in health_records):
+            incomplete.append('health-including-boundaries-invalid-time')
+    elif len(health_records) != math.ceil(duration_seconds / 2) + 2 or not valid_latency:
         issues.append('all-health-including-boundaries-failed')
-    return {'status': 'PASS' if not issues else 'FAIL', 'issues': issues, 'manifests': manifests,
+    result = {'status': 'FAIL' if issues else 'INCOMPLETE' if incomplete else 'PASS',
+            'issues': issues, 'manifests': manifests,
             'summary': summary, 'health_requests_including_boundaries': len(health_records),
             'first_health_ms': health_records[0]['client_request_and_body_ms'] if health_records else None,
-            'max_health_ms': max((r['client_request_and_body_ms'] for r in health_records), default=None),
+            'max_health_ms': max((r['client_request_and_body_ms'] for r in health_records
+                                  if numeric_latency(r.get('client_request_and_body_ms'))), default=None),
             'resource_rows_checked_for_backend': resource_rows, 'diagnostic_timings': timing_records}
+    if operational:
+        # Include the first/last requests in both numeric summaries and diagnostics.
+        ordered = [boundaries[0].get('health_record'), *periodic_health_records,
+                   boundaries[-1].get('health_record')]
+        boundary_rows = [dict(r, sequence=n, kind=r.get('kind', 'request'),
+                              start_lateness_ms=r.get('start_lateness_ms', 0))
+                         if isinstance(r, dict) else r for n, r in enumerate(ordered)]
+        result['operational_assessment'] = combine({
+            **channel_assessments,
+            'health_including_boundaries': assess_channel(http.ENDPOINTS[0], boundary_rows,
+                math.ceil(duration_seconds / 2) + 2),
+        })
+        if result['operational_assessment']['measurement_status'] != 'COMPLETE':
+            incomplete.append('http-boundary-measurement-incomplete')
+            if not issues:
+                result['status'] = 'INCOMPLETE'
+        result.update(incomplete_evidence=incomplete, status_scope='COLLECTION_AND_BINDING_ONLY')
+    return result
+
+
+def numeric_latency(value):
+    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def resource_backend_status(row, backend):
+    """A failed counter read is not proof that the application disappeared."""
+    sample = row.get('process', {})
+    records = sample.get('records', [])
+    valid = [p for p in records if isinstance(p, dict) and type(p.get('pid')) is int
+             and type(p.get('created')) in (int, float) and math.isfinite(p['created'])
+             and isinstance(p.get('exe'), str)]
+    observed = [p for p in valid if p['pid'] == backend.pid]
+    if any(p['created'] != backend.created or os.path.normcase(p['exe']) != backend.exe
+           for p in observed):
+        return 'FAIL'
+    if observed:
+        return 'PASS'
+    if sample.get('errors') or not records or len(valid) != len(records):
+        return 'INCOMPLETE'
+    return 'FAIL'
 
 
 def review_progress(folder, origin_ns, duration_seconds):
@@ -360,9 +456,12 @@ def _component_entry(name, spec, output, duration, origin, external_stop):
             sys.stdout, sys.stderr = stdout, stderr
             if name == 'http':
                 options = {'diagnostic_timing': True} if isinstance(spec, TimingObservationSpec) else {}
+                operational = isinstance(spec, OperationalObservationSpec)
+                if operational:
+                    options.update(endpoints=http.ENDPOINTS[:2], operational_assessment=True)
                 result = http.collect_http_window(spec.port, output / name, duration_seconds=duration,
                                                   origin_ns=origin, stop_event=stop, **options)
-                passed = result['http_component_status'] == 'PASS'
+                passed = result['http_component_status'] == ('COMPLETE' if operational else 'PASS')
             elif name == 'resources':
                 result = resource.collect_resource_window(spec.main, output / name, duration_seconds=duration,
                                                           origin_ns=origin, stop_event=stop)
@@ -392,6 +491,12 @@ def run_observation(spec, output, duration_seconds, stop, notify):
     if isinstance(spec, TimingObservationSpec):
         result.update(scope='TIMING_DIAGNOSTIC_NOT_FIELD_PERFORMANCE', latency_cause='UNDETERMINED',
                       etw_coverage='NOT_EVALUATED')
+    operational = isinstance(spec, OperationalObservationSpec)
+    generation_options = {'enforce_legacy_latency': False} if operational else {}
+    if operational:
+        result.update(assessment_policy='operational-evidence-v2',
+                      status_scope='COLLECTION_AND_BINDING_ONLY',
+                      operational_performance='NOT_EVALUATED')
     try:
         with binding.InstalledPayload(spec.root, spec.reference,
                                       expected_reference_sha256=spec.reference_sha256, extras=spec.extras,
@@ -403,7 +508,8 @@ def run_observation(spec, output, duration_seconds, stop, notify):
             write_json(output / 'initial.json', initial)
             binding.require(initial['binding_status'] == 'PASS', 'initial-binding-failed')
             sessions = initial['sessions']
-            control_initial = generation_binding.capture_generation(payload, spec.main, spec.backend, spec.port)
+            control_initial = generation_binding.capture_generation(payload, spec.main, spec.backend, spec.port,
+                                                                     **generation_options)
             write_json(output / 'control-initial.json', control_initial)
             binding.require(control_initial['generation_status'] == 'PASS', 'initial-control-binding-failed')
             configuration_initial = configuration_binding.capture_configuration(
@@ -444,7 +550,7 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                                                     expected_sessions=sessions)
             write_json(output / 'final.json', final)
             control_final = generation_binding.capture_generation(payload, spec.main, spec.backend, spec.port,
-                expected_identity=control_initial['identity'])
+                expected_identity=control_initial['identity'], **generation_options)
             write_json(output / 'control-final.json', control_final)
             result['control_binding'] = dict(initial=control_initial, final=control_final,
                                              scope='AUTHENTICATED_BOUNDARY_SAMPLES')
@@ -455,6 +561,13 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                 reference_sha256=spec.configuration_reference_sha256, scope='REPORTED_CONFIGURATION_BOUNDARIES')
             result['closeout'] = payload.recheck()
             result['review'] = review_window(spec, output, origin, duration_seconds, sessions, [initial, final])
+            if operational:
+                result['operational_assessment'] = result['review']['operational_assessment']
+                result['incomplete_evidence'] = result['review']['incomplete_evidence']
+                if (result['review']['status'] == 'INCOMPLETE' and not stop.is_set()
+                        and control_final['generation_status'] == 'PASS'
+                        and configuration_final['configuration_status'] == 'PASS'):
+                    result['observation_status'] = 'INCOMPLETE'
             result['shutdown_expectation'] = shutdown_binding.expectation_from_boundary(
                 final, spec.backend, candidate=spec.candidate)
             result['shutdown_expectation_file'] = write_json(output / 'shutdown-expectation.json',
@@ -599,7 +712,9 @@ def supervise_observation(spec, output, *, duration_seconds, preparation_timeout
             binding.require(file_fact(output / 'worker-result.json') == done, 'worker-result-hash')
             result, _ = read_json(output / 'worker-result.json')
             receipt['worker_result'] = done
-            for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate'):
+            for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate',
+                        'assessment_policy', 'status_scope', 'operational_performance',
+                        'operational_assessment', 'observation_status', 'incomplete_evidence'):
                 if key in result:
                     receipt[key] = result[key]
             binding.require(result['field_gate'] == 'NOT_EVALUATED' and result['release_gate'] == 'HOLD'

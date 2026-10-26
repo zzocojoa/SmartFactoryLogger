@@ -45,7 +45,7 @@ def validate_duration(duration):
 
 
 def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False, _concurrent_api=False,
-            _ready_stacks=False):
+            _ready_stacks=False, _python_frames=None):
     """Run only inside the owned worker; the supervisor bounds blocking calls."""
     spec.validate()
     if _outlier:
@@ -53,6 +53,9 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                         and _trace is not None, 'outlier-fixed-bounded-trace-required')
     else:
         validate_duration(duration)
+    if _python_frames is not None:
+        binding.require(not _outlier and type(duration) is int and duration == 6
+                        and spec.candidate == binding.CANDIDATE_1030, 'python-health-fixed-scope')
     binding.require(type(_concurrent_api) is bool and (not _concurrent_api or _outlier),
                     'concurrent-api-requires-bounded-outlier-trace')
     binding.require(type(_ready_stacks) is bool and (not _ready_stacks or _concurrent_api),
@@ -74,8 +77,11 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                       concurrent_trigger=None)
     if _ready_stacks:
         result.update(scope='READY_CONCURRENT_CAPTURE_NOT_FIELD_PERFORMANCE')
+    if _python_frames is not None:
+        result.update(scope='PYTHON_HTTP_CAPTURE_NOT_FIELD_PERFORMANCE')
     companion = None
     companion_finished = False
+    python_probes = []
 
     def finish_companion():
         nonlocal companion_finished
@@ -141,6 +147,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
             event_start = system_events.utc_now() - timedelta(minutes=2)
             if _trace is not None:
                 save('trace-binding.json', _trace.begin(dict(files), stop))
+            if _python_frames is not None:
+                save('python-started.json', _python_frames.start())
             origin = time.perf_counter_ns() + (3_000_000_000 if _concurrent_api else 250_000_000)
             if _concurrent_api:
                 companion = ConcurrentApiLoad(spec.port, Path(output)/'concurrent-api',
@@ -171,6 +179,8 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                 sample.update(sequence=index, scheduled_ns=target)
                 name = f'probe-{index:03d}.json'
                 save(name, sample)
+                if _python_frames is not None:
+                    python_probes.append(sample)
                 result['samples'].append(dict(file=name, status=sample['status'], probe_id=sample.get('probe_id')))
                 binding.require(sample['status'] == 'REQUEST_AND_RUNTIME_BOUND', 'diagnostic-request-not-bound')
                 previous_finish = time.perf_counter_ns()
@@ -200,6 +210,14 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
                     release_gate='HOLD', promotion_allowed=False))
             event_end = system_events.utc_now()
             notify(dict(phase='finalizing', origin_ns=origin))
+            if _python_frames is not None:
+                completed = _python_frames.finish(python_probes, origin_ns=origin)
+                save('python-completion.json', completed)
+                binding.require(completed['status'] == 'CAPTURED' or
+                    _trace is not None and completed['status'] == 'CAPTURED_WITH_READ_GAPS', 'python-stream-incomplete')
+                result['python_read_quality'] = completed.get('read_quality', 'NOT_REPORTED')
+                result['python_successful_reads'] = completed.get('reads')
+                result['python_failed_reads'] = completed.get('failed_reads')
             if _trace is not None:
                 save('trace-completion.json', _trace.finish(dict(files), stop))
             if companion is not None:
@@ -230,6 +248,11 @@ def collect(spec, output, duration, stop, notify, *, _trace=None, _outlier=False
         # Existing owned-worker IPC field: PASS means collector completion only.
         result['observation_status'] = 'PASS'
     except Exception as error:
+        if _python_frames is not None:
+            try:
+                save('python-abort.json', _python_frames.abort())
+            except Exception as close_error:
+                result['errors'].append(dict(type=type(close_error).__name__, reason='python-stream-cleanup-failed'))
         if companion is not None and not companion_finished:
             try:
                 companion.request_stop()

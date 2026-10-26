@@ -1,0 +1,11 @@
+# Release evidence and executable helpers are bound to exact SHA256 bytes.
+# Keep their original LF/CRLF (including historical mixed endings) on checkout.
+docs/01-plan/features/production-release-risk-validation* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+docs/02-design/features/production-release-risk-validation* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+docs/03-analysis/production-release-risk-validation* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+docs/04-report/production-release-risk-validation* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+docs/V2/05_운영_배포/approved_* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+docs/V2/05_운영_배포/historical_data_use_policy.* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+docs/V2/05_운영_배포/operating_rollback_baseline.md -text whitespace=trailing-space,space-before-tab,cr-at-eol
+scripts/field-v1028/* -text whitespace=trailing-space,space-before-tab,cr-at-eol
+scripts/test_approved_disabled_low_signal.ps1 -text whitespace=trailing-space,space-before-tab,cr-at-eol

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -20,7 +21,8 @@ class SpotTemperatureQaSchemaTests(unittest.TestCase):
         if cls.powershell is None:
             raise unittest.SkipTest("Windows PowerShell is required for portable QA tests")
 
-    def _run_qa(self, runtime_version: object, sidecar_version: object) -> dict:
+    def _run_qa(self, runtime_version: object, sidecar_version: object,
+                approved_policy: bool = False, alarm_on: bool = False) -> dict:
         """Run the shipped script with synthetic health/files, without a validator.
 
         The missing validator must still fail the overall QA. These tests inspect
@@ -43,6 +45,14 @@ class SpotTemperatureQaSchemaTests(unittest.TestCase):
             instance = "11111111-1111-1111-1111-111111111111"
             commit = "c" * 40
             fingerprint = "a" * 64
+            policy_path = REPO_ROOT / "docs/V2/05_운영_배포/approved_release_policy_20261023.json"
+            policy_hash = ""
+            if approved_policy:
+                policy_bytes = policy_path.read_bytes()
+                policy = json.loads(policy_bytes.decode("utf-8-sig"))
+                policy_hash = hashlib.sha256(policy_bytes).hexdigest()
+                commit = policy["candidate"]["build_commit"]
+                fingerprint = policy["candidate"]["config_fingerprint_sha256"]
             metadata = {
                 "schema_metadata": {
                     "active_schema_version": sidecar_version,
@@ -70,6 +80,12 @@ class SpotTemperatureQaSchemaTests(unittest.TestCase):
                     "enabled": True, "write_failure_count": 0, "spool_pending_count": 0,
                 },
             }
+            if approved_policy:
+                metadata["spot_configuration_snapshot"].update({
+                    "low_signal_alarm_enabled": alarm_on,
+                    "low_signal_comparator_verified": False,
+                    "low_signal_comparator_configured_verified": False,
+                })
             (data / csv_name.replace(".csv", ".metadata.json")).write_text(
                 json.dumps(metadata), encoding="utf-8",
             )
@@ -94,7 +110,7 @@ class SpotTemperatureQaSchemaTests(unittest.TestCase):
             output = root / "qa.json"
             harness = root / "run.ps1"
             harness.write_text(r'''
-param($QaScript, $HealthPath, $ConfigPath, $LogPath, $OutputPath)
+param($QaScript, $HealthPath, $ConfigPath, $LogPath, $OutputPath, $PolicyPath, $PolicyHash)
 $ErrorActionPreference = "Stop"
 $global:qaFixtureHealth = Get-Content -LiteralPath $HealthPath -Raw | ConvertFrom-Json
 $global:qaFixtureCalls = 0
@@ -105,26 +121,46 @@ function Invoke-RestMethod {
     $global:qaFixtureHealth.spot_temperature.v2_4_operational.rows_total = $global:qaFixtureCalls
     return $global:qaFixtureHealth
 }
-& $QaScript -BackendBaseUrl "http://127.0.0.1:1" -ConfigPath $ConfigPath `
+$scopeArguments = @{}
+if ($PolicyHash) {
+    $scopeArguments.ReleasePolicyPath = $PolicyPath
+    $scopeArguments.ExpectedReleasePolicySha256 = $PolicyHash
+}
+& $QaScript @scopeArguments -BackendBaseUrl "http://127.0.0.1:1" -ConfigPath $ConfigPath `
     -LogPath $LogPath -OutputPath $OutputPath -ObservationSeconds 5 `
     -SampleIntervalSeconds 5 -SkipStopPrompt
 exit $LASTEXITCODE
 ''', encoding="utf-8-sig")
             result = subprocess.run(
                 [self.powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness),
-                 str(script), str(health_file), str(config), str(data), str(output)],
+                 str(script), str(health_file), str(config), str(data), str(output),
+                 str(policy_path), policy_hash],
                 env={**os.environ, "APPDATA": str(root / "appdata"), "SFL_CONFIG_PATH": str(config)},
                 capture_output=True, text=True, timeout=30, check=False,
             )
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             self.assertTrue(output.exists(), result.stdout + result.stderr)
             report = json.loads(output.read_text(encoding="utf-8-sig"))
+            self.last_report = report
             checks = {entry["name"]: entry for entry in report["checks"]}
             self.assertFalse(checks["Full CSV validator"]["passed"])
             self.assertEqual(checks["Full CSV validator"]["actual"], "validator prerequisites missing")
             self.assertTrue(checks["Current-session metadata sidecar"]["passed"])
             self.assertEqual(config.read_text(encoding="utf-8"), "[SETTINGS]\n")
             return checks
+
+    def test_approved_disabled_scope_is_not_physical_test_pass(self) -> None:
+        checks = self._run_qa("2.5.2", "2.5.2", approved_policy=True)
+        self.assertTrue(checks["Approved disabled Low Signal release scope"]["passed"])
+        self.assertFalse(checks["Full CSV validator"]["passed"])
+        self.assertEqual(len(self.last_report["scope_exclusions"]), 1)
+        self.assertEqual(self.last_report["scope_exclusions"][0]["physical_test"], "NOT_TESTED")
+        self.assertEqual(self.last_report["whole_release_promotion"], "NOT_EVALUATED_BY_THIS_QA")
+
+    def test_approved_scope_rejects_alarm_enabled(self) -> None:
+        checks = self._run_qa("2.5.2", "2.5.2", approved_policy=True, alarm_on=True)
+        self.assertFalse(checks["Approved disabled Low Signal release scope"]["passed"])
+        self.assertEqual(self.last_report["scope_exclusions"], [])
 
     def test_accepts_supported_runtime_and_matching_sidecar_versions(self) -> None:
         for version in ("2.5.0", "2.5.1", "2.5.2"):
