@@ -310,6 +310,7 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
 
 
 CSV_PENDING_EVENT_LIMIT = 5000
+CSV_PENDING_PAYLOAD_BYTE_LIMIT = 64 * 1024**2
 
 
 @dataclass(frozen=True)
@@ -348,6 +349,7 @@ class CSVLoggerService:
         self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=CSV_PENDING_EVENT_LIMIT)
         self._pending_events: dict[int, tuple[CSVEventEnvelope, set[str]]] = {}
         self._pending_row_events: dict[int, tuple[list, int]] = {}
+        self._pending_source_payload_bytes = 0
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
@@ -531,6 +533,10 @@ class CSVLoggerService:
                     self._drop_count += 1
                     self._last_drop_at = now
                     return {**result, "status": "REJECTED_LIMIT", "reason": "pending_item_limit"}
+                if self._pending_source_payload_bytes + len(payload) > CSV_PENDING_PAYLOAD_BYTE_LIMIT:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_LIMIT", "reason": "pending_byte_limit"}
                 try:
                     self.queue.put_nowait(envelope)
                 except queue.Full:
@@ -538,6 +544,7 @@ class CSVLoggerService:
                     self._last_drop_at = now
                     return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
                 self._pending_events[envelope.producer_seq] = (envelope, set(write_config.required_sinks))
+                self._pending_source_payload_bytes += len(payload)
                 self._last_enqueue_at = now
                 if self._payload_bytes_ema is None:
                     self._payload_bytes_ema = float(payload_bytes)
@@ -567,6 +574,7 @@ class CSVLoggerService:
                 if pending is not None:
                     pending[1].discard(sink)
                     if not pending[1]:
+                        self._pending_source_payload_bytes -= len(pending[0].payload)
                         del self._pending_events[sequence]
 
     def _capture_write_config_locked(self) -> CSVWriteConfig:
@@ -2858,6 +2866,7 @@ class CSVLoggerService:
             last_write_at = self._last_write_at
             payload_bytes_ema = self._payload_bytes_ema
             pending_event_count = len(self._pending_events)
+            pending_source_payload_bytes = self._pending_source_payload_bytes
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -2876,6 +2885,8 @@ class CSVLoggerService:
             "payload_bytes_ema": payload_bytes_ema,
             "estimated_queue_bytes": estimated_queue_bytes,
             "pending_event_count": pending_event_count,
+            "pending_source_payload_bytes": pending_source_payload_bytes,
+            "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
             "running": self.running,

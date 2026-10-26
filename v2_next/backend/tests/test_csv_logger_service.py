@@ -306,6 +306,49 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual([float(row[rows[0].index("MainPress")]) for row in rows[1:]], [30.0, 31.0])
             self.assertEqual(len(self.list_v1_files(tmp_dir)) + len(self.list_v2_files(tmp_dir)), 2)
 
+    def test_csv_source_budget_includes_inflight_payloads(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        budget = 64 * 1024**2
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            data.Status = "x" * (128 * 1024)
+            payload_size = len(json.dumps(dict(data), ensure_ascii=False, allow_nan=False,
+                                          sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    started.set()
+                    if not release.wait(30):
+                        raise TimeoutError("test did not release CSV byte-budget writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open):
+                service.start()
+                try:
+                    first = service.enqueue_detailed(data)
+                    self.assertEqual(first["status"], "ACCEPTED")
+                    self.assertTrue(started.wait(2))
+                    accepted = 1
+                    for _ in range(budget // payload_size):
+                        receipt = service.enqueue_detailed(data)
+                        if receipt["status"] != "ACCEPTED":
+                            break
+                        accepted += 1
+                    self.assertEqual(receipt["status"], "REJECTED_LIMIT")
+                    self.assertEqual(receipt["reason"], "pending_byte_limit")
+                    state = service.get_runtime_state()
+                    self.assertEqual(state["pending_source_payload_bytes"], accepted * payload_size)
+                    self.assertLessEqual(state["pending_source_payload_bytes"], budget)
+                    self.assertEqual(state["pending_event_count"], accepted)
+                finally:
+                    release.set()
+                    self.assertTrue(service.stop(timeout_sec=30))
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual(len(rows) - 1, accepted)
+            self.assertEqual(service.get_runtime_state()["pending_source_payload_bytes"], 0)
+
     def test_same_date_rows_stay_in_one_file(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             log_dir = tmp_dir

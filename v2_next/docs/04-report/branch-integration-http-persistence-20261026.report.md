@@ -137,3 +137,11 @@ CSV 접수에서 queue 슬롯과 별개로 원본 이벤트를 예약하고 v1/v
 - `test_csv_pending_limit_includes_inflight_and_both_outputs`: 실제 v2 파일 열기를 지연하고 2건 한도에서 세 번째를 거절하는지, 해제 후 두 CSV에30/31만 저장되고 pending0인지 검사. `tdd/csv-items-red`에서 ACCEPTED/LIMIT 예상 실패(exit1), 최종 `csv-items-final-green`의 CSV160시험 통과(exit0).
 - 2026-10-27 완료 감사에서 발견한 Optional envelope 타입 오류2개는 실제 decode 조건을 명시해 해결했다. 최종 backend Ruff·프로젝트 mypy9파일 exit0. repository.py 추가 검사는 기존9오류만 남으며 exit1이다. 기존 오류와 신규 오류가 사라진 결과를 구분해 보존했다.
 - 이번 건수 제한은 bytes·직렬화/출력 임시 사본·스풀 한도나 부분 쓰기 무결성 전체의 완료를 뜻하지 않는다. 감사의 원시 결과와 원본4문서 복원/원격 통합/전체7단계 잔여 범위도 유지한다.
+
+## HTTP 1단계 — CSV 원본 payload 예약
+
+접수된 원본 bytes의 합계를64MiB 내에서 예약하고 queue에서 꺼내도 유지하며, 필수 출력이 flush된 뒤 해제한다. 기존 EMA 추정치는 변경하지 않고 실제 원본 예약량을 별도 상태로 표시한다.
+
+- `test_csv_source_budget_includes_inflight_payloads`: 실제 writer를 지연하고128KiB Status가 있는 여러 원본을 접수했다. 상한 초과를 `REJECTED_LIMIT/pending_byte_limit`로 거절하고 접수분만 실제 CSV 행으로 저장, 종료 후 예약0을 확인한다.
+- `tdd/csv-source-bytes-red`는 예상한 초과 ACCEPTED로 exit1. `csv-source-bytes-green`의 CSV service/runtime60시험, 변경 Ruff·프로젝트 mypy 모두 exit0.
+- 아직 원본 직렬화 전에 발생하는 임시 사본과 출력 렌더링 사본은 이 counter에 포함하지 않는다. 이를 전체 R02 합산64MiB 구현으로 표시하지 않으며 같은1단계의 다음 필수 경계로 유지한다.
