@@ -42,8 +42,8 @@ class _PayloadBudgetExceeded(ValueError):
     pass
 
 
-def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = None) -> tuple[Any, int]:
-    """Detach containers and size UTF-8 JSON without allocating encoded strings.
+def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = None) -> tuple[Any, int, int, int]:
+    """Detach containers and size UTF-8 bytes plus Python text character storage.
 
     Immutable source strings are shared, not copied. Container/object overhead
     is separate from the serialized-payload budget. Match json.dumps defaults
@@ -52,23 +52,31 @@ def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = Non
     if limit < 0:
         raise _PayloadBudgetExceeded
     result: Any
+    char_width = 1
     if isinstance(value, str):
         if len(value) + 2 > limit:
             raise _PayloadBudgetExceeded
         size = len(value)
         if not value.isascii():
+            highest = ord(max(value))
+            char_width = 4 if highest > 0xFFFF else 2 if highest > 0xFF else 1
+            if (len(value) + 2) * (1 + char_width) > limit:
+                raise _PayloadBudgetExceeded
             size = 0
             for char in value:
                 code = ord(char)
                 if 0xD800 <= code <= 0xDFFF:
                     raise ValueError("Unpaired surrogate in JSON payload")
                 size += 1 + (code > 0x7F) + (code > 0x7FF) + (code > 0xFFFF)
-        size += 2 + value.count('"') + value.count("\\")
-        size += 5 * sum(value.count(chr(code)) for code in range(32))
-        size -= 4 * sum(value.count(char) for char in "\b\f\n\r\t")
+        escapes = 2 + value.count('"') + value.count("\\")
+        escapes += 5 * sum(value.count(chr(code)) for code in range(32))
+        escapes -= 4 * sum(value.count(char) for char in "\b\f\n\r\t")
+        size += escapes
+        characters = len(value) + escapes
         result = value
     elif value is None or isinstance(value, (bool, int, float)):
         size = len(json.dumps(value, allow_nan=False))
+        characters = size
         result = value
     elif isinstance(value, (dict, list, tuple)):
         parents = set() if parents is None else parents
@@ -76,7 +84,7 @@ def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = Non
         if identity in parents:
             raise ValueError("Circular JSON payload")
         parents.add(identity)
-        size = 2
+        size = characters = 2
         try:
             if isinstance(value, dict):
                 result = {}
@@ -84,25 +92,37 @@ def _prepare_json_payload(value: Any, limit: int, parents: set[int] | None = Non
                     if not (key is None or isinstance(key, (str, bool, int, float))):
                         raise TypeError("Unsupported JSON object key")
                     key_text = key if isinstance(key, str) else json.dumps(key, allow_nan=False)
-                    _, key_size = _prepare_json_payload(key_text, limit - size, parents)
-                    size += key_size + 2 + (2 if index else 0)
-                    detached, item_size = _prepare_json_payload(item, limit - size, parents)
+                    _, key_size, key_chars, key_width = _prepare_json_payload(key_text, limit, parents)
+                    separator = 2 + (2 if index else 0)
+                    size += key_size + separator
+                    characters += key_chars + separator
+                    char_width = max(char_width, key_width)
+                    detached, item_size, item_chars, item_width = _prepare_json_payload(item, limit, parents)
                     result[key] = detached
                     size += item_size
+                    characters += item_chars
+                    char_width = max(char_width, item_width)
+                    if size + characters * char_width > limit:
+                        raise _PayloadBudgetExceeded
             else:
                 result = []
                 for index, item in enumerate(value):
                     size += 2 if index else 0
-                    detached, item_size = _prepare_json_payload(item, limit - size, parents)
+                    characters += 2 if index else 0
+                    detached, item_size, item_chars, item_width = _prepare_json_payload(item, limit, parents)
                     result.append(detached)
                     size += item_size
+                    characters += item_chars
+                    char_width = max(char_width, item_width)
+                    if size + characters * char_width > limit:
+                        raise _PayloadBudgetExceeded
         finally:
             parents.remove(identity)
     else:
         raise TypeError("Unsupported JSON value")
-    if size > limit:
+    if size + characters * char_width > limit:
         raise _PayloadBudgetExceeded
-    return result, size
+    return result, size, characters, char_width
 
 
 class SpotObservationQueue:
@@ -154,7 +174,7 @@ class SpotObservationQueue:
                 return self._reject_locked("REJECTED_LIMIT", "pending_item_limit", observation_key)
             available = FACT_PENDING_PAYLOAD_BYTE_LIMIT - self._state["pending_payload_bytes"]
             try:
-                source, payload_size = _prepare_json_payload(source, available // 2)
+                source, payload_size, text_characters, text_width = _prepare_json_payload(source, available)
             except _PayloadBudgetExceeded:
                 return self._reject_locked("REJECTED_LIMIT", "pending_byte_limit", observation_key)
             except (TypeError, ValueError, OverflowError):
@@ -162,7 +182,7 @@ class SpotObservationQueue:
             # Reserve both the serialized text and final UTF-8 bytes before
             # either allocation. Containers are detached while leaves share
             # immutable source strings; queued bytes own the final snapshot.
-            reservation = payload_size * 2
+            reservation = payload_size + text_characters * text_width
             self._state["pending_payload_bytes"] += reservation
             accepted = False
             payload = b""

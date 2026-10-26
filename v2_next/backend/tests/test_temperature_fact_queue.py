@@ -416,6 +416,30 @@ class FactQueueTests(unittest.TestCase):
                     self.assertFalse(owner.snapshot()["writer_alive"])
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "3"])
 
+    def test_serialization_budget_accounts_for_wide_unicode_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            owner = SpotObservationQueue(lambda: SpotObservationFactWriter(path))
+            try:
+                large = observation(1)
+                large["source_payload_for_budget"] = "a" * (6 * 1024**2) + "😀"
+                result = owner.enqueue_detailed(large)
+                self.assertEqual(result.status, "REJECTED_LIMIT")
+                self.assertEqual(result.reason, "pending_byte_limit")
+                self.assertEqual(result.observation_key, "synthetic-A:1")
+                self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+                small = observation(2)
+                small["instrument_info"] = "온도\n😀"
+                small["source_payload_for_budget"] = {12: True, None: [-2.5, '\x01\t\\"온😀']}
+                self.assertTrue(owner.enqueue(small))
+            finally:
+                owner.close(5)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+            rows = self.read_rows(path)
+            self.assertEqual([row["spot_poll_seq"] for row in rows], ["2"])
+            self.assertEqual(rows[0]["instrument_info"], small["instrument_info"])
+            self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
         original_open = Path.open

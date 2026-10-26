@@ -434,3 +434,12 @@ fact owner에서 JSON 컨테이너를 분리하고 인코딩 길이를 먼저 �
 - 기존 bytes 한계 시험의 기대식을 원본1개에서 직렬화 사본까지 포함한2개로 변경했다. 기존 예약 유지·반환·실제 저장 데이터 assertions는 유지했다. 새 내부 반환값의 타입 표기도 보완했다.
 - `fact-serialization-budget-green-r2`: 관련19시험 중18통과·기존 private F01자료 미제공1skip,exit0. backend Ruff·기본 mypy10파일 exit0.
 - 현재는 UTF-8 길이를 기준으로 두 사본을 예약한다. Python의 넓은 Unicode 문자열 표현, decode/출력 사본과 CSV·이미지 경로의 선예약은 아직 추가 검증·보완이 필요하다. 이 접수 경계나 앞선1,000시험을 현재 전체 예산 계약의 완료로 표시하지 않는다.
+
+## HTTP 1단계 — 직렬화 문자열의 Unicode 폭 반영
+
+직렬화 전에 UTF-8 bytes 길이와 JSON 문자열의 문자 수·최대 문자 폭(1/2/4bytes)을 계산한다. 한 개의 이모지 때문에 전체 문자열이 넓어지는 경우도 포함해 예약한다. 원본 문자열 참조는 공유하고 컨테이너를 분리하므로 원본의 후속 중첩 수정이 직렬화 길이를 바꾸지 않는다. 이 값은 payload/문자 내용 공간이며 Python 객체 overhead나 전체 RSS 상한은 아니다.
+
+- `test_serialization_budget_accounts_for_wide_unicode_text`:6MiB 영문과 이모지1개 입력이 기존 ACCEPTED로 통과하는 RED(`fact-wide-serialization-red`, exit1)를 확인했다. 수정 후 초과 입력 거절·예약0·다음 작은 한글/이모지/제어문자 입력의 실제 저장·예약 반환을 확인했다.
+- `fact-wide-serialization-green`: fact queue/fact/종료/SPOT API280시험 중279통과·기존 private F01자료 미제공1skip,76.682초,exit0. 전체 로그 검사에 unittest FAIL/ERROR/Traceback은 없고, 기존 오류 주입 로그·asyncio 지연 알림·Starlette 경고는 보존한다. backend Ruff·기본 mypy10파일도 exit0.
+- `verify_fact_json_budget.py`의 독립 대조는269개 JSON 자료의 실제 직렬화 bytes·문자 수·문자 폭, 정확한 경계/1바이트 부족, 공유 중첩 참조 분리와 잘못된6입력을 확인해 exit0이었다. 근거 `fact-json-budget-differential.json`은 소스 SHA256에 결합돼 있다. 이269개는17개 필수 시나리오에 추가 통과로 합산하지 않는다.
+- fact 접수 직렬화 경계의 구현이다. decode·writer 출력·스풀 직렬화 및 CSV·이미지 경로의 임시 사본 예약, 컨테이너/인덱스 메모리 계측과 전체7단계/17명세는 계속 남아 있다. 직전58fd675f의 전체1,000시험에는 이후 직렬화 변경이 포함되지 않으므로 최신 전체 회귀로 표시하지 않는다.

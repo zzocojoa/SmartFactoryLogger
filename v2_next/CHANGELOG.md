@@ -17,6 +17,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Keep partial writes and close failures uncertain: preserve the bytes and stop
   further writes or automatic recovery by that writer. Offline manifests include
   unresolved archived spools and propagate read failures instead of reporting zero.
+- Reserve fact-admission serialization space before creating the JSON text and
+  UTF-8 bytes, including Python's wider Unicode character storage. Decode/output
+  copies and corresponding CSV/image reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
   seven-stage plan, full additional scenario matrix, new installer validation,
   and deployment are incomplete. The package version alone does not identify
