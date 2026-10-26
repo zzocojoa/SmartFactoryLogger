@@ -108,7 +108,15 @@ class HealthTimingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_executor_backlog_is_separate_from_worker_execution(self):
         loop = asyncio.get_running_loop()
-        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        submitted = asyncio.Event()
+
+        class ObservedExecutor(ThreadPoolExecutor):
+            def submit(self, *args, **kwargs):
+                future = super().submit(*args, **kwargs)
+                submitted.set()
+                return future
+
+        loop.set_default_executor(ObservedExecutor(max_workers=1))
         entered, release = threading.Event(), threading.Event()
 
         def occupy_worker():
@@ -123,14 +131,19 @@ class HealthTimingTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(.001)
             self.assertTrue(entered.is_set())
             response = Response()
+            submitted.clear()
+            # Scheduling the route is distinct from submitting its worker.
+            loop.call_soon(time.sleep, .03)
             pending = asyncio.create_task(backend_app.health(request(), response))
+            await asyncio.wait_for(submitted.wait(), 2)
             await asyncio.sleep(.06)
             self.assertFalse(pending.done())
             self.assertFalse(self.plc.called)
             release.set()
             self.assertEqual(await asyncio.wait_for(pending, 2), BODY)
             points = self.read_timing(response)["checkpoints"]
-            self.assertGreaterEqual(points["worker_enter"] - points["submitted"], 50_000_000)
+            self.assertGreaterEqual(points["worker_enter"] - points["submitted"], 50_000_000,
+                                    "executor backlog was shorter than fixture hold")
         finally:
             release.set()
             await occupied
