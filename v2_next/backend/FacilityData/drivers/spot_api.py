@@ -277,6 +277,7 @@ _spot_image_capture_written_count = 0
 _spot_image_capture_dropped_count = 0
 _spot_image_capture_dropped_oversize_count = 0
 _spot_image_capture_dropped_queue_full_count = 0
+_spot_image_capture_dropped_pending_limit_count = 0
 _spot_image_capture_failure_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 _spot_image_shutdown_baseline: Optional[Dict[str, Any]] = None
@@ -807,6 +808,7 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "dropped_count": _spot_image_capture_dropped_count,
         "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
         "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
+        "dropped_pending_limit_count": _spot_image_capture_dropped_pending_limit_count,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
         "manifest_initialization_requested": initialization_pending,
@@ -865,6 +867,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature, _spot_image_capture_thread
     global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
+    global _spot_image_capture_dropped_pending_limit_count
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
@@ -885,6 +888,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_dropped_count = 0
         _spot_image_capture_dropped_oversize_count = 0
         _spot_image_capture_dropped_queue_full_count = 0
+        _spot_image_capture_dropped_pending_limit_count = 0
         _spot_image_capture_failure_count = 0
         _spot_image_capture_last_enqueue_at = 0.0
         _spot_image_capture_last_write_at = 0.0
@@ -1003,6 +1007,8 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "mode": _spot_image_capture_mode(),
             "queue_size": _SPOT_IMAGE_CAPTURE_QUEUE.qsize(),
             "queue_capacity": _SPOT_IMAGE_CAPTURE_QUEUE_MAX,
+            "pending_capture_count": (_spot_image_capture_enqueued_count
+                                      - _spot_image_capture_written_count - _spot_image_capture_failure_count),
             "enqueued_count": _spot_image_capture_enqueued_count,
             "written_count": _spot_image_capture_written_count,
             "fact_row_count": fact_row_count,
@@ -1013,6 +1019,7 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "dropped_count": _spot_image_capture_dropped_count,
             "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
             "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
+            "dropped_pending_limit_count": _spot_image_capture_dropped_pending_limit_count,
             "failure_count": _spot_image_capture_failure_count,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
             "last_write_at": _spot_image_capture_last_write_at or None,
@@ -1178,6 +1185,7 @@ def _maybe_enqueue_spot_image_capture(
 ) -> None:
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
     global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
+    global _spot_image_capture_dropped_pending_limit_count
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
         return
     mode = _spot_image_capture_mode()
@@ -1202,6 +1210,18 @@ def _maybe_enqueue_spot_image_capture(
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
             return
         if min_interval_sec > 0.0 and now - _spot_image_capture_last_enqueue_at < min_interval_sec:
+            return
+        # The single writer owns a dequeued capture until task_done. Include it
+        # in admission rather than freeing its reservation at queue.get().
+        with _SPOT_IMAGE_CAPTURE_QUEUE.mutex:
+            pending = _SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks
+            queued = len(_SPOT_IMAGE_CAPTURE_QUEUE.queue)
+        if pending >= _SPOT_IMAGE_CAPTURE_QUEUE_MAX:
+            _spot_image_capture_dropped_count += 1
+            if queued >= _SPOT_IMAGE_CAPTURE_QUEUE.maxsize:
+                _spot_image_capture_dropped_queue_full_count += 1
+            else:
+                _spot_image_capture_dropped_pending_limit_count += 1
             return
         event = _SpotImageCaptureEvent(
             image_bytes=bytes(image_bytes),

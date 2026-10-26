@@ -191,3 +191,11 @@ csv.writer 함수 이름을 타입으로 쓰던6곳을 writer Protocol로, objec
 - `csv-consumer-red`의 예상 실패는 상세 거절 code가 None인 것(exit1)이었다. 첫 green 시도에서는 가상 시각 생산 후 실제 시각으로 이력을 조회해 TTL이 만료되는 시험 오류1개가 남았다. 조회 시계만 같은 기준으로 맞췄고 제품 로직은 추가 변경하지 않았다.
 - `csv-consumer-green-r2`: 서비스 시계·원본 시계·history cursor·worker lifecycle 45시험 통과(exit0). backend Ruff(`csv-consumer-ruff-r2`)와 기본 mypy10파일(`csv-consumer-mypy`)도 exit0. Ruff 첫 실행은 기존 실행 폴더 이름 충돌로 시작하지 못했으며 새 이름으로 검사를 완료했다.
 - 기존 consumer 종료 시험의 I/O 예외 주입 위치를 실제 호출하는 상세 API로 옮겼으며 기존 종료/재시작 assertions를 유지했다. 구조화 로그를 영속 data-trace, 출력별 저장 대조 또는 7단계 전체 완료로 간주하지 않는다.
+
+## HTTP 1단계 — 이미지 pending 건수
+
+이미지 접수에서 queue 대기뿐 아니라 writer가 처리 중인 capture도 기존128건 상한에 포함한다. 기존 queue 포화와 pending 한도 거절을 분리해 health·종료 상태에 집계한다. 실제 완료/실패와 task_done의 원자적 상태 갱신 및 과거 실패 보존은 유지했다.
+
+- `test_capture_pending_limit_includes_inflight`: 실제 JPEG 파일 쓰기를 지연하고2건 상한에서 세 번째 접수 거절, 해제 후 다음 이미지 접수·실제3파일/3fact·종료 대조를 확인한다. `image-items-red`는 unfinished3/기대2의 행동 실패(exit1)였다.
+- `image-items-green`: 이미지 종료 증거·SPOT API·retention·CSV 이미지 시작237시험 통과(exit0). backend Ruff 및 기본 mypy10파일도 exit0.
+- 아직 이미지 원본/연결 snapshot/임시 출력의 합산 bytes 예산, 고정 설정·목적지 및 상세 접수 결과는 후속 경계다. 단순 건수 제한을 RV02/RR03 전체 완료로 표시하지 않는다.
