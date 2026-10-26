@@ -293,6 +293,45 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(final['pending_payload_bytes'], 0)
         self.assertTrue(final['accounting_consistent'])
 
+    def test_rejected_live_capture_keeps_image_and_reports_identity(self):
+        import httpx
+
+        self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', 1))
+        image = io.BytesIO()
+        Image.new('RGB', (2, 2), (31, 2, 3)).save(image, format='JPEG')
+        payload = image.getvalue()
+        for name in ('_img_cache_entry', '_img_refresh_success_count',
+                     '_img_upstream_request_count', '_img_last_upstream_started_at',
+                     '_img_last_upstream_completed_at', '_img_failure_count',
+                     '_img_last_error_code', '_img_last_error_message', '_img_last_success_at'):
+            self.stack.enter_context(patch.object(spot, name, getattr(spot, name)))
+
+        async def receive():
+            async with httpx.AsyncClient() as client:
+                with patch.object(spot, '_http_client', client), \
+                     patch.object(spot, '_request_spot_image', return_value=payload) as request:
+                    entry = await spot._refresh_spot_image_cache('http://synthetic.invalid/image.jpg')
+                    self.assertEqual(request.await_count, 1)
+                    return entry
+
+        with self.assertLogs('spot_control', level='WARNING') as logs:
+            entry = self.loop.run_until_complete(receive())
+        self.assertEqual(len(logs.records), 1)
+        receipt = json.loads(logs.records[0].getMessage().split('rejected ', 1)[1])
+        self.assertEqual(receipt['status'], 'REJECTED_LIMIT')
+        self.assertEqual(receipt['reason'], 'pending_byte_limit')
+        self.assertEqual(receipt['capture_id'], entry.capture_id)
+        self.assertTrue(entry.capture_id)
+        self.assertNotIn('synthetic.invalid', logs.records[0].getMessage())
+        self.assertEqual(entry.image_bytes, payload)
+        self.assertIs(spot._img_cache_entry, entry)
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['enqueued_count'], 0)
+        self.assertEqual(final['dropped_payload_limit_count'], 1)
+        self.assertEqual(final['failure_count'], 0)
+        self.assertFalse((self.root / 'spot_image_fact.csv').exists())
+        self.assertFalse(list((self.root / 'images').rglob('*.jpg')))
+
     def test_capture_during_config_apply_uses_complete_previous_settings(self):
         from backend.Configuration import Configuration_DB_Manager as settings
 

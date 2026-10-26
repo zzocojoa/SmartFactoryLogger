@@ -3613,7 +3613,7 @@ async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
     _img_refresh_success_count += 1
     _img_last_upstream_completed_at = captured_at_epoch
     _record_image_success()
-    _maybe_enqueue_spot_image_capture(
+    admission = _maybe_enqueue_spot_image_capture(
         image_bytes=entry.image_bytes,
         captured_at=entry.captured_at_epoch,
         image_url=image_url,
@@ -3621,6 +3621,15 @@ async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
         image_age_ms=0.0,
         capture_id=entry.capture_id,
     )
+    if not admission.accepted and admission.status != "DISABLED":
+        _logger.warning(
+            "SPOT image capture admission rejected %s",
+            json.dumps({
+                "status": admission.status,
+                "reason": admission.reason,
+                "capture_id": admission.capture_id,
+            }, ensure_ascii=True, allow_nan=False, separators=(",", ":")),
+        )
     return entry
 
 

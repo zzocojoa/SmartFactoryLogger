@@ -285,3 +285,13 @@ ConfigManager가 log/image 경로·이미지 정책·제한·연결 신선도 �
 - `test_capture_admission_reports_pending_limit_with_identity`: 실제 writer를 지연하고2건 한도에서 세 번째 접수의 LIMIT/사유/원래 ID, 앞선 두 ACCEPTED와 실제 저장 ID를 대조했다. 임시 CLOSED 결과와 필요한 LIMIT의 RED(`image-admission-red`, exit1)를 확인했다.
 - `image-admission-green`: 이미지 종료·SPOT API·retention·CSV 시작243시험 통과(exit0). backend Ruff·mypy10파일 exit0.
 - 기존 정책 제외를 drop으로 바꾸지 않았다. 현재 저장 불가의 가용성 계약과 상세 결과의 실제 HTTP 호출부 기록·영속 추적은 다음 경계이며, 전체 접수 계약 완료로 표시하지 않는다.
+
+## HTTP 1단계 — 실제 이미지 조회 경로의 거절 기록
+
+실제 refresh 호출부가 상세 접수 결과를 확인하고 거절 status/reason/capture ID를 경고에
+남긴다. 캐시와 응답 이미지의 최신 갱신은 유지한다. 정상 정책 제외는 오류로 기록하지 않고,
+새 경고에 센서 URL·인증정보·이미지 본문을 넣지 않는다.
+
+- `test_rejected_live_capture_keeps_image_and_reports_identity`: 실제 refresh/접수와1byte 저장 예산에서 경고 누락을 RED(`image-producer-red`, exit1)로 확인했다. 수정 후 반환/캐시 이미지 유지·LIMIT 사유·같은 capture ID·저장0·거절1·쓰기 실패0을 대조했다.
+- `image-producer-green`: 관련244시험 통과(exit0). backend Ruff·기본 mypy10파일 exit0.
+- 이 구조화 로그는 영속 data-trace나 출력별 정상 종료 대조의 대체물이 아니다. 해당 전체 계약은 미완료다.
