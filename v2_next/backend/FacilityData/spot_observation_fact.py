@@ -4,18 +4,20 @@ import csv
 import hashlib
 import json
 import math
+import os
 import sqlite3
+import stat
 import threading
 import time
 from datetime import datetime, timezone
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass, field
 import io
 from pathlib import Path
-from typing import Any, Callable, ContextManager, NoReturn, Optional
+from typing import Any, Callable, ContextManager, Iterator, NoReturn, Optional
 from uuid import uuid4
 
 from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
@@ -249,6 +251,14 @@ class SpotObservationFactWriter:
     _spool_read_offsets: dict[Path, int] = field(default_factory=dict, init=False, repr=False)
     _active_spool_segment: Path | None = field(default=None, init=False, repr=False)
     _uncertain_spool_path: Path | None = field(default=None, init=False, repr=False)
+    _initial_read_retryable: bool = field(default=False, init=False, repr=False)
+    _initial_read_identity_known: bool = field(default=False, init=False, repr=False)
+    _initial_read_identity: tuple[int, int, int, int] | None = field(default=None, init=False, repr=False)
+    initialization_manual_recovery: bool = field(default=False, init=False)
+
+    @property
+    def initialization_retryable(self) -> bool:
+        return self._initial_read_retryable and not self.initialization_manual_recovery
 
     def __post_init__(self) -> None:
         if self.load_existing_keys:
@@ -256,6 +266,12 @@ class SpotObservationFactWriter:
 
     def ensure_initialized(self) -> bool:
         """Create a current-schema header even when no observation has been emitted yet."""
+        if self.initialization_manual_recovery:
+            return False
+        if self._initial_read_retryable:
+            self._load_manifest_state_from_output()
+            if self._initial_read_retryable or self.initialization_manual_recovery:
+                return False
         try:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             with _SPOT_OBSERVATION_FACT_FILE_LOCK:
@@ -329,6 +345,8 @@ class SpotObservationFactWriter:
                 self._record_manifest_row(fact)
 
     def _prepare_output_file_for_append(self) -> bool:
+        if self._initial_read_retryable or self.initialization_manual_recovery:
+            raise RuntimeError("observation fact initial history is unverified")
         if not self.output_path.exists() or self.output_path.stat().st_size == 0:
             return True
         if self._existing_header_matches_current_schema():
@@ -687,16 +705,56 @@ class SpotObservationFactWriter:
                 },
             }
 
+    def _initial_fact_identity(self) -> tuple[int, int, int, int] | None:
+        try:
+            info = self.output_path.lstat()
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISREG(info.st_mode) or not info.st_ino:
+            raise RuntimeError("observation fact initial identity unavailable")
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+    @contextmanager
+    def _initial_fact_reader(self, mode: str, **kwargs: Any) -> Iterator[Any]:
+        handle = self.output_path.open(mode, **kwargs)
+        try:
+            opened = os.fstat(handle.fileno())
+            identity = (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+            if identity != self._initial_read_identity or self._initial_fact_identity() != identity:
+                raise RuntimeError("observation fact changed during initial read")
+            yield handle
+        finally:
+            try:
+                handle.close()
+            except Exception as exc:
+                raise RuntimeError("observation fact initial reader close is uncertain") from exc
+        if self._initial_fact_identity() != identity:
+            raise RuntimeError("observation fact changed after initial read")
+
     def _load_manifest_state_from_output(self) -> None:
-        if not self.output_path.exists() or self.output_path.stat().st_size == 0:
+        if self.initialization_manual_recovery:
             return
         try:
-            expected_size = self.output_path.stat().st_size
+            identity = self._initial_fact_identity()
+            if self._initial_read_identity_known and identity != self._initial_read_identity:
+                raise RuntimeError("observation fact changed between initial read attempts")
+            self._initial_read_identity, self._initial_read_identity_known = identity, True
+            self._initial_read_retryable = False
+            # A failed partial scan must not retain its row/index counters on
+            # retry. This reset is confined to initialization, never append I/O.
+            self._reset_manifest_state()
+            if identity is None or identity[2] == 0:
+                self._initial_read_identity_known = False
+                return
+            expected_size = identity[2]
+            self._manifest_state_ready = False
             hash_started = time.monotonic()
-            self._manifest_digest = _file_sha256_digest(self.output_path)
+            with self._initial_fact_reader("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    self._manifest_digest.update(chunk)
             self.existing_fact_hash_ms = (time.monotonic() - hash_started) * 1000.0
             index_started = time.monotonic()
-            with self.output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            with self._initial_fact_reader("r", encoding="utf-8-sig", newline="") as handle:
                 reader = csv.DictReader(handle)
                 if list(reader.fieldnames or []) != SPOT_OBSERVATION_FACT_COLUMNS:
                     self._manifest_state_ready = False
@@ -704,11 +762,17 @@ class SpotObservationFactWriter:
                 for row in reader:
                     self._record_manifest_row(row)
             self.existing_fact_index_ms = (time.monotonic() - index_started) * 1000.0
-            if self.output_path.stat().st_size != expected_size:
-                self._manifest_state_ready = False
-                return
             self._manifest_tracked_size = expected_size
-        except (OSError, UnicodeError, csv.Error):
+            self._manifest_state_ready = True
+            self._initial_read_identity_known = False
+        except OSError:
+            self.failure_count += 1
+            self._initial_read_retryable = True
+            self._manifest_state_ready = False
+        except (UnicodeError, csv.Error, RuntimeError):
+            self.failure_count += 1
+            self.initialization_manual_recovery = True
+            self._initial_read_retryable = False
             self._manifest_state_ready = False
 
     def _record_manifest_row(self, row: Mapping[str, Any]) -> None:

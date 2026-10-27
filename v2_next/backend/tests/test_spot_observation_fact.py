@@ -761,6 +761,106 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertFalse(spool_path.exists())
             self.assertEqual(list(segments.glob("*.jsonl")), [])
 
+    def test_initial_read_retry_rebuilds_partial_index_without_duplicates(self) -> None:
+        original_open = Path.open
+        snapshot = {"spot_service_instance_id": "initial-read", "spot_poll_seq": 1,
+                    "spot_observation_seq": 1, "spot_poll_status": "success",
+                    "spot_raw_validity": "valid_temperature", "spot_raw_value_text": "455.0",
+                    "spot_last_poll_completed_at": "2026-06-26T00:00:00Z"}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            seed = SpotObservationFactWriter(path)
+            self.assertIsNotNone(seed.write_fact(snapshot))
+            self.assertIsNotNone(seed.write_fact({**snapshot, "spot_poll_seq": 2, "spot_observation_seq": 2}))
+            before = path.read_bytes()
+
+            class InterruptedRows:
+                def __init__(self, stream):
+                    self.stream, self.lines = stream, 0
+
+                def __getattr__(self, name):
+                    return getattr(self.stream, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.stream.close()
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    if self.lines == 2:
+                        raise OSError("synthetic interrupted history read")
+                    self.lines += 1
+                    return next(self.stream)
+
+            def interrupted_open(target, mode="r", *args, **kwargs):
+                stream = original_open(target, mode, *args, **kwargs)
+                return InterruptedRows(stream) if target == path and mode == "r" else stream
+
+            with patch.object(Path, "open", interrupted_open):
+                writer = SpotObservationFactWriter(path)
+                self.assertFalse(writer.ensure_initialized())
+            self.assertTrue(writer.ensure_initialized(), "the same readable original must recover its initial index")
+            self.assertEqual(writer.manifest_summary()["row_count"], 2)
+            self.assertEqual(writer.manifest_summary()["duplicate_observation_key_count"], 0)
+            self.assertGreater(writer.failure_count, 0)
+            self.assertIsNone(writer.write_fact(snapshot))
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(list(Path(tmp).glob("*.schema-mismatch.*")), [])
+
+    def test_initial_read_recovery_holds_replaced_deleted_and_unclosed_files(self) -> None:
+        original_open = Path.open
+        for failure in ("replace", "delete", "close", "invalid_utf8"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "facts.csv"
+                seed = SpotObservationFactWriter(path)
+                self.assertTrue(seed.ensure_initialized())
+                before = path.read_bytes()
+
+                class FailedClose:
+                    def __init__(self, stream):
+                        self.stream = stream
+
+                    def __getattr__(self, name):
+                        return getattr(self.stream, name)
+
+                    def close(self):
+                        self.stream.close()
+                        raise OSError("synthetic initial reader close failure")
+
+                def failed_open(target, mode="r", *args, **kwargs):
+                    if target == path and mode == "rb":
+                        if failure == "close":
+                            return FailedClose(original_open(target, mode, *args, **kwargs))
+                        raise PermissionError("synthetic initial open failure")
+                    return original_open(target, mode, *args, **kwargs)
+
+                if failure == "invalid_utf8":
+                    path.write_bytes(before + b"\xff\n")
+                    writer = SpotObservationFactWriter(path)
+                else:
+                    with patch.object(Path, "open", failed_open):
+                        writer = SpotObservationFactWriter(path)
+                if failure == "replace":
+                    replacement = path.with_suffix(".replacement")
+                    replacement.write_bytes(before)
+                    replacement.replace(path)
+                elif failure == "delete":
+                    path.unlink()
+                retained = path.read_bytes() if path.exists() else None
+                self.assertFalse(writer.ensure_initialized())
+                self.assertTrue(writer.initialization_manual_recovery)
+                self.assertFalse(writer.initialization_retryable)
+                self.assertEqual(path.read_bytes() if path.exists() else None, retained)
+                self.assertEqual(list(Path(tmp).glob("*.schema-mismatch.*")), [])
+                # An external repair does not silently clear the uncertainty.
+                path.write_bytes(before)
+                self.assertFalse(writer.ensure_initialized())
+                self.assertEqual(path.read_bytes(), before)
+
     def test_header_read_failure_preserves_original_and_recovers_pending_fact(self) -> None:
         snapshot = {"spot_service_instance_id": "header-read", "spot_poll_seq": 1,
                     "spot_observation_seq": 1, "spot_poll_status": "success",
