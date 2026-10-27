@@ -26,6 +26,7 @@ class StoragePressureSample:
     clock_domain: str = field(default_factory=clock_domain_id)
     writer_alive: bool = True
     manual_recovery_required: bool = False
+    admission_blocked_reason: str | None = None
 
     @property
     def has_pending(self) -> bool:
@@ -96,6 +97,8 @@ class StoragePressureController:
             reasons.add("budget_exhausted")
         if any(sample.manual_recovery_required for sample in active):
             reasons.add("manual_recovery")
+        if any(sample.admission_blocked_reason is not None for sample in active):
+            reasons.add("admission_blocked")
         if any(not sample.writer_alive for sample in active):
             reasons.add("writer_stopped")
         blocked = bool(reasons)

@@ -862,7 +862,8 @@ class PersistenceTraceTests(unittest.TestCase):
         clock = [100.0]
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            writer = PersistenceTraceWriter(root, "workspace-producer", clock=lambda: clock[0])
+            writer = PersistenceTraceWriter(root, "workspace-producer", clock=lambda: clock[0], config_generation=0)
+            writer.probe_storage()
             detail = "x" * (384 * 1024)
             for sequence in range(4):
                 self.assertIsNotNone(writer.append({"event_id": sequence, "detail": detail}))
@@ -875,6 +876,12 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertEqual(state["admission_blocked_reason"], "trace_workspace_full",
                              "byte pressure left the producer admission gate open")
             self.assertLessEqual(state["pending_bytes"], 2 * 1024**2)
+            decision = StoragePressureController().evaluate([writer.storage_pressure_sample()], now_monotonic=100.0)
+            self.assertEqual(decision.state, "PERSISTENCE_BLOCKED",
+                             "trace admission failure was hidden below the byte capacity limit")
+            self.assertEqual(decision.current_storage_availability, "available")
+            self.assertLess(decision.max_occupancy_ratio, .8)
+            self.assertIn("admission_blocked", decision.reasons)
             original_replace = Path.replace
 
             def failed_publish(source, target):
@@ -897,6 +904,8 @@ class PersistenceTraceTests(unittest.TestCase):
                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
             self.assertEqual(stored, [{"event_id": sequence, "detail": detail} for sequence in range(5)])
             self.assertEqual(writer.snapshot()["pending_bytes"], 0)
+            self.assertEqual(StoragePressureController().evaluate(
+                [writer.storage_pressure_sample()], now_monotonic=101.0).state, "NORMAL")
 
     def test_partial_trace_write_is_preserved_without_publication(self):
         with tempfile.TemporaryDirectory() as folder:

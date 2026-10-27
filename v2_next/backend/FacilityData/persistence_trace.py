@@ -484,6 +484,7 @@ class PersistenceTraceWriter:
             stage_due_monotonic=min((due for _, due in stages), default=None),
             clock_domain=state["clock_domain"], writer_alive=writer_alive,
             manual_recovery_required=state["manual_recovery_required"],
+            admission_blocked_reason=state["admission_blocked_reason"],
         )
 
     def snapshot(self) -> dict[str, Any]:
