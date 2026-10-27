@@ -79,6 +79,7 @@ class SpotImageCaptureWriter:
     _manifest_tracked_size: int = field(default=0, init=False, repr=False)
     _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
     _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
+    _fact_append_uncertain: bool = field(default=False, init=False, repr=False)
     _retention_scan: Optional[Generator[None, None, None]] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -140,6 +141,8 @@ class SpotImageCaptureWriter:
         observation_snapshot: Optional[Mapping[str, Any]],
         capture_id: Optional[str] = None,
     ) -> dict[str, str]:
+        if self._fact_append_uncertain:
+            raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
         sha256 = hashlib.sha256(image_bytes).hexdigest()
         captured_dt = datetime.fromtimestamp(captured_at, timezone.utc)
         captured_iso = captured_dt.isoformat().replace("+00:00", "Z")
@@ -261,9 +264,19 @@ class SpotImageCaptureWriter:
             encoding = "utf-8-sig" if write_header and previous_size == 0 else "utf-8"
             payload = buffer.getvalue().encode(encoding)
             expected_size = previous_size + len(payload)
-            with self.fact_path.open("ab") as handle:
-                if handle.write(payload) != len(payload):
-                    raise OSError("SPOT image fact append was truncated")
+            append_started = False
+            try:
+                with self.fact_path.open("ab") as handle:
+                    append_started = True
+                    if handle.write(payload) != len(payload):
+                        raise OSError("SPOT image fact append was truncated")
+            except Exception:
+                if append_started:
+                    # A partial row or failed close cannot be repaired by schema
+                    # rollover or by appending the next capture after the tail.
+                    self._fact_append_uncertain = True
+                    self._manifest_state_ready = False
+                raise
             self._extend_manifest_digest(
                 previous_size,
                 expected_size=expected_size,

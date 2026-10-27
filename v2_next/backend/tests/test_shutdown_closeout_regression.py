@@ -1265,6 +1265,47 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertEqual(writer.write_capture(**args), fact)
             self.assertEqual(writer.fact_row_count, 1)
 
+    def test_partial_image_fact_append_blocks_further_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8partial-fact\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            opened = Path.open
+
+            class PartialAppend:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return self.handle.__exit__(*exc)
+
+                def write(self, payload):
+                    self.handle.write(payload[:37])
+                    self.handle.flush()
+                    raise OSError("injected partial fact append")
+
+            def partial_open(path, mode="r", *open_args, **kwargs):
+                handle = opened(path, mode, *open_args, **kwargs)
+                return PartialAppend(handle) if path == writer.fact_path and mode == "ab" else handle
+
+            with patch.object(Path, "open", new=partial_open):
+                with self.assertRaisesRegex(OSError, "partial fact append"):
+                    writer.write_capture(**args)
+            self.assertEqual(writer.fact_path.stat().st_size, 37)
+            originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            for timestamp in (args["captured_at"], args["captured_at"] + 1):
+                with self.assertRaisesRegex(RuntimeError, "fact append is uncertain"):
+                    writer.write_capture(**dict(args, captured_at=timestamp))
+            self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+            self.assertEqual(writer.written_count, 0)
+            with self.assertRaisesRegex(RuntimeError, "manifest state is unavailable"):
+                _ = writer.fact_sha256
+
     def test_image_digest_read_failure_does_not_duplicate_durable_capture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
