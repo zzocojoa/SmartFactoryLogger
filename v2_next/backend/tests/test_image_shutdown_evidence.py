@@ -539,6 +539,8 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
 
         with patch.object(Path, 'write_bytes', new=write), \
              patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]):
+            empty = spot.get_spot_image_capture_shutdown_status()
+            self.assertIsNone(empty.get('oldest_pending_monotonic'))
             self.assertTrue(self.enqueue().accepted)
             for number, delay in enumerate((1., 2., 4., 8., 16., 30., 30.), 1):
                 pending = await_retry(number)
@@ -548,6 +550,9 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 self.assertEqual(pending['queue_size'], 0)
                 self.assertGreater(pending['pending_payload_bytes'], 0)
                 self.assertTrue(pending['accounting_consistent'])
+                self.assertEqual(pending.get('oldest_pending_monotonic'), 1000.0)
+                self.assertEqual(pending.get('stage_due_monotonic'), 1000.0)
+                self.assertFalse(pending.get('pending_clock_unknown', True))
                 due = pending['next_retry_at_monotonic']
                 clock[0] = due - .25
                 time.sleep(.03)
@@ -561,6 +566,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.assertEqual(complete['recovered_count'], 1)
             self.assertEqual(complete['retry_error_count'], 7)
             self.assertEqual(complete['pending_payload_bytes'], 0)
+            self.assertIsNone(complete.get('oldest_pending_monotonic'))
             with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
                 self.assertEqual(len(list(csv.DictReader(handle))), 1)
 
@@ -568,6 +574,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.assertTrue(self.enqueue().accepted)
             pending = await_retry(8)
             self.assertEqual(pending['next_retry_at_monotonic'], clock[0] + 1.)
+            self.assertEqual(pending.get('oldest_pending_monotonic'), clock[0])
             before = spot.begin_spot_image_capture_shutdown()
             clock[0] += 100
             self.assertFalse(spot.stop_spot_image_capture_for_shutdown(3))
@@ -582,6 +589,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.assertEqual(final['unfinished_tasks'], 1)
             self.assertEqual(final['pending_payload_bytes'], before['pending_payload_bytes'])
             self.assertEqual(final['failure_count'], 0)
+            self.assertEqual(final.get('oldest_pending_monotonic'), before['oldest_pending_monotonic'])
 
     def test_partial_fact_failure_never_retries_after_config_change(self):
         opened = Path.open

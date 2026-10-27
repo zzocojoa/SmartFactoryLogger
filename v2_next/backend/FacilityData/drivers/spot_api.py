@@ -308,6 +308,12 @@ class _SpotImageCaptureEvent:
     snapshot_text_storage_bytes: int = 0
 
 
+@dataclass(frozen=True)
+class _ImageCapturePendingStage:
+    admitted_monotonic: float
+    clock_domain: str
+
+
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
 _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT = 128 * 1024**2
 _SPOT_IMAGE_CAPTURE_QUEUE: queue.Queue[_SpotImageCaptureEvent] = queue.Queue(maxsize=_SPOT_IMAGE_CAPTURE_QUEUE_MAX)
@@ -342,6 +348,7 @@ _spot_image_capture_dropped_pending_limit_count = 0
 _spot_image_capture_dropped_payload_limit_count = 0
 _spot_image_capture_dropped_invalid_count = 0
 _spot_image_capture_pending_payload_bytes = 0
+_spot_image_capture_pending_stages: Dict[int, _ImageCapturePendingStage] = {}
 _spot_image_capture_failure_count = 0
 _spot_image_capture_recovery: Optional[_SpotImageCaptureEvent] = None
 _spot_image_capture_retry_at: Optional[float] = None
@@ -949,18 +956,22 @@ def _spot_image_capture_worker() -> None:
                     and _spot_image_shutdown_baseline is None
                 )
                 reserved_bytes = event.reserved_payload_bytes
+                event_token = id(event)
                 if retain_for_retry:
                     with _spot_image_capture_lock:
                         _spot_image_capture_recovery = event
-                # Release the payload and any exception traceback owning it
-                # before returning the reservation to another producer.
-                del event
+                # Drop temporary decoded copies before returning reservations.
                 capture_error = None
                 decoded_snapshot = None
                 # Outcome accounting and Queue.task_done() are one atomic state
                 # transition. Shutdown can therefore never observe a recorded
                 # failure while the same capture still appears unfinished.
                 with _spot_image_capture_lock:
+                    if not retain_for_retry:
+                        _spot_image_capture_pending_stages.pop(event_token, None)
+                    # Remove the stage before this object's id can be reused
+                    # by a producer, and release payload before its budget.
+                    del event
                     if retain_for_retry:
                         _spot_image_capture_retry_error_count += 1
                         _spot_image_capture_retry_at = time.monotonic() + _spot_image_capture_retry_delay
@@ -1062,6 +1073,10 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
     initialization_failed = _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
     owner_release_failed = _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set()
     probe_manual_recovery = _image_probe_manual_recovery_required()
+    stages = tuple(_spot_image_capture_pending_stages.values())
+    timing_known = (len(stages) == unfinished
+                    and all(stage.clock_domain == clock_domain_id() for stage in stages))
+    oldest = min((stage.admitted_monotonic for stage in stages), default=None) if timing_known else None
     writes_drained = (bool(baseline) and blocked and stopping and not alive and queued == 0
                       and unfinished == 0 and accounting and not initialization_pending
                       and not owner_release_failed and not probe_manual_recovery)
@@ -1095,6 +1110,10 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "dropped_payload_limit_count": _spot_image_capture_dropped_payload_limit_count,
         "dropped_invalid_count": _spot_image_capture_dropped_invalid_count,
         "pending_payload_bytes": _spot_image_capture_pending_payload_bytes,
+        "oldest_pending_monotonic": oldest,
+        "stage_due_monotonic": oldest,
+        "clock_domain": clock_domain_id() if timing_known else None,
+        "pending_clock_unknown": not timing_known,
         "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
@@ -1194,6 +1213,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_dropped_payload_limit_count = 0
         _spot_image_capture_dropped_invalid_count = 0
         _spot_image_capture_pending_payload_bytes = 0
+        _spot_image_capture_pending_stages.clear()
         _spot_image_capture_failure_count = 0
         _spot_image_capture_retry_at = None
         _spot_image_capture_retry_delay = 1.0
@@ -1629,9 +1649,12 @@ def _enqueue_spot_image_capture_locked(
                 _spot_image_capture_dropped_queue_full_count += 1
                 return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
             transferred_bytes = payload_size
+            admitted_monotonic = time.monotonic()
+            _spot_image_capture_pending_stages[id(event)] = _ImageCapturePendingStage(
+                admitted_monotonic, clock_domain_id())
             _spot_image_capture_enqueued_count += 1
             _spot_image_capture_last_enqueue_at = time.time()
-            _spot_image_capture_last_enqueue_monotonic = time.monotonic()
+            _spot_image_capture_last_enqueue_monotonic = admitted_monotonic
     except PayloadBudgetExceeded:
         with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
