@@ -4,6 +4,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Verify and reuse an existing JPEG when retrying its fact append, without
+  rewriting its bytes or modification time. Compare bounded file windows and
+  identity before/after reading, reserve that workspace in the capture owner's
+  payload budget, and preserve conflicting files. A partial fact write, short
+  write or uncertain close blocks that writer's subsequent captures and final
+  success; full same-event recovery and storage-pressure control remain pending.
+
 - Bind CSV shutdown state and finalized sidecar bytes to producer evidence.
   Independently check the sidecar schema, final persisted row identity and
   SHA256, with bounded reads and unchanged legacy unknown results. Report

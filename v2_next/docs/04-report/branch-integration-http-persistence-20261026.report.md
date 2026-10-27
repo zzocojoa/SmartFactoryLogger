@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1~4단계 일부 진행. CSV 접수/설정 고정·부분 쓰기/불확실 경로 차단·데이터/증거 분리 확정·거절/제외 ID 보존을 구현했다. 독립 검증기는 생산/접수/출력 증거와 종료 합계, 실제 행 bytes/내용 hash/위치 중복, 접수 당시 경로·열/스키마·설정 적용 구간, 현재 실행의 파일 소유 범위·첫/마지막 행·범위 공백/겹침·재개방·최종 파일 크기를 대조한다. 종료 상태·실제 sidecar hash/스키마/마지막 행 대조와 현재 생산자 CSV 범위 판정·명시적 QA CLI를 추가했다. 출시 전체 QA 연결·fact/JPEG 복구·압력/화면 계약은 계속 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 현재 코드 `253cce7d` 전체 backend 1,082시험 중1,081통과·기존 private F01 미제공1skip, 436.547초·exit0. backend/CSV QA 스크립트 Ruff·기본 mypy12파일·독립 검증기 mypy1파일도 통과. 새 CSV CLI/운영 계약/QA 스키마89시험 및 실제 CLI 경계 검사 포함. 전체 health는 `f8ad11d8` 시점이며 현재 전체 실행으로 확대하지 않는다. 7단계/17명세 전체 구현, 최종 전체 health·새 설치본 빌드/검증·master 통합은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~4단계 일부 진행. CSV 접수 ID·설정/경로 고정, 데이터/증거 분리 확정, 실제 행·파일 범위·종료·sidecar 대조와 QA CLI를 구현했다. 이미지 고정 ID 충돌 거부, 기존 JPEG 검산/재사용, 검산 공간 예약, 부분 fact 쓰기 뒤 해당 writer 차단을 추가했다. 전체 fact/JPEG 복구·독립 대조, 압력 제어·API/화면·관측 재사용 계약과 전체 17명세 검증은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 현재 코드 `dbc79f20` 전체 backend 1,087시험 중1,086통과·private F01 미제공1skip, 432.346초·exit0. backend Ruff·기본 mypy12파일 exit0. 전체 health는 이미지 후속 변경 전 `4d671d6c`에서 exit0이며 최신 전체 실행으로 확대하지 않는다. 전체 구현 뒤 최종 health·새 설치본 빌드/검증·master 통합은 미완료 |
 
 ## 보존과 통합
 
@@ -876,3 +876,26 @@ CSV의 기존 EMA 계산을 canonical bytes 생성 전에 끝내 같은 예약 �
 - 명령·전체 stdout/stderr·종료 코드·로그 hash29실행과 최종 소스7파일/원문4문서 검산: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-metadata-closeout/verification.json`.
 - 별도 security-review 도구는 사용할 수 없어 제한된 메타데이터 읽기, 허용 루트·실제 파일 식별, 읽기 전용 검증, CLI 모드 분리, legacy 미평가와 실패 보존을 직접 검토했다. 새 서버 연결·설치·백업·설정 변경은 없다.
 - 직전 목표 턴은 현재 작업본209회귀와 브랜치 감사로 다음 동작을 확정한 PROGRESS다. 이번에는 CSV 마감/증거 검증과 실제 QA CLI를 구현·시험·커밋했다. 전체 목표를 줄이지 않으며, 남은 fact/JPEG 복구·압력/API/화면·관측 재사용 계약,7단계/17명세 전체, 출시 통합 QA·최종 health·새 설치본 검증·master 통합은 계속 진행 대상이다.
+
+
+## 2026-10-27 이미지 파일 재사용·불확실 쓰기 보존과 완료 상태 재점검
+
+- `4d671d6c`: 동일 capture ID에 다른 고정 내용이 들어오면 파일 쓰기 전에 거부한다.
+- `50e0d6e7`: JPEG 저장 후 fact 열기가 실패한 경우, 재호출 시 기존 JPEG의 파일 ID·크기·수정 시각과 실제 bytes를 대조하고 원본을 재작성하지 않는다. 최대4KiB 읽기 창을 사용한다.
+- `bccd9d91`: 읽기 창의 메모리를 이미지 owner의 기존 payload 예산에 먼저 예약하고 사용 후 반환한다. 경계 바로 아래에서는 파일 읽기 전에 거절하고 정확한 예산에서는 검산한다.
+- `68cf19da`: fact 부분 쓰기·짧은 쓰기·닫기 오류를 해당 writer의 불확실 상태로 유지한다. 이후 같은/새 capture의 추가 쓰기와 정상 최종 확정을 막고 원래 파일을 보존한다.
+- `8db88999`, `dbc79f20`: 1MiB 전후·1.5MB의 유효 JPEG, 같은 크기의 변조/잘린 파일, fact 유무, 부분/짧은 쓰기·닫기 실패 회귀를 추가했다. 이 후속 경계 검사는 새 행동 RED로 세지 않는다.
+
+아직 worker는 실패 event를 계속 보유해 자동 복구하지 않는다. 불확실 상태는 같은 writer의 메모리 상태이며 writer 재생성·설정 전환·재시작의 전체 경계를 입증하지 않았다. 따라서 이 변경을 RR-T03 전체 통과, 자동 복구 완료 또는 전체 이미지 무결성 PASS로 기록하지 않는다.
+
+검증 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-file-recovery-r2/verification.json`.
+
+- 행동 실패 재현과 중간 오류를 포함한13실행의 전체 로그·종료 코드·SHA256, 현재 소스4개와 원문4문서 해시를 대조했다. 첫 JPEG 재사용 검사는 Windows의 path/handle ctime 차이 때문에 실패했고, 실제 파일 ID·크기·mtime 및 내용으로 검산하도록 수정했다. 예산 시험의 첫 실패는 live 상태 필드 오기였고, 이를 수정한 뒤 실제 예산 초과 실패를 재현했다. 실패 기록은 그대로 보존한다.
+- 최신 코드 `dbc79f2003161e04ec6d68f0ba5df2146a607b58`: 전체 backend **1,087시험 중1,086통과·private F01자료 미제공1skip**,432.346초·exit0. backend Ruff·기본 mypy12파일 exit0.
+- 전체 `npm.cmd run health`는 앞선 `4d671d6c`에서 exit0이다. 의존성15·Electron103·화면 Node9/Vitest442·backend1,083(1skip)·타입/린트·QA 자체 검사를 포함한다. 근거는 `C:/Users/user/Desktop/SmartFactory/BRANCH_RECHECK_20261027_63a52959/health-result.json`이다. 최신 이미지 변경 후에는 영향을 받는 backend 전체와 정적 검사를 실행했으며 전체 health/새 설치본 검증은 별도로 남는다.
+- 증거 수집기 첫 시도의 Git blob/작업 파일 원시 SHA 비교는 LF/CRLF 차이로 실패했다. R2에는 두 SHA를 모두 남기고 줄 끝 변환만으로 동일한지 확인했다. 소스나 고정 원문 증거를 이 검사에 맞춰 변경하지 않았다.
+- 전용 security-review 도구는 없었다. 파일 식별·내용 대조, 제한된 raw 읽기, 할당 전 예산 예약, 계수 lock 밖 I/O, 원본 보존을 직접 검토했다. 서버·설치본·설정·백업은 변경하지 않았다.
+
+`.pdca-status.json`에 누락된 HTTP 개선을 DO/부분 구현으로 등록했다. 기존 feature 기록은 보존했다. 과거 네 feature의 check/act 표시는 후속 근거와의 연결 정리가 남아 있으며, 기능 전체 미구현이나 현장 시험 전체 재실행을 뜻하지 않는다: `nsis-startup-render-performance`, `spot-camera-rest-api-conformance`, `spot-request-churn-remediation`, `spot-tcp-source-port-quarantine-v2`.
+
+원래 일곱 목표의 범위는 유지한다. 1~4는 완료,5는 작업 브랜치/upstream 완료·master 미완료,6은 부분 구현,7은 부분 검증이다. 남은 사항은 fact/JPEG 전체 복구와 독립 대조, 저장 압력/목적지 probe/재시도, API·화면·관측 참조 계약,7단계/17시나리오 전체,최종 통합 health·새 설치본 검증·master 통합이다. 운영 등록 build `cd46692a`와 승인된 예외·제외 범위는 그대로다.

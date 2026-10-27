@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-26T06:31:50.439532+00:00",
+  "lastUpdated": "2026-10-27T09:43:22.651280+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -30,9 +30,10 @@
     "spot-request-churn-remediation",
     "spot-tcp-source-port-quarantine-v2",
     "spot-realtime-image-performance",
-    "spot-comm-temperature-ui-s1"
+    "spot-comm-temperature-ui-s1",
+    "http-persistence-integrity"
   ],
-  "primaryFeature": "spot-image-capture-settings-ui",
+  "primaryFeature": "http-persistence-integrity",
   "statusReaderPolicy": {
     "rootCurrentPhase": "not_defined",
     "canonicalPrimaryPhasePath": "features[primaryFeature].phase",
@@ -48261,6 +48262,64 @@
       },
       "updatedAt": "2026-10-26T06:31:50.439532+00:00",
       "completedAt": "2026-10-26T06:29:31.038Z"
+    },
+    "http-persistence-integrity": {
+      "phase": "do",
+      "matchRate": null,
+      "iterationCount": 0,
+      "documents": {
+        "plan": "docs/01-plan/features/http-persistence-integrity.plan.md",
+        "report": "docs/04-report/branch-integration-http-persistence-20261026.report.md"
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "evidence": "docs/01-plan/features/http-persistence-integrity.plan.md (r4)"
+        },
+        {
+          "phase": "do",
+          "status": "active"
+        },
+        {
+          "phase": "check",
+          "status": "pending"
+        },
+        {
+          "phase": "report",
+          "status": "pending"
+        }
+      ],
+      "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
+      "overallGoalComplete": false,
+      "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
+      "currentDevelopmentCommit": "dbc79f20",
+      "lastBackendVerification": {
+        "commit": "dbc79f2003161e04ec6d68f0ba5df2146a607b58",
+        "total": 1087,
+        "passed": 1086,
+        "skipped": 1,
+        "exitCode": 0,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-file-recovery-r2/verification.json"
+      },
+      "completedScope": [
+        "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
+        "Bounded fact spool and capture payload accounting",
+        "Verified JPEG reuse with owner read reservation; same-ID content conflicts and uncertain fact append preserved"
+      ],
+      "remainingScope": [
+        "Complete fact/JPEG same-event recovery and independent data reconciliation",
+        "Storage-pressure controller, destination probes and bounded retries",
+        "API dispatch suppression and frontend timer/observation-reference contracts",
+        "All r4 RV/RR-T/FR-T scenarios and final installer verification",
+        "Work-branch/master integration and final whole-state verification"
+      ],
+      "lastWholeHealth": {
+        "commit": "4d671d6c",
+        "exitCode": 0,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_RECHECK_20261027_63a52959/health-result.json"
+      },
+      "updatedAt": "2026-10-27T09:43:22.651280+00:00"
     }
   },
   "pipeline": {
@@ -50350,5 +50409,5 @@
       "scope": "approved_ui_s1_logic_review_package_server_application_collection_preservation_and_next_rollback"
     }
   ],
-  "updatedAt": "2026-10-26T06:31:50.439532+00:00"
+  "updatedAt": "2026-10-27T09:43:22.651280+00:00"
 }
