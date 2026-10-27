@@ -423,7 +423,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         ),
         next_fetch_scheduled_at: null,
       }));
-      if (previousConfig?.image_url === nextConfig.image_url && pendingPressure) {
+      if (previousConfig?.image_url === nextConfig.image_url && pendingPressure &&
+        (previousConfig.image_refresh_interval !== nextConfig.image_refresh_interval ||
+          previousConfig.refresh_interval !== nextConfig.refresh_interval)) {
         scheduleStoragePressureRecheck(pendingPressure);
       }
       if (

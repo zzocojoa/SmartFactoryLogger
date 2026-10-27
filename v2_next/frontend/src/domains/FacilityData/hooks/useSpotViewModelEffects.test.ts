@@ -351,6 +351,28 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     } finally { unmount(); }
   });
 
+  it('keeps the pressure deadline when only presentation configuration changes', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementation(async () => new Response('', { status: 503, headers: {
+      'X-Spot-Image-Upstream-Suppressed': '1',
+      'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+      'Retry-After': '2',
+    } }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      service.config.mockResolvedValue({ ...SPOT_CONFIG, widget_width: 640 });
+      await act(async () => { await result.current.refreshConfig(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(service.image).toHaveBeenCalledTimes(2);
+    } finally { unmount(); }
+  });
+
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);
