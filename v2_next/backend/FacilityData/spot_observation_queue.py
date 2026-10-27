@@ -24,7 +24,7 @@ from backend.FacilityData.persistence_payload import (
     encode_json_payload as _encode_json_payload,
 )
 from backend.FacilityData.spot_observation_fact import (
-    FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
+    FACT_SPOOL_PENDING_BYTE_LIMIT, FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
 )
 from backend.FacilityData.freshness import clock_domain_id
 
@@ -93,6 +93,10 @@ class SpotObservationQueue:
             "rejected_count": 0, "write_failure_count": 0, "spool_failure_count": 0,
             "spool_last_error_code": None,
             "spool_pending_count": 0, "inflight": False, "initialization_state": "pending",
+            "spool_pending_bytes": None, "spool_retained_bytes": None,
+            "spool_pending_byte_limit": FACT_SPOOL_PENDING_BYTE_LIMIT,
+            "spool_usage_status": "unknown", "spool_usage_error_type": None,
+            "spool_usage_failure_count": 0, "spool_usage_checked_monotonic": None,
             "initialization_duration_ms": None, "last_write_duration_ms": None,
             "last_error_code": None, "last_success_at": None, "accepting": True,
             "last_queue_residence_ms": None, "existing_fact_hash_ms": None, "existing_fact_index_ms": None,
@@ -284,6 +288,18 @@ class SpotObservationQueue:
 
     def _refresh_state(self, writer: SpotObservationFactWriter) -> None:
         # All stat/read/manifest work is performed by the single owner thread.
+        try:
+            pending_bytes, retained_bytes = writer.spool_storage_usage()
+        except Exception as exc:
+            with self._lock:
+                self._state["spool_usage_status"] = "unknown"
+                self._state["spool_usage_error_type"] = type(exc).__name__
+                self._state["spool_usage_failure_count"] += 1
+            raise
+        with self._lock:
+            self._state.update(spool_pending_bytes=pending_bytes, spool_retained_bytes=retained_bytes,
+                               spool_usage_status="measured", spool_usage_error_type=None,
+                               spool_usage_checked_monotonic=time.monotonic())
         pending = writer.spool_pending_count()
         summary = writer.manifest_summary()
         stat = writer.output_path.stat()

@@ -528,10 +528,7 @@ class SpotObservationFactWriter:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_row_too_large"
                     return
-                pending_bytes = sum(
-                    max(0, path.stat().st_size - self._spool_read_offsets.get(path, 0))
-                    for path in self._spool_pending_paths() if path.exists()
-                )
+                pending_bytes, _ = self.spool_storage_usage()
                 if pending_bytes + payload_size > FACT_SPOOL_PENDING_BYTE_LIMIT:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_byte_limit"
@@ -595,6 +592,19 @@ class SpotObservationFactWriter:
 
     def _spool_pending_paths(self) -> list[Path]:
         return _spool_pending_paths(self._effective_spool_path())
+
+    def spool_storage_usage(self) -> tuple[int, int]:
+        """Owner-only I/O: remaining recovery bytes and all retained bytes."""
+        with self._spool_state_lock:
+            pending = retained = 0
+            for path in self._spool_pending_paths():
+                try:
+                    size = path.stat().st_size
+                except FileNotFoundError:
+                    continue  # The optional legacy spool need not exist.
+                retained += size
+                pending += max(0, size - self._spool_read_offsets.get(path, 0))
+            return pending, retained
 
     def spool_pending_count(self) -> int:
         with self._spool_state_lock:

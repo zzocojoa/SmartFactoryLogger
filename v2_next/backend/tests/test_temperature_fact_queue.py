@@ -750,6 +750,61 @@ class FactQueueTests(unittest.TestCase):
                     owner.close(2)
             self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1"])
 
+    def test_spooled_bytes_remain_visible_until_owner_recovery(self):
+        clock, blocked = [100.0], [True]
+        original_open = Path.open
+
+        def wait_state(owner, predicate):
+            deadline = time.perf_counter() + 3
+            while time.perf_counter() < deadline:
+                state = owner.snapshot()
+                if predicate(state):
+                    return state
+                threading.Event().wait(.01)
+            self.fail(f'Owner state did not reach expected boundary: {state}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.csv'
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def failing_append(target, mode='r', *args, **kwargs):
+                if target == path and mode == 'a' and blocked[0]:
+                    raise PermissionError('fact unavailable while spool remains writable')
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, 'open', failing_append), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    wait_state(owner, lambda state: state['initialization_state'] == 'ready')
+                    self.assertTrue(owner.enqueue(observation()))
+                    state = wait_state(owner, lambda state: state['completed_count'] == 1)
+                    spool_files = list(Path(tmp).rglob('segment-*.jsonl'))
+                    expected = sum(item.stat().st_size for item in spool_files)
+                    self.assertGreater(expected, 0)
+                    self.assertEqual(state.get('spool_pending_bytes'), expected,
+                                     'spooled bytes disappeared after the memory queue drained')
+                    self.assertEqual(state['spool_retained_bytes'], expected)
+                    self.assertEqual(state['spool_pending_byte_limit'], 64 * 1024**2)
+                    self.assertEqual(state['spool_usage_status'], 'measured')
+                    self.assertEqual(state['pending_write_count'], 0)
+                    with patch.object(Path, 'open', side_effect=AssertionError('snapshot opened file')), \
+                            patch.object(Path, 'stat', side_effect=AssertionError('snapshot stated file')):
+                        self.assertEqual(owner.snapshot()['spool_pending_bytes'], expected)
+                    blocked[0] = False
+                    clock[0] = 101.0
+                    recovered = wait_state(owner, lambda state: state['spool_recovered_count'] == 1)
+                    self.assertEqual(recovered['spool_pending_bytes'], 0)
+                    self.assertEqual(recovered['spool_retained_bytes'], 0)
+                    self.assertEqual(recovered['spool_usage_status'], 'measured')
+                    self.assertEqual(recovered['write_failure_count'], 1)
+                finally:
+                    blocked[0] = False
+                    closed = owner.close(3)
+            self.assertFalse(closed, 'recovery erased the original write failure')
+            self.assertEqual([row['spot_poll_seq'] for row in self.read_rows(path)], ['1'])
+
     def test_write_failure_invalidates_prior_fact_access(self):
         original_open = Path.open
         clock, locked, probes = [100.0], [False], []
