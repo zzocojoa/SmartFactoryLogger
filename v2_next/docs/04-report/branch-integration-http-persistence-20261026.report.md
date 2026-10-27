@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1~4단계 일부 진행. CSV 접수/설정 고정·부분 쓰기/불확실 경로 차단·데이터/증거 분리 확정·거절/제외 ID 보존을 구현했다. 독립 검증기는 생산/접수/출력 증거와 종료 합계, 실제 행 bytes/내용 hash/위치 중복, 접수 당시 경로·열/스키마·설정 적용 구간, 현재 실행의 파일 소유 범위·첫/마지막 행·범위 공백/겹침·재개방·최종 파일 크기를 대조한다. 메타데이터/최종 종료 계약·QA 연결·fact/JPEG 복구·압력/화면 계약은 계속 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 현재 `e8101d4f` 관련 CSV/runtime/trace/이미지·앱 종료206시험 통과. backend Ruff·기본 mypy12파일·독립 검증기 mypy1파일 통과. 이번 변경은 repository·독립 검증기·시험 파일 총 3개다. 최근 전체 backend는 `f278874d`의1,059시험 중1,058통과·1skip, 전체 health는 `f8ad11d8` 시점이며 현재 전체 실행으로 확대하지 않는다. 전체 구현 완료 후 새 설치본 빌드·최종 검증·master 통합은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1~4단계 일부 진행. CSV 접수/설정 고정·부분 쓰기/불확실 경로 차단·데이터/증거 분리 확정·거절/제외 ID 보존을 구현했다. 독립 검증기는 생산/접수/출력 증거와 종료 합계, 실제 행 bytes/내용 hash/위치 중복, 접수 당시 경로·열/스키마·설정 적용 구간, 현재 실행의 파일 소유 범위·첫/마지막 행·범위 공백/겹침·재개방·최종 파일 크기를 대조한다. 종료 상태·실제 sidecar hash/스키마/마지막 행 대조와 현재 생산자 CSV 범위 판정·명시적 QA CLI를 추가했다. 출시 전체 QA 연결·fact/JPEG 복구·압력/화면 계약은 계속 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 현재 코드 `253cce7d` 전체 backend 1,082시험 중1,081통과·기존 private F01 미제공1skip, 436.547초·exit0. backend/CSV QA 스크립트 Ruff·기본 mypy12파일·독립 검증기 mypy1파일도 통과. 새 CSV CLI/운영 계약/QA 스키마89시험 및 실제 CLI 경계 검사 포함. 전체 health는 `f8ad11d8` 시점이며 현재 전체 실행으로 확대하지 않는다. 7단계/17명세 전체 구현, 최종 전체 health·새 설치본 빌드/검증·master 통합은 미완료 |
 
 ## 보존과 통합
 
@@ -851,3 +851,28 @@ CSV의 기존 EMA 계산을 canonical bytes 생성 전에 끝내 같은 예약 �
 - clean `e8101d4f` 통합 회귀 **206시험 통과**,145.541초·exit0. backend Ruff, 기본 mypy12파일, 독립 검증기 mypy1파일 모두 exit0. 기존 종료 오류·부분 쓰기·큰 CSV 필드·이미지 종료 검사 포함.
 - 별도 security-review 도구는 없어 활성 소유 상한, SQL 매개변수화, 임시 디스크 사용, 허용 경로·파일 ID 확인과 원본 읽기 전용 동작을 직접 검토했다. 새 운영 연결·설치·백업은 없다.
 - 전체 backend/health·새 설치본 검증은 이번 부분 검사로 대체하지 않는다. 메타데이터/최종 상태, 남은 fact/JPEG 복구·압력/API/화면 계약, 7단계/17명세 전체 및 master 통합은 계속 미완료다.
+
+## 2026-10-27 실제 CSV 종료·메타데이터 대조와 QA CLI
+
+- `1a2762e7`: 추적 종료 요약에 실제 데이터 마감 성공, 과거 쓰기 실패, pending/미해결 파일 소유/닫히지 않은 핸들 수를 연결했다. 메타데이터 교체 실패로 런타임 종료가 실패하면 독립 판정도 불완전이다. legacy 종료 상태는 미평가다.
+- `0c4f87b3`, `a1d15f04`: 허용 루트 안의 실제 sidecar를 최대1MiB로 읽고 읽기 중 변경·누락·잘못된 JSON/중복 키를 검사한다. 접수 스키마/열 hash, 최종 CSV 행의 생산자·sample_seq, 파일명·finalized 상태도 대조한다.
+- `581969b7`: 런타임이 sidecar 교체 후 실제 파일 전체 bytes/SHA256을 `CSV_METADATA_COMMIT_V1`로 기록한다. 독립 검증기는 물리 CSV별 마지막 확정 기록과 실제 sidecar를 대조한다. 파일 재개방과 segment 인자 역순을 허용하지만 누락·잘못된 확정 기록·종료 후 변조를 허용하지 않는다. 읽기 성공과 hash 일치 여부는 별도 상태다.
+- `7d15a7e4`: `csv_integrity_status`는 현재 생산자가 소유한 CSV 범위만 판정한다. 대조가 정상이어도 `rejected_count > 0`이면 `csv_admissions_rejected`/INCOMPLETE다. 실제 CSV 읽기나 종료 증거가 없으면 NOT_EVALUATED이며, 모든 CSV 조건을 충족해야 VERIFIED다. 전체 온도 fact/JPEG 무결성을 의미하는 `data_integrity_status`는 계속 NOT_EVALUATED다.
+- `253cce7d`: 기존 CSV QA 도구에 명시적인 persistence 모드를 추가했다. 실제 CLI로 없는 trace, 정상 CSV, 변조 파일, legacy 종료 상태, 잘못된 옵션 조합을 검사했다. 이 모드는 CSV VERIFIED만 exit0이고 미평가/불완전은 exit1, 잘못된 명령 구성은 exit2다. 기존 단일/다중 CSV와 fact 옵션은 별도 모드이며 섞으면 거부한다.
+
+종료된 한 생산자의 모든 trace segment와 원래 CSV/sidecar가 존재하는 허용 루트를 지정한다. 예시는 시험 경로이며 서버 실행 지시가 아니다.
+
+```powershell
+.\backend\.venv\Scripts\python.exe scripts\validate_csv_v2_shadow.py `
+  --persistence-data-root 'C:\QA\closed-run' `
+  --persistence-trace 'C:\QA\closed-run\trace\001.trace.jsonl' 'C:\QA\closed-run\trace\002.trace.jsonl'
+```
+
+여러 실제 데이터 루트가 있으면 `--persistence-data-root`를 반복한다. 다른 생산자를 섞거나 원래 절대경로가 없는 이관 사본을 임의로 성공 처리하지 않는다. 출력 JSON의 범위는 `CSV_CURRENT_PRODUCER_OWNED_RANGES`이며, 기존 파일의 과거 prefix·센서 물리 샘플·fact/JPEG·운영 성능 또는 출시 전체 승격으로 확대하지 않는다. 보존된 설치본/현장 원시 증거는 재작성하지 않았다.
+
+추가 SHA256 시험의 첫 실행은 시험 자료 구조를 잘못 지정한 KeyError였다. 이를 제품 수정 전에 고쳐 `csv-sidecar-bytes-red-r2`에서 실제 누락 검출 실패를 재현했다. 첫 GREEN에서 읽기 성공과 hash 불일치를 같은 상태로 표시해 기존 회귀1건이 실패했고, 두 상태를 구분한 R2에서 통과했다. 이 두 중간 실패는 정상 RED나 성공으로 재분류하지 않는다.
+
+- 최종 코드 `253cce7d`: 전체 backend **1,082시험 중1,081통과·기존 private F01 fixture 미제공1skip**,436.547초·exit0. backend와 CSV QA 스크립트 Ruff, 기본 mypy12파일, 독립 검증기 mypy1파일도 exit0이다. 최종 코드 검사 중에는 제품 소스를 수정하지 않았고 결과 문서만 정리했다.
+- 명령·전체 stdout/stderr·종료 코드·로그 hash29실행과 최종 소스7파일/원문4문서 검산: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-metadata-closeout/verification.json`.
+- 별도 security-review 도구는 사용할 수 없어 제한된 메타데이터 읽기, 허용 루트·실제 파일 식별, 읽기 전용 검증, CLI 모드 분리, legacy 미평가와 실패 보존을 직접 검토했다. 새 서버 연결·설치·백업·설정 변경은 없다.
+- 직전 목표 턴은 현재 작업본209회귀와 브랜치 감사로 다음 동작을 확정한 PROGRESS다. 이번에는 CSV 마감/증거 검증과 실제 QA CLI를 구현·시험·커밋했다. 전체 목표를 줄이지 않으며, 남은 fact/JPEG 복구·압력/API/화면·관측 재사용 계약,7단계/17명세 전체, 출시 통합 QA·최종 health·새 설치본 검증·master 통합은 계속 진행 대상이다.

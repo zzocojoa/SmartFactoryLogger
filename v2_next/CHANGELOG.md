@@ -4,11 +4,19 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Bind CSV shutdown state and finalized sidecar bytes to producer evidence.
+  Independently check the sidecar schema, final persisted row identity and
+  SHA256, with bounded reads and unchanged legacy unknown results. Report
+  current-producer CSV integrity separately from broader fact/image integrity;
+  accounted admission rejections cannot pass the CSV check. Add an explicit
+  persistence mode to the CSV QA CLI, which exits nonzero for incomplete or
+  unevaluated proof and never mixes legacy file options into that mode.
+
 - Persist bounded CSV file start/end ownership and link each row receipt to its
   original file extent. Reconcile first/last and interior byte coverage, normal
   reopening and final file size. Close failures cannot publish successful ends;
-  the terminal trace follows file closeout. Final metadata/state reconciliation
-  and QA integration remain incomplete; file coverage is not full integrity PASS.
+  the terminal trace follows file closeout. Coverage participates in the scoped
+  CSV integrity check; complete fact/image and release QA integration remain pending.
 
 - Reconcile CSV producer boundaries, trace segments, admission IDs, required
   output receipts and terminal counts. Under explicit allowed data roots,
@@ -17,12 +25,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
   CSV parser limit after closeout reads so admitted large fields can finish.
   Bind rows to the original admitted destination, CSV columns/schema and
   effective configuration intervals. Missing or ambiguous contracts remain
-  incomplete. Full terminal-metadata coverage and QA integration remain
-  incomplete; per-row verification does not emit a full data-integrity PASS.
+  incomplete. These per-row checks alone do not establish full data integrity.
 
 - Persist policy-excluded CSV ID ranges within the shared 4,096 outcome-range
   budget. Add bounded read-only evidence parsing and admission-total checks;
-  full terminal-metadata validation and QA integration remain incomplete.
+  broader fact/image and integrated release QA remain incomplete.
 
 - Persist each admitted CSV event's original output contract and per-sink
   processing failure identity/reason. Retain failure receipts until trace commit,
