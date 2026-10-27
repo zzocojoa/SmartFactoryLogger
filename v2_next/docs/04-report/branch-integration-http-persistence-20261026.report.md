@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV/이미지 저장·복구/검산, 압력 구성요소·이미지/진단 gate·API/화면 재확인, 이미지 owner 재시작과 fact 단계 시각·본 파일 접근 재확인 구현. required sink 전체 제공·monitor 서비스 연결·감속/온도 우선·전체 사실 대조/작업 공간·7단계/17명세는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend `7aa74ecb`의 1156중1155통과·F01미제공1skip·exit0. 변경4파일 Ruff·기본 mypy12파일 exit0. 마지막 전체 health는 `9f7e1dbf`이며 현재 소스 전체 health·빌드·새 설치본은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. 온도 fact 쓰기 실패 상태 무효화·제한된 spool 자동 복구와 CSV 데이터 단계 단조 시각을 추가. 전체 required sink·monitor 서비스 연결·감속/온도 우선·전체 대조/작업 공간·7단계/17명세는 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e07f8ef5`와 동일 소스의 backend 전체 1163중1162통과·F01미제공1skip·exit0. 변경5파일 Ruff·기본 mypy12파일 exit0. 마지막 전체 health는 `9f7e1dbf`; 현재 전체 health·빌드·새 설치본은 미완료 |
 
 ## 보존과 통합
 
@@ -1128,3 +1128,18 @@ CSV/관측 fact/trace/spool 가용성·예정 시각·세대별 pending, 생성�
 최종 소스 `7aa74ecb3767c1d377860b5e3126b3aa3f49769d`의 `npm.cmd run health:backend:test`: **1156중 1155통과·1skip**, 474.131초, exit0. skip은 기존 private F01자료 미제공이다. 변경4파일 Ruff·기본 mypy12파일·diff 검사 exit0. 전체 frontend/Electron/health와 새 설치본은 재검증하지 않았다. 25실행의 원 명령·종료 코드·50로그·backend 전체 로그·소스4개·고정 원문4개·109경로를 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-recovery-state/verification.json`에 결합했다. fixture capture ID 누락 실패도 제품 RED와 구분해 보존한다.
 
 남은 범위: 새 fact 쓰기 실패 시 현재 접근 상태 무효화/재예약, CSV/fact/spool/trace required sink 전체 가용성·세대/복구 시각·owner 교체 후 이력, monitor 서비스 연결, PRESSURED/NORMAL 정책, 상태/관측 참조·전체 fact/JPEG·작업 공간 상한·7단계/17시나리오, 최종 health/build/installer와 master 통합. 온도 fact 접근 성공을 전체 저장 가용성이나 과거 무결성 PASS로 확대하지 않는다. 직전 턴은 점검 보고의 NO_PROGRESS였고 이번에는 구현·검증·커밋을 진행했다. 서버·승인 운영본·설정·백업은 변경하지 않았고 전체 목표는 유지한다.
+
+## 2026-10-28 온도 임시 저장 복구와 CSV 데이터 단계 시각
+
+- `53403bd2`: 온도 fact 실제 쓰기 실패 뒤 이전 파일 접근 성공 상태를 unknown으로 바꾸고 재확인을 예약한다. 기존 실패 이력과 마지막 성공 시각은 보존하며 새 실패로 기존 예약을 뒤로 밀지 않는다.
+- `46163406`, `b1a96f31`: 같은 owner가 새 관측/UI 없이 기존 spool을 20행·1MiB 처리 단위로 재시도한다. 실패 시 30초 상한의 backoff를 적용하고 진전 시 초기 간격으로 돌아온다. 새 관측은 기존 재시도 간격을 우회하지 않고 spool에 보존한다. 종료가 시작되면 배경 복구는 중지하되 이미 접수된 큐의 기존 정상 종료 drain은 유지한다.
+- `47877514`: 큐에 새 관측이 남아 있어도 예정된 20행 복구를 먼저 수행하고, 손상 spool은 원본을 보존한 수동 복구 상태로 남기는 회귀를 확인했다. recovered 계수는 처리된 spool 항목 수이며 서로 다른 관측 수로 확대하지 않는다.
+- `e07f8ef5`: CSV 접수 envelope에 같은 프로세스의 단조 접수 시각·고정된 데이터 단계 예정 시각·clock domain을 보존한다. 실제 1초 flush 스케줄도 단조 시계로 계산하며 주기는 바꾸지 않는다. queue/inflight·새 입력·설정 변경으로 기존 기한이 미뤄지지 않는다. 설정 세대·출력별 메모리 상태는 configured directory 조합의 해시를 제공하며 실제 fallback 선택이나 파일 가용성 증거로 쓰지 않는다. 데이터가 기록되고 증거만 기다리는 행은 데이터 단계에서 제외한다.
+
+세 fact 행동과 CSV 접수 시각 행동의 RED→GREEN을 확인했다. 나머지 두 spool 경계와 시계 역행·증거 대기 분리는 구현 후 회귀 검사다. 실제 owner·임시 파일을 사용하고 접근 오류/지연과 시계 경계만 주입했다. 후속 회귀를 새로운 실패 재현으로 집계하지 않았다.
+
+최종 소스 `e07f8ef5a1a9153926ae3dd07563ff872e323f21`와 동일한 5개 파일 SHA256에서 `npm.cmd run health:backend:test`: **1163중 1162통과·1skip**, 466.515초, exit0. 전체 검사는 CSV 변경이 미커밋인 상태에서 실행됐고, 검사 전후 및 커밋 후 소스 해시 일치를 확인했다. skip은 기존 private F01자료 미제공이다. 변경5파일 Ruff·기본 mypy12파일·diff 검사 exit0. 14실행/28로그와 backend 전체 로그·소스·고정 원문4개·109경로·승인 설치본을 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-csv-recovery/verification.json`에 결합했다. 마지막 전체 health는 여전히 `9f7e1dbf`이며 이번 backend 검사를 frontend/Electron/빌드·새 설치본 검증으로 확대하지 않는다.
+
+전용 보안 검토 도구가 없어 원본/파일 식별 보존·불확실 상태 차단·종료 책임·메모리 상태 읽기의 파일 I/O 부재·인증정보/접속 권한 비추가를 직접 검토했다. CSV의 configured destination 해시는 실제 저장 성공이나 파일 접근 성공을 뜻하지 않는다.
+
+남은 범위: CSV/fact/spool/trace의 전체 목적지 가용성·복구/증거 단계 시각·세대별 pending·owner 교체 이력, 온도 fact 초기화 재시도, required writer 제공과 monitor 서비스 연결, PRESSURED 감속·NORMAL 온도 우선, 전체 fact/JPEG 대조·작업 공간·상태/관측 참조·7단계/17명세, 최종 health/build/installer와 master 통합. 이전 점검 턴은 구현 진전 없는 NO_PROGRESS였으며 이번에는 코드·회귀·커밋을 진행했다. 서버·운영 설치본·설정·백업은 변경하지 않았고 일곱 목표를 유지한다.
