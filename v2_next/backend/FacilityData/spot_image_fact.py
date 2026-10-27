@@ -325,18 +325,8 @@ class SpotImageCaptureWriter:
             existing_header = []
         if existing_header == SPOT_IMAGE_FACT_COLUMNS:
             return False
-        archive_path = self.fact_path.with_name(
-            f"{self.fact_path.stem}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}.schema-mismatch.csv"
-        )
-        self.fact_path.rename(archive_path)
-        self._known_facts_by_capture_id = {}
-        self._known_facts_complete = True
-        self._fact_row_count = 0
-        self._fact_digest = hashlib.sha256()
-        self._fact_has_content = False
-        self._manifest_state_ready = True
-        self._manifest_tracked_size = 0
-        return True
+        self._mark_fact_append_uncertain()
+        raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
 
     def _existing_fact_for_capture_id(self, capture_id: str) -> Optional[dict[str, str]]:
         facts_by_id = self._load_known_facts_by_capture_id()
@@ -387,7 +377,7 @@ class SpotImageCaptureWriter:
                                 raise csv.Error("SPOT image fact history contains an incomplete row")
                             row_count += 1
                     else:
-                        self._manifest_state_ready = False
+                        raise csv.Error("SPOT image fact history has an unsupported header")
             except OSError:
                 row_count = 0
                 self._manifest_state_ready = False
