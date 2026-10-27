@@ -17,6 +17,8 @@ import tracemalloc
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from PIL import Image
+
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.spot_image_fact import (
@@ -1213,6 +1215,55 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertEqual(restarted.write_capture(**args), first)
             self.assertEqual(writer.fact_row_count, 1)
             self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+
+    def test_image_fact_retry_preserves_verified_jpeg(self) -> None:
+        data = io.BytesIO()
+        Image.new("RGB", (2, 2), (4, 5, 6)).save(data, format="JPEG")
+        base = data.getvalue()
+        remaining = 1_500_000 - len(base)
+        comments = bytearray()
+        while remaining:
+            size = min(65_537, remaining)
+            if 0 < remaining - size < 4:
+                size -= 4
+            comments.extend(b"\xff\xfe" + (size - 2).to_bytes(2, "big") + b"x" * (size - 4))
+            remaining -= size
+        jpeg = base[:2] + comments + base[2:]
+        self.assertEqual(len(jpeg), 1_500_000)
+        with Image.open(io.BytesIO(jpeg)) as decoded:
+            decoded.load()
+            self.assertEqual(decoded.size, (2, 2))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+            args = dict(image_bytes=jpeg, captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            original_open = Path.open
+
+            def fail_fact_append(path, mode="r", *open_args, **kwargs):
+                if path == writer.fact_path and mode == "ab":
+                    raise OSError("injected fact failure after JPEG commit")
+                return original_open(path, mode, *open_args, **kwargs)
+
+            with patch.object(Path, "open", new=fail_fact_append):
+                with self.assertRaisesRegex(OSError, "injected fact failure"):
+                    writer.write_capture(**args)
+            image_path, = root.rglob("*.jpg")
+            self.assertEqual(image_path.read_bytes(), jpeg)
+            os.utime(image_path, ns=(1_700_000_000_123_456_000, 1_700_000_000_123_456_000))
+            before = image_path.stat()
+            fact = writer.write_capture(**args)
+            self.assertEqual(image_path.stat().st_mtime_ns, before.st_mtime_ns,
+                             "verified JPEG must not be rewritten when only fact append failed")
+            self.assertEqual(image_path.read_bytes(), jpeg)
+            with writer.fact_path.open(encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(list(csv.DictReader(handle)), [fact])
+            self.assertEqual(fact["spot_image_capture_id"], image_path.stem)
+            self.assertEqual(fact["spot_image_sha256"], hashlib.sha256(jpeg).hexdigest())
+            self.assertEqual(writer.written_count, 1)
+            self.assertEqual(writer.write_capture(**args), fact)
+            self.assertEqual(writer.fact_row_count, 1)
 
     def test_image_digest_read_failure_does_not_duplicate_durable_capture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

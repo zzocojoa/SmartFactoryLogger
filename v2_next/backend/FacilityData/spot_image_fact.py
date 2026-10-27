@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import threading
 import time
 from dataclasses import dataclass, field
@@ -175,24 +176,50 @@ class SpotImageCaptureWriter:
             image_path=image_path,
         ):
             existing_fact = self._existing_fact_for_capture_id(capture_id)
-        if existing_fact is not None:
-            if any(existing_fact.get(key) != fact[key] for key in SPOT_IMAGE_FACT_COLUMNS):
-                raise RuntimeError("SPOT image capture identity conflicts with stored fact")
-            if not image_path.exists():
-                tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
-                tmp_path.write_bytes(image_bytes)
-                tmp_path.replace(image_path)
-            return dict(existing_fact)
+        if existing_fact is not None and any(existing_fact.get(key) != fact[key] for key in SPOT_IMAGE_FACT_COLUMNS):
+            raise RuntimeError("SPOT image capture identity conflicts with stored fact")
 
-        tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
-        tmp_path.write_bytes(image_bytes)
-        tmp_path.replace(image_path)
+        if not self._reuse_capture_file(image_path, image_bytes):
+            tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
+            tmp_path.write_bytes(image_bytes)
+            tmp_path.replace(image_path)
+        if existing_fact is not None:
+            return dict(existing_fact)
 
         self._append_fact(fact)
         self._remember_fact(fact)
         self.written_count += 1
         self._cleanup_retention(time.time())
         return fact
+
+    @staticmethod
+    def _reuse_capture_file(path: Path, expected: bytes) -> bool:
+        try:
+            before = path.lstat()
+        except FileNotFoundError:
+            return False
+        if not stat.S_ISREG(before.st_mode) or before.st_size != len(expected):
+            raise RuntimeError("SPOT image capture file is uncertain: type or size differs")
+
+        def identity(info: os.stat_result) -> tuple[int, int, int, int]:
+            # Windows path stat and handle stat can report different ctime
+            # semantics after rename; use the same identity as CSV evidence.
+            return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+        with path.open("rb", buffering=0) as handle:
+            if identity(os.fstat(handle.fileno())) != identity(before):
+                raise RuntimeError("SPOT image capture file is uncertain: identity changed")
+            # Verify the existing whole capture without allocating another JPEG.
+            with memoryview(bytearray(min(4096, max(1, len(expected))))) as window, memoryview(expected) as source:
+                offset = 0
+                while offset < len(expected):
+                    count = handle.readinto(window[:min(len(window), len(expected) - offset)])
+                    if not count or window[:count] != source[offset:offset + count]:
+                        raise RuntimeError("SPOT image capture file is uncertain: content differs")
+                    offset += count
+            if identity(os.fstat(handle.fileno())) != identity(before) or identity(path.lstat()) != identity(before):
+                raise RuntimeError("SPOT image capture file is uncertain: changed while verifying")
+        return True
 
     def _capture_may_already_be_recorded(self, *, captured_at: float, image_path: Path) -> bool:
         if image_path.exists():
