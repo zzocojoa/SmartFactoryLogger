@@ -10,6 +10,7 @@ import stat
 import threading
 import time
 from datetime import datetime, timezone
+from fnmatch import fnmatch
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
@@ -1151,7 +1152,16 @@ def _spool_segment_directory(spool_path: Path) -> Path:
 
 
 def _spool_segment_paths(spool_path: Path) -> list[Path]:
-    return sorted(_spool_segment_directory(spool_path).glob("segment-*.jsonl"))
+    return _matching_spool_paths(_spool_segment_directory(spool_path), "segment-*.jsonl")
+
+
+def _matching_spool_paths(directory: Path, pattern: str) -> list[Path]:
+    # Path.glob suppresses access errors; unavailable storage is not empty.
+    try:
+        with os.scandir(directory) as entries:
+            return sorted(directory / entry.name for entry in entries if fnmatch(entry.name, pattern))
+    except FileNotFoundError:
+        return []  # No segment directory is needed before the first spool write.
 
 
 def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
@@ -1170,7 +1180,7 @@ def _count_spool_rows(spool_path: Path, offset: int = 0) -> int:
 
 def _spool_pending_paths(spool_path: Path) -> list[Path]:
     archive_pattern = f"{spool_path.stem}.*.schema-mismatch{spool_path.suffix}"
-    return [spool_path, *_spool_segment_paths(spool_path), *sorted(spool_path.parent.glob(archive_pattern))]
+    return [spool_path, *_spool_segment_paths(spool_path), *_matching_spool_paths(spool_path.parent, archive_pattern)]
 
 
 def _spool_pending_count(spool_path: Path) -> int:

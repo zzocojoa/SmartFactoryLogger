@@ -805,6 +805,75 @@ class FactQueueTests(unittest.TestCase):
             self.assertFalse(closed, 'recovery erased the original write failure')
             self.assertEqual([row['spot_poll_seq'] for row in self.read_rows(path)], ['1'])
 
+    def test_spool_enumeration_failure_preserves_pending_until_idle_recovery(self):
+        clock, block_append, deny_listing = [100.0], [True], [False]
+        original_open, original_scandir = Path.open, os.scandir
+        denied_threads = []
+
+        def wait_state(owner, predicate):
+            deadline = time.perf_counter() + 3
+            while time.perf_counter() < deadline:
+                state = owner.snapshot()
+                if predicate(state):
+                    return state
+                threading.Event().wait(.01)
+            self.fail(f'Owner state did not reach expected boundary: {state}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.csv'
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            spool_directory = path.with_name(path.name + '.failed.jsonl.segments-v1')
+
+            def failing_append(target, mode='r', *args, **kwargs):
+                if target == path and mode == 'a' and block_append[0]:
+                    raise PermissionError('fact append unavailable')
+                return original_open(target, mode, *args, **kwargs)
+
+            def failing_listing(target):
+                if Path(target) == spool_directory and deny_listing[0]:
+                    denied_threads.append(threading.current_thread())
+                    raise PermissionError('spool directory cannot be enumerated')
+                return original_scandir(target)
+
+            with patch.object(Path, 'open', failing_append), patch('os.scandir', side_effect=failing_listing), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    wait_state(owner, lambda state: state['initialization_state'] == 'ready')
+                    self.assertTrue(owner.enqueue(observation()))
+                    state = wait_state(owner, lambda state: state['completed_count'] == 1)
+                    spool = writer._active_spool_segment
+                    original = spool.read_bytes()
+                    self.assertGreater(state['spool_pending_bytes'], 0)
+                    deny_listing[0], clock[0] = True, 101.0
+                    state = wait_state(owner, lambda state: state['spool_usage_failure_count'] > 0
+                                       or state['spool_usage_checked_monotonic'] == 101.0)
+                    self.assertEqual(state['spool_usage_status'], 'unknown',
+                                     'unreadable spool directory was reported as measured empty')
+                    self.assertEqual(state['spool_pending_bytes'], len(original))
+                    self.assertEqual(state['spool_retained_bytes'], len(original))
+                    self.assertEqual(state['spool_usage_error_type'], 'PermissionError')
+                    state = wait_state(owner, lambda state: state['spool_recovery_failure_count'] == 1)
+                    self.assertEqual(state['spool_pending_count'], 1)
+                    self.assertEqual(state['spool_next_recovery_monotonic'], 103.0)
+                    self.assertFalse(state['writes_drained'])
+                    self.assertEqual(spool.read_bytes(), original)
+                    self.assertTrue(denied_threads)
+                    self.assertTrue(all(thread is owner._thread for thread in denied_threads))
+                    deny_listing[0], block_append[0], clock[0] = False, False, 103.0
+                    state = wait_state(owner, lambda state: state['spool_recovered_count'] == 1)
+                    self.assertEqual(state['spool_pending_bytes'], 0)
+                    self.assertEqual(state['spool_usage_status'], 'measured')
+                    self.assertEqual(state['spool_usage_failure_count'], 1)
+                    self.assertEqual(state['spool_recovery_failure_count'], 1)
+                    self.assertEqual(state['write_failure_count'], 1)
+                finally:
+                    deny_listing[0] = block_append[0] = False
+                    closed = owner.close(3)
+            self.assertFalse(closed, 'recovery erased historical failures')
+            self.assertEqual([row['spot_poll_seq'] for row in self.read_rows(path)], ['1'])
+
     def test_write_failure_invalidates_prior_fact_access(self):
         original_open = Path.open
         clock, locked, probes = [100.0], [False], []
