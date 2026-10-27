@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import tempfile
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +9,37 @@ from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_trace_byte_limits_reject_oversized_records_without_copying(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "byte-producer")
+            oversized = {"event_id": "too-large", "detail": "x" * (2 * 1024**2)}
+            tracemalloc.start()
+            try:
+                token = writer.append(oversized)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertIsNone(token, "oversized trace record accepted")
+            self.assertLessEqual(peak, 256 * 1024)
+            self.assertEqual(writer.snapshot()["pending_bytes"], 0)
+            self.assertTrue(writer.snapshot()["incomplete"])
+            record = {"event_id": "one", "detail": "x" * (512 * 1024)}
+            self.assertIsNotNone(writer.append(record))
+            self.assertIsNotNone(writer.append(dict(record, event_id="two")))
+            self.assertIsNone(writer.append(dict(record, event_id="three")))
+            self.assertLessEqual(writer.snapshot()["pending_bytes"], 2 * 1024**2)
+            while writer.snapshot()["pending_records"]:
+                self.assertTrue(writer.flush(force=True))
+            stored = []
+            for path in sorted(root.glob("*.trace.jsonl")):
+                self.assertLessEqual(path.stat().st_size, 1024**2)
+                stored.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()[1:])
+            self.assertEqual([r["event_id"] for r in stored], ["one", "two"])
+            self.assertEqual([r["detail"] for r in stored], [record["detail"]] * 2)
+            self.assertEqual(writer.snapshot()["pending_bytes"], 0)
+            self.assertTrue(writer.snapshot()["incomplete"])
+
     def test_two_full_segments_refuse_new_records_until_commit(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
