@@ -1821,6 +1821,7 @@ def _spot_image_response(
     *,
     profile: SpotImageProfile,
     source: str,
+    upstream_suppressed: bool = False,
 ) -> tuple[bytes, Dict[str, Any]]:
     global _img_last_source
     _img_last_source = source
@@ -1832,7 +1833,24 @@ def _spot_image_response(
         "age_ms": _spot_image_cache_age_ms(entry),
         "image_path": "/image.jpg",
         "profile": profile,
+        "image_upstream_suppressed": upstream_suppressed,
+        "suppression_reason": "storage_pressure" if upstream_suppressed else None,
+        "retry_after_sec": math.ceil(max(1.0, _spot_image_cache_ttl_sec(profile))) if upstream_suppressed else None,
     }
+
+
+def _spot_image_storage_blocked() -> bool:
+    return (_storage_pressure_monitor is not None
+            and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED")
+
+
+def _spot_image_pressure_response(image_url: str, profile: SpotImageProfile) -> tuple[bytes, Dict[str, Any]]:
+    global _img_cache_hit_count
+    entry = _img_cache_entry
+    if entry is not None and entry.image_url == image_url:
+        _img_cache_hit_count += 1
+        return _spot_image_response(entry, profile=profile, source="cache", upstream_suppressed=True)
+    raise SpotStoragePressureError(math.ceil(max(1.0, _spot_image_cache_ttl_sec(profile))))
 
 
 def _resolve_spot_temperature_url() -> str:
@@ -2156,8 +2174,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
         async with _spot_device_request_lock:
-            if (_storage_pressure_monitor is not None
-                    and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED"):
+            if _spot_image_storage_blocked():
                 raise SpotStoragePressureError
             request_started_at = time.monotonic()
             response = await _request_spot_http_response(
@@ -3859,6 +3876,8 @@ async def fetch_image_async(
             _img_failure_count = min(_img_failure_count + 1, 10)
             raise
 
+        if _spot_image_storage_blocked():
+            return _spot_image_pressure_response(image_url, normalized_profile)
         cache_entry = _img_cache_entry
         if _is_spot_image_cache_fresh(
             cache_entry,
@@ -3883,6 +3902,8 @@ async def fetch_image_async(
                     image_url=image_url,
                     upstream_status=None,
                 )
+            if _spot_image_storage_blocked():
+                return _spot_image_pressure_response(image_url, normalized_profile)
             cache_entry = _img_cache_entry
             if _is_spot_image_cache_fresh(
                 cache_entry,
@@ -3917,7 +3938,7 @@ async def fetch_image_async(
             if current_image_url != image_url:
                 continue
             if isinstance(exc, SpotStoragePressureError):
-                raise SpotStoragePressureError(math.ceil(max(1.0, _spot_image_cache_ttl_sec(normalized_profile)))) from exc
+                return _spot_image_pressure_response(image_url, normalized_profile)
             raise
         finally:
             async with _img_fetch_lock:

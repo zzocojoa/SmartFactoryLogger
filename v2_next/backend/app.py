@@ -3559,6 +3559,11 @@ async def spot_image(request: Request):
             headers[_SPOT_IMAGE_LATENCY_HEADER] = f"{float(meta['latency_ms']):.1f}"
         if meta.get("age_ms") is not None:
             headers[_SPOT_IMAGE_AGE_HEADER] = f"{float(meta['age_ms']):.1f}"
+        if meta.get("image_upstream_suppressed") is not None:
+            headers["X-Spot-Image-Upstream-Suppressed"] = "1" if meta["image_upstream_suppressed"] else "0"
+        if meta.get("image_upstream_suppressed"):
+            headers["X-Spot-Image-Suppression-Reason"] = "storage_pressure"
+            headers["Retry-After"] = str(meta["retry_after_sec"])
         headers.update(_spot_internal_temperature_headers())
         observability_service.record_spot_image_result(200, path=route_path)
         return Response(content=data, media_type="image/jpeg", headers=headers)

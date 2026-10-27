@@ -5,12 +5,14 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import queue
 import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import AsyncIterator, Mapping
 from contextlib import ExitStack, asynccontextmanager
@@ -4915,6 +4917,52 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 spot_api._spot_device_request_lock.release()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+            self.assertTrue(monitor.stop())
+
+    async def test_storage_pressure_reuses_only_current_sensor_cache(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        transport = FakeSpotHttpTransport()
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'blocked')])
+        request = StarletteRequest({'type': 'http', 'method': 'GET',
+                                    'path': '/api/spot/live_image.jpg', 'headers': []})
+        try:
+            with patch.object(spot_api, '_spot_http_transport', transport):
+                await spot_api.fetch_image_async()
+                original = spot_api._img_cache_entry
+                self.assertIsNotNone(original)
+                stale = replace(original, captured_at_epoch=original.captured_at_epoch - 30,
+                                captured_at_monotonic=original.captured_at_monotonic - 30)
+                spot_api._img_cache_entry = stale
+                self.assertTrue(monitor.start())
+                with patch.object(spot_api, '_storage_pressure_monitor', monitor):
+                    try:
+                        response = await backend_app.spot_image(request)
+                    except HTTPException as exc:
+                        response = exc
+                    self.assertEqual(response.status_code, 200,
+                                     'same-sensor stale JPEG was not retained during storage pressure')
+                    self.assertEqual(response.body, original.image_bytes)
+                    self.assertEqual(response.headers['X-Spot-Image-At'], str(int(stale.captured_at_epoch * 1000)))
+                    self.assertGreaterEqual(float(response.headers['X-Spot-Image-Age-Ms']), 30000)
+                    self.assertEqual(response.headers['X-Spot-Image-Upstream-Suppressed'], '1')
+                    self.assertEqual(response.headers['X-Spot-Image-Suppression-Reason'], 'storage_pressure')
+                    self.assertEqual(int(response.headers['Retry-After']),
+                                     math.ceil(max(1, spot_api.get_spot_live_image_refresh_interval_sec())))
+                    spot_api._img_cache_entry = original
+                    fresh = await backend_app.spot_image(request)
+                    self.assertEqual(fresh.headers['X-Spot-Image-Upstream-Suppressed'], '1')
+                    spot_api.config.SPOT_IP = 'other-sensor.local'
+                    with self.assertRaises(HTTPException) as rejected:
+                        await backend_app.spot_image(request)
+                    self.assertEqual(rejected.exception.status_code, 503)
+                    self.assertEqual(rejected.exception.detail['code'], 'storage_pressure')
+                    self.assertEqual(len(transport.requests), 1)
+                    self.assertEqual(spot_api._img_refresh_success_count, 1)
+                    self.assertEqual(spot_api._img_failure_count, 0)
+                    self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+        finally:
             self.assertTrue(monitor.stop())
 
     async def test_snapshot_and_live_callers_share_one_upstream_refresh(self) -> None:
