@@ -12,16 +12,108 @@ from backend.FacilityData.freshness import clock_domain_id
 
 
 class PersistenceTraceTests(unittest.TestCase):
-    def test_uncertain_trace_stays_held_after_external_repair(self):
+    def test_trace_retry_cap_and_reset_preserve_pending_bytes(self):
+        clock, calls = [100.0], []
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            writer = PersistenceTraceWriter(root, "manual-recovery")
+            writer = PersistenceTraceWriter(root, "retry-cap", clock=lambda: clock[0])
+            writer.append({"kind": "first"})
+
+            def failed_publish(source, target):
+                calls.append(clock[0])
+                raise PermissionError("injected extended publication outage")
+
+            with patch.object(Path, "replace", failed_publish):
+                original = None
+                for count, delay in enumerate((1., 2., 4., 8., 16., 30., 30.), 1):
+                    self.assertFalse(writer.flush(force=True))
+                    state = writer.snapshot()
+                    self.assertEqual(state["failure_count"], count)
+                    self.assertEqual(state["retry_delay_seconds"], delay)
+                    next_retry = clock[0] + delay
+                    self.assertEqual(state["next_retry_monotonic"], next_retry)
+                    pending = next(root.glob("*.pending"))
+                    original = pending.read_bytes() if original is None else original
+                    self.assertEqual(pending.read_bytes(), original)
+                    clock[0] = next_retry - .001
+                    self.assertFalse(writer.flush(force=True))
+                    self.assertEqual(len(calls), count)
+                    clock[0] = next_retry
+            self.assertTrue(writer.flush(force=True))
+            self.assertEqual(writer.snapshot()["failure_count"], 7)
+            writer.append({"kind": "second"})
+            with patch.object(Path, "replace", failed_publish):
+                self.assertFalse(writer.flush(force=True))
+            state = writer.snapshot()
+            self.assertEqual(state["retry_delay_seconds"], 1.)
+            self.assertEqual(state["next_retry_monotonic"], clock[0] + 1.)
+            self.assertEqual(state["failure_count"], 8)
+            clock[0] += 1.
+            self.assertTrue(writer.flush(force=True))
+            records = [json.loads(line)["kind"] for path in sorted(root.glob("*.trace.jsonl"))
+                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(records, ["first", "second"])
+
+    def test_trace_retry_backoff_is_not_bypassed_by_new_records(self):
+        clock, attempts, failed = [100.0], [], [True]
+        original_replace = Path.replace
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "retry-clock", clock=lambda: clock[0])
+
+            def controlled_publish(source, target):
+                attempts.append(clock[0])
+                if failed[0]:
+                    raise PermissionError("injected trace publication outage")
+                return original_replace(source, target)
+
+            with patch.object(Path, "replace", controlled_publish):
+                writer.append({"kind": "first"})
+                self.assertFalse(writer.flush(force=True))
+                clock[0] = 100.99
+                writer.append({"kind": "second"})
+                self.assertFalse(writer.flush(force=True))
+                self.assertEqual(attempts, [100.0], "new record or forced flush bypassed trace retry backoff")
+                self.assertEqual(writer.snapshot()["next_retry_monotonic"], 101.0)
+                clock[0] = 101.0
+                self.assertFalse(writer.flush())
+                self.assertEqual(attempts, [100.0, 101.0])
+                self.assertEqual(writer.snapshot()["next_retry_monotonic"], 103.0)
+                self.assertEqual(writer.snapshot()["current_storage_availability"], "blocked")
+                clock[0] = 102.99
+                writer.append({"kind": "third"})
+                failed[0] = False
+                self.assertFalse(writer.flush(force=True))
+                self.assertEqual(attempts, [100.0, 101.0])
+                clock[0] = 103.0
+                self.assertTrue(writer.flush())
+                state = writer.snapshot()
+                self.assertEqual(state["failure_count"], 2)
+                self.assertEqual(state["pending_recovery"], 0)
+                self.assertEqual(state["pending_records"], 2)
+                self.assertEqual(state["current_storage_availability"], "available")
+                self.assertEqual(state["availability_scope"], "last_trace_publication")
+                self.assertEqual(state["last_success_monotonic"], 103.0)
+                self.assertIsNone(state["next_retry_monotonic"])
+                self.assertEqual(state["retry_delay_seconds"], 1.0)
+                self.assertTrue(writer.flush())
+            records = [json.loads(line)["kind"] for path in sorted(root.glob("*.trace.jsonl"))
+                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(records, ["first", "second", "third"])
+            self.assertEqual(writer.snapshot()["pending_records"], 0)
+
+    def test_uncertain_trace_stays_held_after_external_repair(self):
+        clock = [100.0]
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "manual-recovery", clock=lambda: clock[0])
             writer.append({"kind": "first"})
             with patch.object(Path, "replace", side_effect=PermissionError("injected temporary outage")):
                 self.assertFalse(writer.flush(force=True))
             pending = next(root.glob("*.pending"))
             original = pending.read_bytes()
             pending.write_bytes(b"uncertain partial bytes\n")
+            clock[0] = 101.0
             self.assertFalse(writer.flush(force=True))
             self.assertTrue(writer.snapshot()["incomplete"])
             # Matching bytes supplied externally do not authorize this owner
@@ -31,6 +123,8 @@ class PersistenceTraceTests(unittest.TestCase):
                              "uncertain trace resumed automatically after external repair")
             state = writer.snapshot()
             self.assertTrue(state["manual_recovery_required"])
+            self.assertIsNone(state["next_retry_monotonic"])
+            self.assertEqual(state["current_storage_availability"], "blocked")
             self.assertEqual(state["admission_blocked_reason"], "trace_manual_recovery")
             self.assertEqual(state["pending_records"], 1)
             self.assertEqual(state["pending_recovery"], 1)
@@ -567,9 +661,10 @@ class PersistenceTraceTests(unittest.TestCase):
                     self.assertTrue(writer.snapshot()["incomplete"])
 
     def test_workspace_pressure_blocks_admission_until_budget_returns(self):
+        clock = [100.0]
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            writer = PersistenceTraceWriter(root, "workspace-producer")
+            writer = PersistenceTraceWriter(root, "workspace-producer", clock=lambda: clock[0])
             detail = "x" * (384 * 1024)
             for sequence in range(4):
                 self.assertIsNotNone(writer.append({"event_id": sequence, "detail": detail}))
@@ -593,6 +688,7 @@ class PersistenceTraceTests(unittest.TestCase):
                 self.assertFalse(writer.flush(force=True))
             self.assertEqual(writer.snapshot()["admission_blocked_reason"], "trace_workspace_full")
             self.assertEqual(writer.snapshot()["pending_records"], 4)
+            clock[0] = 101.0
             self.assertTrue(writer.flush(force=True))
             self.assertIsNone(writer.snapshot()["admission_blocked_reason"])
             self.assertGreaterEqual(writer.snapshot()["failure_count"], 1)
@@ -748,9 +844,10 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertEqual(writer.snapshot()["pending_bytes"], 0)
 
     def test_failed_publish_keeps_same_segment_for_retry(self):
+        clock = [100.0]
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            writer = PersistenceTraceWriter(root, "producer-fixture")
+            writer = PersistenceTraceWriter(root, "producer-fixture", clock=lambda: clock[0])
             first = {"event_id": "producer-fixture:1", "sink_id": "csv_v2", "status": "DATA_WRITTEN_EVIDENCE_PENDING"}
             second = dict(first, event_id="producer-fixture:2")
             token1 = writer.append(first)
@@ -770,6 +867,7 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertEqual(writer.snapshot()["pending_records"], 2)
             self.assertEqual(writer.snapshot()["failure_count"], 1)
             self.assertEqual(list(root.rglob("*.trace.jsonl")), [])
+            clock[0] = 101.0
             self.assertTrue(writer.flush(force=True))
             self.assertEqual(writer.snapshot()["pending_records"], 0)
             self.assertEqual(writer.snapshot()["pending_bytes"], 0)

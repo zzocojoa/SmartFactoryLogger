@@ -172,6 +172,11 @@ class PersistenceTraceWriter:
         self._refused_count = 0
         self._incomplete = False
         self._manual_recovery_required = False
+        self._next_retry_monotonic: float | None = None
+        self._retry_delay_seconds = 1.0
+        self._current_storage_availability = "unknown"
+        self._availability_checked_monotonic: float | None = None
+        self._last_success_monotonic: float | None = None
         self._processing_bytes = 0
         self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
@@ -301,6 +306,8 @@ class PersistenceTraceWriter:
                     return True
                 segment = self._segments[0]
                 now = self.clock()
+                if self._next_retry_monotonic is not None and now < self._next_retry_monotonic:
+                    return False  # Producer/closeout force cannot bypass an owned retry schedule.
                 if (not force and not segment.sealed and len(segment.records) < TRACE_SEGMENT_RECORD_LIMIT
                         and segment.size < TRACE_SEGMENT_BYTE_LIMIT and now < segment.flush_due_monotonic):
                     return True
@@ -319,11 +326,24 @@ class PersistenceTraceWriter:
                     self._incomplete |= uncertain
                     self._manual_recovery_required |= uncertain
                     self._last_error = str(exc) if uncertain else "trace_io_failed"
+                    self._current_storage_availability = "blocked"
+                    self._availability_checked_monotonic = self.clock()
+                    if uncertain:
+                        self._next_retry_monotonic = None
+                    else:
+                        self._retry_delay_seconds = (1.0 if self._next_retry_monotonic is None
+                                                     else min(30.0, 2 * self._retry_delay_seconds))
+                        self._next_retry_monotonic = self._availability_checked_monotonic + self._retry_delay_seconds
                 return False
             finally:
                 with self._lock:
                     self._processing_bytes = 0
             with self._lock:
+                self._current_storage_availability = "available"
+                self._availability_checked_monotonic = self.clock()
+                self._last_success_monotonic = self._availability_checked_monotonic
+                self._next_retry_monotonic = None
+                self._retry_delay_seconds = 1.0
                 self._committed_sequence = segment.sequence
                 self._segments.popleft()
                 del segment  # Drop encoded bytes before another producer reuses their budget.
@@ -357,6 +377,12 @@ class PersistenceTraceWriter:
                     "pending_segments": len(self._segments),
                     "admission_blocked_reason": admission_blocked_reason,
                     "manual_recovery_required": self._manual_recovery_required,
+                    "current_storage_availability": self._current_storage_availability,
+                    "availability_scope": "last_trace_publication",
+                    "availability_checked_monotonic": self._availability_checked_monotonic,
+                    "last_success_monotonic": self._last_success_monotonic,
+                    "next_retry_monotonic": self._next_retry_monotonic,
+                    "retry_delay_seconds": self._retry_delay_seconds,
                     "committed_segment_seq": self._committed_sequence,
                     "failure_count": self._failure_count,
                     "refused_count": self._refused_count, "incomplete": self._incomplete,
