@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import tracemalloc
 import unittest
@@ -10,6 +11,70 @@ from backend.FacilityData.persistence_validation import validate_csv_persistence
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_validator_reconciles_ranges_without_expanding_ids(self):
+        with tempfile.TemporaryDirectory() as folder:
+            writer = PersistenceTraceWriter(Path(folder), "range-run")
+            records = [
+                {"kind": "producer_start", "after_producer_seq": 0},
+                {"kind": "csv_admission", "contract_version": "CSV_ADMISSION_EVENT_V1",
+                 "producer_instance_id": "range-run", "producer_seq": 1, "status": "ACCEPTED"},
+                {"kind": "admission_exclusion_range", "contract_version": "CSV_ADMISSION_EXCLUSIONS_V1",
+                 "first_producer_seq": 2, "last_producer_seq": 1000001, "status": "DISABLED"},
+                {"kind": "admission_rejection_range", "contract_version": "CSV_ADMISSION_REJECTIONS_V1",
+                 "first_producer_seq": 1000002, "last_producer_seq": 1000002, "status": "INVALID"},
+                {"kind": "producer_stop", "final_producer_seq": 1000002},
+                {"kind": "admission_summary", "produced_count": 1000002, "accounted_count": 1000002,
+                 "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 1000000, "rejected_count": 1,
+                 "after_producer_seq": 0, "last_producer_seq": 1000002,
+                 "outcome_counts": {"ACCEPTED": 1, "DISABLED": 1000000, "INVALID": 1}, "details_incomplete": False},
+            ]
+            for record in records:
+                self.assertIsNotNone(writer.append(record))
+            self.assertTrue(writer.flush(force=True))
+            path = next(Path(folder).glob("*.trace.jsonl"))
+            original = path.read_bytes()
+            tracemalloc.start()
+            try:
+                result = validate_csv_persistence_trace([path])
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertLess(peak, 2 * 1024**2, "validator expanded excluded IDs into memory")
+            header = original.splitlines(keepends=True)[0]
+            cases = [
+                (1, {"producer_seq": 2}, "overlapping_admission_identities"),
+                (1, {"producer_instance_id": "foreign-run"}, "admission_producer_identity_mismatch"),
+                (1, {"producer_seq": True}, "invalid_admission_identity"),
+                (2, {"status": "INVALID"}, "invalid_admission_identity"),
+                (2, {"last_producer_seq": 1}, "invalid_admission_identity"),
+                (2, {"contract_version": "unknown"}, "invalid_admission_identity"),
+                (3, {"first_producer_seq": 1000003, "last_producer_seq": 1000003},
+                 "admission_identity_outside_producer_bounds"),
+            ]
+            for index, changes, issue in cases:
+                with self.subTest(changes=changes):
+                    amended = [dict(record) for record in records]
+                    amended[index].update(changes)
+                    contents = header + b"".join((json.dumps(record) + "\n").encode() for record in amended)
+                    path.write_bytes(contents)
+                    result = validate_csv_persistence_trace([path])
+                    self.assertEqual(result["status"], "INCOMPLETE")
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(path.read_bytes(), contents)
+            path.write_bytes(original + (json.dumps(records[1]) + "\n").encode())
+            result = validate_csv_persistence_trace([path])
+            self.assertIn("overlapping_admission_identities", result["issues"])
+            self.assertIn("admission_identity_totals_mismatch", result["issues"])
+            path.write_bytes(original)
+            with patch("backend.FacilityData.persistence_validation.sqlite3.connect",
+                       side_effect=sqlite3.OperationalError("fixture workspace unavailable")):
+                result = validate_csv_persistence_trace([path])
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertIn("validator_workspace_unavailable", result["issues"])
+            self.assertEqual(path.read_bytes(), original)
+
     def test_validator_rejects_foreign_segment_identity(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "run-a")
@@ -50,6 +115,8 @@ class PersistenceTraceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "parser-fixture")
             writer.append({"kind": "producer_start", "after_producer_seq": 0})
+            writer.append({"kind": "csv_admission", "contract_version": "CSV_ADMISSION_EVENT_V1",
+                           "producer_instance_id": "parser-fixture", "producer_seq": 1, "status": "ACCEPTED"})
             writer.append({"kind": "producer_stop", "final_producer_seq": 1})
             writer.append({"kind": "admission_summary", "produced_count": 1, "accounted_count": 1,
                            "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 0, "rejected_count": 0,
@@ -58,8 +125,8 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertTrue(writer.flush(force=True))
             path = next(Path(folder).glob("*.trace.jsonl"))
             original = path.read_bytes()
-            header, start, stop, summary = original.splitlines(keepends=True)
-            prefix = header + start + stop
+            header, start, admission, stop, summary = original.splitlines(keepends=True)
+            prefix = header + start + admission + stop
             result = validate_csv_persistence_trace([path])
             self.assertEqual(result["status"], "NOT_EVALUATED")
             self.assertEqual(result["issues"], [])

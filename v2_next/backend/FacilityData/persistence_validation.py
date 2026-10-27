@@ -1,6 +1,10 @@
 """Independent, read-only validation of CSV persistence evidence."""
+from collections import Counter
+from contextlib import closing
 import json
 from pathlib import Path
+import sqlite3
+import tempfile
 from typing import Any, Sequence
 
 from backend.FacilityData.persistence_trace import TRACE_SEGMENT_BYTE_LIMIT, TRACE_SEGMENT_RECORD_LIMIT
@@ -43,7 +47,59 @@ def _admission_total_issues(summary: dict[str, Any]) -> set[str]:
     return issues
 
 
-def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
+def _index_admission(database: sqlite3.Connection, record: dict[str, Any], producer: Any) -> set[str]:
+    kind = record.get("kind")
+    if not isinstance(kind, str) or kind not in {"csv_admission", "admission_exclusion_range", "admission_rejection_range"}:
+        return set()
+    status = record.get("status")
+    if kind == "csv_admission":
+        first = last = record.get("producer_seq")
+        allowed = {"ACCEPTED"}
+        contract = "CSV_ADMISSION_EVENT_V1"
+        if record.get("producer_instance_id") != producer:
+            return {"admission_producer_identity_mismatch"}
+    else:
+        first, last = record.get("first_producer_seq"), record.get("last_producer_seq")
+        excluded = kind == "admission_exclusion_range"
+        allowed = {"DISABLED"} if excluded else {"REJECTED_FULL", "REJECTED_LIMIT", "REJECTED_UNAVAILABLE",
+                                               "REJECTED_CLOSED", "INVALID"}
+        contract = "CSV_ADMISSION_EXCLUSIONS_V1" if excluded else "CSV_ADMISSION_REJECTIONS_V1"
+    if (type(first) is not int or type(last) is not int or first < 1 or last < first
+            or not isinstance(status, str) or status not in allowed or record.get("contract_version") != contract):
+        return {"invalid_admission_identity"}
+    # Decimal text avoids a narrowing conversion to SQLite's signed 64-bit integers.
+    # Ranges stay ranges: an excluded interval is never expanded into per-ID objects.
+    database.execute("INSERT INTO outcomes VALUES (?, ?, ?)", (str(first), str(last), status))
+    return set()
+
+
+def _admission_identity_issues(database: sqlite3.Connection, summary: dict[str, Any]) -> set[str]:
+    after, final = summary.get("after_producer_seq"), summary.get("last_producer_seq")
+    if type(after) is not int or type(final) is not int or after < 0 or final < after:
+        return set()  # The summary/boundary checks report invalid bounds independently.
+    issues: set[str] = set()
+    counts: Counter[str] = Counter()
+    next_sequence = after + 1
+    for first_text, last_text, status in database.execute(
+            "SELECT first_seq, last_seq, status FROM outcomes ORDER BY length(first_seq), first_seq"):
+        first, last = int(first_text), int(last_text)
+        if first <= after or last > final:
+            issues.add("admission_identity_outside_producer_bounds")
+        if first < next_sequence:
+            issues.add("overlapping_admission_identities")
+        elif first > next_sequence:
+            issues.add("missing_admission_identities")
+        next_sequence = max(next_sequence, last + 1)
+        counts[status] += last - first + 1
+    if next_sequence < final + 1:
+        issues.add("missing_admission_identities")
+    reported = summary.get("outcome_counts")
+    if isinstance(reported, dict) and any(counts[key] != reported.get(key, 0) for key in counts.keys() | reported.keys()):
+        issues.add("admission_identity_totals_mismatch")
+    return issues
+
+
+def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
     records = 0
@@ -52,6 +108,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     boundaries: dict[str, list[int]] = {"producer_start": [], "producer_stop": []}
     summary_bounds: tuple[int, int] | None = None
     identities: dict[str, str] = {}
+    terminal_summary: dict[str, Any] | None = None
     for path in paths:
         try:
             with path.open("rb") as handle:
@@ -96,6 +153,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
                 issues.add("invalid_trace_record")
                 continue
             records += 1
+            issues.update(_index_admission(database, record, header.get("producer_instance_id")))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -106,6 +164,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
                     boundaries[kind].append(value)
             if record.get("kind") == "admission_summary":
                 summaries += 1
+                terminal_summary = record
                 issues.update(_admission_total_issues(record))
                 if all(type(record.get(key)) is int for key in ("after_producer_seq", "last_producer_seq")):
                     summary_bounds = record["after_producer_seq"], record["last_producer_seq"]
@@ -115,6 +174,8 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
         issues.add("missing_admission_summary")
     if summaries > 1:
         issues.add("multiple_admission_summaries")
+    if terminal_summary is not None:
+        issues.update(_admission_identity_issues(database, terminal_summary))
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -129,7 +190,24 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     if unsupported:
         issues.add("unsupported_trace_schema")
     return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1",
-            "coverage": "TRACE_PARSE_ADMISSION_TOTALS_AND_PRODUCER_BOUNDARIES",
+            "coverage": "CSV_PRODUCER_ADMISSION_IDENTITIES",
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED"}
+
+
+def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
+    """Validate evidence without rewriting it or retaining all outcome IDs in RAM."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="sfl-evidence-") as workspace:
+            with closing(sqlite3.connect(str(Path(workspace) / "admissions.sqlite"))) as database:
+                database.execute("PRAGMA cache_size=-1024")
+                database.execute("PRAGMA temp_store=FILE")
+                database.execute("CREATE TABLE outcomes (first_seq TEXT, last_seq TEXT, status TEXT)")
+                database.execute("CREATE INDEX outcome_order ON outcomes(length(first_seq), first_seq)")
+                return _validate_csv_trace(paths, database)
+    except (OSError, sqlite3.Error):
+        return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_PRODUCER_ADMISSION_IDENTITIES",
+                "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
+                "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
+                "data_integrity_status": "NOT_EVALUATED"}

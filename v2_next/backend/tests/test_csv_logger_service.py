@@ -67,6 +67,36 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_missing_admission_identity(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            service.start()
+            try:
+                receipts = [service.enqueue_detailed(self.create_data(f"2026-03-09T07:20:2{i}.000", 30.0 + i))
+                            for i in range(3)]
+                self.assertTrue(all(receipt["status"] == "ACCEPTED" for receipt in receipts))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths)["issues"], [])
+            removed = 0
+            for path in paths:
+                retained = []
+                for line in path.read_bytes().splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record.get("kind") == "csv_admission" and record["producer_seq"] == receipts[1]["producer_seq"]:
+                        removed += 1
+                    else:
+                        retained.append(line)
+                path.write_bytes(b"".join(retained))
+            self.assertEqual(removed, 1)
+            before = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "missing admission identity was not rejected")
+            self.assertIn("admission_identity_totals_mismatch", result["issues"])
+            self.assertIn("missing_admission_identities", result["issues"])
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
     def test_persistence_validation_requires_producer_boundaries(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)
