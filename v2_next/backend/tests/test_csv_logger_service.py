@@ -106,6 +106,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
                      ({"csv_v2_schema_version": "future"}, "csv_config_contract_mismatch"),
                      ({"admitted_log_dir": str(tmp_dir / "before")}, "csv_config_contract_mismatch"),
                      ("missing", "missing_csv_config_activation"),
+                     ("missing-contracts", "missing_csv_admission_contract"),
                      ("duplicate", "duplicate_csv_config_generation")]
             for changes, issue in cases:
                 with self.subTest(changes=changes):
@@ -113,6 +114,8 @@ class CSVLoggerServiceTests(unittest.TestCase):
                         amended = []
                         for line in contents.splitlines(keepends=True):
                             record = json.loads(line)
+                            if changes == "missing-contracts" and record.get("kind") in {"csv_admission", "config_activated"}:
+                                continue
                             if record.get("kind") == "config_activated":
                                 if changes == "missing":
                                     continue
@@ -125,7 +128,8 @@ class CSVLoggerServiceTests(unittest.TestCase):
                         path.write_bytes(b"".join(amended))
                     result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
                     self.assertIn(issue, result["issues"])
-                    self.assertEqual(result["configuration_status"], "INCOMPLETE")
+                    self.assertEqual(result["configuration_status"], "INCOMPLETE",
+                                     "missing admission/config evidence was marked verified")
             for path, contents in originals.items():
                 path.write_bytes(contents)
             result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])

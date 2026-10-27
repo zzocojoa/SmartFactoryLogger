@@ -543,6 +543,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
         checked_rows += 1
         contract, contract_issues = _admitted_csv_contract(database, row)
         destination_issues.update(contract_issues)
+        configuration_issues.update(contract_issues)
         if contract is not None:
             destination_issues.update(_admitted_destination_issues(contract, row))
         row_byte_issues, row_content_issues = _csv_row_issues(row, roots, contract)
