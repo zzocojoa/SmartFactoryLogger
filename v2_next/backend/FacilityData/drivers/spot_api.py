@@ -70,7 +70,9 @@ from backend.FacilityData.spot_observation_fact import (
 )
 from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
 from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FILENAME, SpotImageCaptureWriter
-from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
+from backend.FacilityData.persistence_payload import (
+    PayloadBudgetExceeded, decoded_string_bytes, encode_json_payload, prepare_json_payload,
+)
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -271,6 +273,7 @@ class _SpotImageCaptureEvent:
     reserved_payload_bytes: int = 0
     writer_signature: Optional[tuple[Path, Path, int, float]] = None
     capture_id: Optional[str] = None
+    snapshot_text_storage_bytes: int = 0
 
 
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
@@ -674,6 +677,7 @@ def _spot_image_capture_failure_evidence(
         "failure_count": failure_count,
         "stage": stage,
         "error_type": error.__class__.__name__,
+        "reason": "snapshot_decode_byte_limit" if stage == "snapshot_decode" and isinstance(error, PayloadBudgetExceeded) else None,
         "errno": getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
         "winerror": getattr(error, "winerror", None) if isinstance(getattr(error, "winerror", None), int) else None,
     }
@@ -716,11 +720,34 @@ def _spot_image_capture_worker() -> None:
             capture_error: Optional[Exception] = None
             failure_stage = "writer_initialization"
             failure_evidence = None
+            decoded_snapshot = None
+            processing_bytes = 0
             try:
                 current_writer = _get_spot_image_capture_writer(event.writer_signature)
                 if writer is not None and writer is not current_writer:
                     writer.close_retention_scan()
                 writer = current_writer
+                failure_stage = "snapshot_decode"
+                if isinstance(event.observation_snapshot, bytes):
+                    # JSON decoding owns both its text and parsed strings. Old
+                    # direct events without a bound use a conservative UCS4
+                    # bound; production events carry the admission preflight.
+                    text_bytes = event.snapshot_text_storage_bytes or 4 * len(event.observation_snapshot)
+                    required = 2 * text_bytes
+                    with _spot_image_capture_lock:
+                        if _spot_image_capture_pending_payload_bytes + required > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
+                            raise PayloadBudgetExceeded
+                        _spot_image_capture_pending_payload_bytes += required
+                        processing_bytes = required
+                    decoded_snapshot = json.loads(event.observation_snapshot)
+                    retained = decoded_string_bytes(decoded_snapshot)
+                    if retained > required:
+                        raise RuntimeError("Image snapshot exceeded its decode bound")
+                    with _spot_image_capture_lock:
+                        _spot_image_capture_pending_payload_bytes -= processing_bytes - retained
+                        processing_bytes = retained
+                else:
+                    decoded_snapshot = event.observation_snapshot
                 failure_stage = "write_capture"
                 fact = writer.write_capture(
                     capture_id=event.capture_id,
@@ -730,9 +757,7 @@ def _spot_image_capture_worker() -> None:
                     source=event.source,
                     image_age_ms=event.image_age_ms,
                     link_checked_at=event.link_checked_at,
-                    observation_snapshot=(json.loads(event.observation_snapshot)
-                                          if isinstance(event.observation_snapshot, bytes)
-                                          else event.observation_snapshot),
+                    observation_snapshot=decoded_snapshot,
                 )
             except Exception as exc:  # pragma: no cover - exercised through integration-style tests
                 capture_error = exc
@@ -749,6 +774,7 @@ def _spot_image_capture_worker() -> None:
                 # before returning the reservation to another producer.
                 del event
                 capture_error = None
+                decoded_snapshot = None
                 # Outcome accounting and Queue.task_done() are one atomic state
                 # transition. Shutdown can therefore never observe a recorded
                 # failure while the same capture still appears unfinished.
@@ -765,7 +791,7 @@ def _spot_image_capture_worker() -> None:
                         _spot_image_capture_last_error_at = failure_evidence["error_at"]
                         _spot_image_capture_last_error_code = failure_evidence["error_type"]
                         _spot_image_capture_last_error_message = "capture writer failed"
-                    _spot_image_capture_pending_payload_bytes -= reserved_bytes
+                    _spot_image_capture_pending_payload_bytes -= reserved_bytes + processing_bytes
                     _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
             if failure_evidence is not None:
                 # Default stderr formatting drops LogRecord.extra. Keep the safe
@@ -1307,7 +1333,7 @@ def _enqueue_spot_image_capture_locked(
     reserved_bytes = transferred_bytes = 0
     prepared_snapshot = snapshot_payload = event = None
     try:
-        workspace = 0
+        workspace = text_bytes = 0
         if snapshot is not None:
             prepared_snapshot, payload_bound, characters, width = prepare_json_payload(
                 snapshot, available - len(image_bytes),
@@ -1333,6 +1359,7 @@ def _enqueue_spot_image_capture_locked(
             source=source, image_age_ms=image_age_ms, link_checked_at=link_checked_at,
             observation_snapshot=snapshot_payload, reserved_payload_bytes=payload_size,
             writer_signature=_spot_image_capture_config_signature(), capture_id=capture_id,
+            snapshot_text_storage_bytes=text_bytes,
         )
         with _spot_image_capture_lock:
             if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():

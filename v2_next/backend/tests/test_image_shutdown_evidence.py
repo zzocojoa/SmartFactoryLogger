@@ -418,9 +418,9 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
 
     def test_capture_payload_budget_includes_inflight_and_linked_snapshot(self):
-        # Two retained captures (~4.5 MiB) plus the second admission's JSON
-        # workspace fit; a third capture plus its workspace must be refused.
-        limit = 6 * 1024**2
+        # Two retained captures (~4.5 MiB), the writer's decoded snapshot and
+        # admission workspace fit; a third capture must still be refused.
+        limit = 7 * 1024**2
         self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', limit))
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
         self.stack.enter_context(patch.object(spot, '_spot_temperature_snapshot', None))
@@ -456,7 +456,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         pending = spot.get_spot_image_capture_shutdown_status()
         self.assertEqual(pending['enqueued_count'], 2)
         self.assertEqual(pending['unfinished_tasks'], 2)
-        self.assertEqual(pending['pending_payload_bytes'], sum(payload_sizes[:2]))
+        self.assertGreaterEqual(pending['pending_payload_bytes'], sum(payload_sizes[:2]) + 768 * 1024)
         self.assertLessEqual(pending['pending_payload_bytes'], limit)
         self.assertEqual(pending['dropped_payload_limit_count'], 1)
         self.assertEqual(pending['dropped_oversize_count'], 0)
@@ -476,6 +476,75 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             rows = list(csv.DictReader(handle))
         self.assertEqual([row['spot_image_linked_observation_key'] for row in rows],
                          ['budget-fixture:1', 'budget-fixture:2', 'budget-fixture:4'])
+
+    def test_image_decode_budget_failure_preserves_capture_identity(self):
+        self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', 5 * 1024**2))
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
+        snapshot = {'spot_service_instance_id': 'decode-limit', 'spot_poll_seq': 1,
+                    'spot_last_poll_completed_at': '2026-09-29T00:00:01Z',
+                    'diagnostic_text': 'x' * (2 * 1024**2)}
+        data = io.BytesIO()
+        Image.new('RGB', (2, 2), (4, 5, 6)).save(data, format='JPEG')
+        jpeg = data.getvalue()
+        with patch.object(spot, '_spot_temperature_snapshot', snapshot), self.assertLogs('spot_control', 'WARNING') as logs:
+            receipt = spot._maybe_enqueue_spot_image_capture(
+                image_bytes=jpeg, captured_at=1790640001., image_url='http://synthetic.invalid/image.jpg',
+                source='test', capture_id='original-decode-limit-capture',
+            )
+            self.assertTrue(receipt.accepted)
+            self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            self.assertTrue(spot.stop_spot_image_capture_writer(3))
+        failures = [json.loads(record.getMessage().split('SPOT image capture writer failed ', 1)[1])
+                    for record in logs.records if record.getMessage().startswith('SPOT image capture writer failed ')]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]['capture_id'], receipt.capture_id)
+        self.assertEqual(failures[0]['image_sha256'], hashlib.sha256(jpeg).hexdigest())
+        self.assertEqual(failures[0]['reason'], 'snapshot_decode_byte_limit')
+        failed = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(failed['failure_count'], 1)
+        self.assertEqual(failed['pending_payload_bytes'], 0)
+        self.assertFalse(failed['writes_drained'])
+        self.assertFalse(list((self.root / 'images').rglob('*.jpg')))
+        snapshot['diagnostic_text'] = 'normal'
+        snapshot['spot_poll_seq'] = 2
+        with patch.object(spot, '_spot_temperature_snapshot', snapshot):
+            self.assertTrue(self.enqueue().accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 1)
+        self.assertEqual(final['failure_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertFalse(final['writes_drained'])
+        self.assertTrue(final['accounting_consistent'])
+        self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 1)
+
+    def test_image_snapshot_decode_remains_in_pending_budget(self):
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
+        snapshot = {'spot_service_instance_id': 'decode-fixture', 'spot_poll_seq': 1,
+                    'spot_last_poll_completed_at': '2026-09-29T00:00:01Z',
+                    'diagnostic_text': 'x' * (2 * 1024**2)}
+        entered, release = self.block_write()
+        with patch.object(spot, '_spot_temperature_snapshot', snapshot):
+            tracemalloc.start()
+            try:
+                self.assertTrue(self.enqueue().accepted)
+                self.assertTrue(entered.wait(3))
+                allocated, _ = tracemalloc.get_traced_memory()
+                pending = spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes']
+            finally:
+                tracemalloc.stop()
+                release.set()
+        self.assertLessEqual(allocated, pending + 1024**2,
+                             'decoded image snapshot is outside the pending budget')
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertTrue(final['accounting_consistent'])
+        self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 1)
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([row['spot_image_linked_observation_key'] for row in rows], ['decode-fixture:1'])
 
     def test_oversized_image_snapshot_is_rejected_before_serialization(self):
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
