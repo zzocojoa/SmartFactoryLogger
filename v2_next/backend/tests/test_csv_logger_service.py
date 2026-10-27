@@ -1014,6 +1014,16 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(third["required_sinks"], ("csv_v2",))
             trace_records = [json.loads(line) for path in sorted(tmp_dir.rglob("*.trace.jsonl"))
                              for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            admissions = [record for record in trace_records if record["kind"] == "csv_admission"]
+            self.assertEqual(len(admissions), 3, "CSV trace omitted per-ID accepted contracts")
+            for record, receipt, destination in zip(admissions, (first, second, third), (old_dir, old_dir, new_dir)):
+                self.assertEqual(record["status"], "ACCEPTED")
+                self.assertEqual(record["producer_instance_id"], receipt["producer_instance_id"])
+                self.assertEqual(record["producer_seq"], receipt["producer_seq"])
+                self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
+                self.assertEqual(record["config_generation"], receipt["config_generation"])
+                self.assertEqual(record["required_sinks"], list(receipt["required_sinks"]))
+                self.assertEqual(Path(record["admitted_log_dir"]), destination)
             activations = [record for record in trace_records if record["kind"] == "config_activated"]
             self.assertEqual(len(activations), 2, "CSV trace omitted admitted configuration intervals")
             self.assertEqual([record["effective_from_producer_seq"] for record in activations],

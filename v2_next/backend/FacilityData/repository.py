@@ -457,6 +457,7 @@ class CSVLoggerService:
         self.thread: Optional[threading.Thread] = None
         self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=CSV_PENDING_EVENT_LIMIT)
         self._pending_events: dict[int, tuple[CSVEventEnvelope, set[str]]] = {}
+        self._csv_admission_tokens: dict[int, int] = {}
         self._pending_row_events: dict[int, tuple[list, int]] = {}
         # Locations live only while the admitted rows remain pending. Paths are
         # shared with their writer; retained digest bytes have an explicit charge.
@@ -926,6 +927,7 @@ class CSVLoggerService:
                 if completed in bound_sequences or completed in failure_evidence_sequences:
                     continue  # Retain ownership until row references and failure evidence settle.
                 pending = self._pending_events.pop(completed)
+                self._csv_admission_tokens.pop(completed, None)
                 if completed in self._failed_pending_sequences:
                     self._terminal_failed_event_count += 1
                 else:
@@ -3545,6 +3547,31 @@ class CSVLoggerService:
         self._trace_boundary_failed |= token is None
         self._trace_config_generation = settings.generation
 
+    def _record_csv_admission(self, envelope: CSVEventEnvelope) -> bool:
+        with self._runtime_lock:
+            if envelope.producer_seq in self._csv_admission_tokens:
+                return True
+        trace = self._persistence_trace
+        if trace is None:
+            return False
+        settings = envelope.write_config
+        token = trace.append({
+            "kind": "csv_admission", "contract_version": "CSV_ADMISSION_EVENT_V1", "status": "ACCEPTED",
+            "producer_instance_id": envelope.producer_instance_id, "producer_seq": envelope.producer_seq,
+            "source_payload_hash": envelope.source_payload_hash, "config_generation": settings.generation,
+            "required_sinks": settings.required_sinks, "admitted_log_dir": str(settings.log_dir),
+            "fallback_log_dir": str(settings.fallback_log_dir),
+            "csv_v1_columns": settings.v1_header if settings.v1_enabled else None,
+            "csv_v2_schema_version": settings.v2_contract.schema_version if settings.v2_enabled else None,
+            "csv_v2_column_hash": settings.v2_contract.column_hash if settings.v2_enabled else None,
+        })
+        if token is None:
+            trace.flush()  # A later worker turn retries the same event after capacity returns.
+            return False
+        with self._runtime_lock:
+            self._csv_admission_tokens[envelope.producer_seq] = token
+        return True
+
     def _record_persistence_trace_stop(self) -> None:
         trace = self._persistence_trace
         if trace is None or self._trace_stop_recorded:
@@ -3886,6 +3913,12 @@ class CSVLoggerService:
 
                 if envelope is not None:
                     self._record_trace_config(envelope)
+                    if not self._record_csv_admission(envelope):
+                        deferred_item = envelope
+                        if not self.running:
+                            break
+                        time.sleep(0.2)
+                        continue
                     decoded_sequence = envelope.producer_seq
                     item = self._decode_csv_event(envelope)
                     if item is None:
@@ -4120,6 +4153,9 @@ class CSVLoggerService:
                     settings = deferred_item.write_config
                     self._writer_context.settings = settings
                     csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
+                    self._record_trace_config(deferred_item)
+                    if not self._record_csv_admission(deferred_item):
+                        raise RuntimeError("CSV deferred admission evidence is unavailable")
                     deferred_data = self._decode_csv_event(deferred_item)
                     if deferred_data is None:
                         raise RuntimeError("CSV deferred decode failed")
