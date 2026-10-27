@@ -3878,6 +3878,11 @@ class CSVLoggerService:
         for envelope, sinks in self._pending_events.values():
             for sink in sinks:
                 targets[(envelope.write_config.generation, sink)] = envelope.write_config.log_dir
+        if self._csv_manual_recovery_required:
+            # Disabling new writes does not resolve an already uncertain file.
+            # Keep its original generation/destination visible to the monitor.
+            for key, required in self._csv_probe_files.items():
+                targets.setdefault(key, required["directory"])
         return targets
 
     @staticmethod
@@ -3899,8 +3904,8 @@ class CSVLoggerService:
         if settings is None:
             return  # Legacy direct file access has no running owner contract.
         key = settings.generation, sink
-        self._csv_probe_files[key] = {"path": path, "identity": identity}
         with self._runtime_lock:
+            self._csv_probe_files[key] = {"path": path, "identity": identity, "directory": settings.log_dir}
             state = self._csv_storage_probes.get(key)
             if state is not None:
                 if (state["probe_status"] == "blocked" or state["file_check_error"] is not None

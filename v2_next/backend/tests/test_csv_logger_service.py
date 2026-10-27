@@ -2540,6 +2540,16 @@ class CSVLoggerServiceTests(unittest.TestCase):
                         self.assertEqual(state["current_storage_availability"], "blocked")
                         self.assertTrue(state["manual_recovery_required"])
                         self.assertEqual(csv_path.read_bytes(), original)
+                        service.apply_config(auto_save=False, log_path=tmp_dir / "disabled")
+                        for _ in range(2):
+                            retained = service.get_runtime_state()["csv_storage_destinations"]
+                            self.assertEqual(len(retained), 1, "disabled CSV lost its unresolved destination")
+                            self.assertEqual(retained[0]["destination_key"], state["destination_key"])
+                            self.assertEqual(retained[0]["config_generation"], state["config_generation"])
+                            self.assertTrue(retained[0]["manual_recovery_required"])
+                            self.assertEqual(retained[0]["current_storage_availability"], "blocked")
+                            time.sleep(.25)
+                        self.assertFalse((tmp_dir / "disabled").exists())
                     finally:
                         active[0] = False
                         closed = service.stop(timeout_sec=5)
