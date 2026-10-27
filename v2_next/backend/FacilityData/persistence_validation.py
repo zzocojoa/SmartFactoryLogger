@@ -1,13 +1,21 @@
 """Independent, read-only validation of CSV persistence evidence."""
 from collections import Counter
 from contextlib import closing
+import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
+import stat
 import tempfile
 from typing import Any, Sequence
 
 from backend.FacilityData.persistence_trace import TRACE_SEGMENT_BYTE_LIMIT, TRACE_SEGMENT_RECORD_LIMIT
+
+# The r4 CSV pending-payload contract is 64 MiB; the trace's 1 MiB limit
+# is not a CSV row limit. Hash reads retain only one 4 KiB chunk.
+CSV_ROW_READ_LIMIT = 64 * 1024**2
+CSV_READ_CHUNK_BYTES = 4096
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -191,7 +199,56 @@ def _terminal_output_issues(database: sqlite3.Connection, summary: dict[str, Any
     return set()
 
 
-def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> dict[str, Any]:
+def _file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _csv_row_byte_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> set[str]:
+    integer_fields = ("row_byte_offset", "row_byte_length", "file_device", "file_id")
+    if any(type(record.get(field)) is not int or record[field] < 0 for field in integer_fields):
+        return {"invalid_csv_row_location"}
+    offset, length = record["row_byte_offset"], record["row_byte_length"]
+    digest = record.get("output_bytes_sha256")
+    if (length < 1 or length > CSV_ROW_READ_LIMIT or not isinstance(digest, str) or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest) or not isinstance(record.get("file_path"), str)):
+        return {"invalid_csv_row_location"}
+    path = Path(record["file_path"])
+    if (not path.is_absolute() or path.suffix.lower() != ".csv"
+            or not any(path.is_relative_to(raw) or path.is_relative_to(resolved) for raw, resolved in roots)):
+        return {"csv_path_outside_allowed_roots"}
+    try:
+        resolved_path = path.resolve(strict=True)
+        if not any(resolved_path.is_relative_to(resolved) for _, resolved in roots):
+            return {"csv_path_outside_allowed_roots"}
+        if not stat.S_ISREG(resolved_path.stat().st_mode):
+            return {"csv_path_not_regular_file"}
+        with resolved_path.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            if (before.st_dev, before.st_ino) != (record["file_device"], record["file_id"]):
+                return {"csv_file_identity_mismatch"}
+            if offset + length > before.st_size:
+                return {"csv_row_truncated"}
+            handle.seek(offset)
+            actual = hashlib.sha256()
+            remaining = length
+            while remaining:
+                chunk = handle.read(min(remaining, CSV_READ_CHUNK_BYTES))
+                if not chunk:
+                    return {"csv_row_truncated"}
+                actual.update(chunk)
+                remaining -= len(chunk)
+            after = os.fstat(handle.fileno())
+            current = resolved_path.stat()
+            if _file_signature(before) != _file_signature(after) or _file_signature(after) != _file_signature(current):
+                return {"csv_file_changed_during_validation"}
+            if actual.hexdigest() != digest:
+                return {"csv_row_bytes_mismatch"}
+    except (OSError, ValueError, OverflowError, RuntimeError):
+        return {"csv_data_read_error"}
+    return set()
+
+
+def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, data_roots: Sequence[Path]) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
     records = 0
@@ -201,6 +258,18 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
     summary_bounds: tuple[int, int] | None = None
     identities: dict[str, str] = {}
     terminal_summary: dict[str, Any] | None = None
+    byte_issues: set[str] = set()
+    checked_rows = 0
+    roots: list[tuple[Path, Path]] = []
+    for root in data_roots:
+        try:
+            resolved = root.resolve(strict=True)
+            if not resolved.is_dir():
+                byte_issues.add("invalid_csv_data_root")
+            else:
+                roots.append((root.absolute(), resolved))
+        except (OSError, ValueError, RuntimeError):
+            byte_issues.add("invalid_csv_data_root")
     for path in paths:
         try:
             with path.open("rb") as handle:
@@ -255,6 +324,9 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
             records += 1
             issues.update(_index_admission(database, record, header.get("producer_instance_id")))
             issues.update(_index_sink_record(database, record, header.get("producer_instance_id")))
+            if data_roots and record.get("kind") == "csv_row_data":
+                checked_rows += 1
+                byte_issues.update(_csv_row_byte_issues(record, roots))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -295,6 +367,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
             observed = boundaries["producer_start"][0], boundaries["producer_stop"][0]
             if observed[1] < observed[0] or (summary_bounds is not None and observed != summary_bounds):
                 issues.add("producer_boundary_mismatch")
+    issues.update(byte_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -302,10 +375,12 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
             "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
-            "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED"}
+            "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED",
+            "checked_csv_rows": checked_rows,
+            "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED"}
 
 
-def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
+def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequence[Path] = ()) -> dict[str, Any]:
     """Validate evidence without rewriting it or retaining all outcome IDs in RAM."""
     try:
         with tempfile.TemporaryDirectory(prefix="sfl-evidence-") as workspace:
@@ -319,9 +394,9 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
                 database.execute("CREATE INDEX required_output_identity ON required_outputs(sequence, sink)")
                 database.execute("CREATE TABLE sink_receipts (sequence TEXT, sink TEXT, source_hash TEXT, generation TEXT, kind TEXT)")
                 database.execute("CREATE INDEX sink_receipt_identity ON sink_receipts(sequence, sink)")
-                return _validate_csv_trace(paths, database)
+                return _validate_csv_trace(paths, database, data_roots)
     except (OSError, sqlite3.Error):
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
                 "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
-                "data_integrity_status": "NOT_EVALUATED"}
+                "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED"}

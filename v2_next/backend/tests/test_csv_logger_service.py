@@ -67,6 +67,154 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_reads_large_csv_rows_in_bounded_chunks(self) -> None:
+        previous_field_limit = csv.field_size_limit()
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+                data.Die_ID = "x" * (1024**2 + 1024)
+                self.assertEqual(service.enqueue_detailed(data)["status"], "ACCEPTED")
+            finally:
+                closed = service.stop(timeout_sec=10)
+                state = service.get_runtime_state()
+                self.assertTrue(closed, {key: state.get(key) for key in ("last_processing_failure_reason",
+                                    "last_csv_write_failure_reason", "persistence_trace", "csv_manual_recovery_required")})
+            self.assertEqual(csv.field_size_limit(), previous_field_limit)
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            original_open = Path.open
+            read_sizes = []
+
+            class BoundedReader:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return self.handle.__exit__(*args)
+
+                def read(self, count=-1):
+                    read_sizes.append(count)
+                    if not 0 < count <= 4096:
+                        raise AssertionError("validator requested an unbounded CSV read")
+                    return self.handle.read(count)
+
+            def open_file(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                return BoundedReader(handle) if mode == "rb" and path.suffix == ".csv" else handle
+
+            with patch.object(Path, "open", open_file):
+                result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["checked_csv_rows"], 2)
+            self.assertGreater(len(read_sizes), 512)
+            # Offline closeout must scan the same admitted row, not rely on
+            # the live writer's last-sequence cache. The parser limit is local
+            # in duration even when the underlying file cannot be opened.
+            records = (json.loads(line) for path in paths for line in path.read_bytes().splitlines())
+            csv_path = Path(next(record["file_path"] for record in records
+                                 if record.get("kind") == "csv_row_data" and record["sink_id"] == "csv_v2"))
+            service._v2_persisted_sample_seq_by_path.clear()
+            service._v2_persisted_at_by_path.clear()
+            metadata_path = service.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+            self.assertIsNotNone(metadata_path)
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(metadata["csv_closeout"]["final_persisted_sample_seq"], 1)
+            self.assertEqual(csv.field_size_limit(), previous_field_limit)
+            csv_path.unlink()
+            self.assertIsNone(service.refresh_spot_observation_fact_manifest_for_csv(csv_path))
+            self.assertEqual(csv.field_size_limit(), previous_field_limit)
+
+    def test_validator_detects_changed_csv_row_bytes(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+                data.Die_ID = '금형,"A"\n😀'
+                service.enqueue_detailed(data)
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"], [])
+            traces = {path: path.read_bytes() for path in paths}
+            records = [json.loads(line) for contents in traces.values() for line in contents.splitlines()]
+            row = next(record for record in records if record.get("kind") == "csv_row_data")
+            csv_path = Path(row["file_path"])
+            original = csv_path.read_bytes()
+            offset = row["row_byte_offset"]
+            changed = original[:offset] + b"9" + original[offset + 1:]
+            self.assertNotEqual(changed, original)
+            csv_path.write_bytes(changed)
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["status"], "INCOMPLETE", "changed CSV row bytes were not rejected")
+            self.assertIn("csv_row_bytes_mismatch", result["issues"])
+            self.assertEqual(csv_path.read_bytes(), changed)
+            self.assertEqual({path: path.read_bytes() for path in paths}, traces)
+            self.assertEqual(result["row_bytes_status"], "INCOMPLETE")
+            self.assertEqual(validate_csv_persistence_trace(paths)["row_bytes_status"], "NOT_EVALUATED")
+            csv_path.write_bytes(original)
+            for changes, issue in [({"row_byte_offset": -1}, "invalid_csv_row_location"),
+                                   ({"row_byte_length": 64 * 1024**2 + 1}, "invalid_csv_row_location"),
+                                   ({"row_byte_offset": len(original)}, "csv_row_truncated"),
+                                   ({"file_id": row["file_id"] + 1}, "csv_file_identity_mismatch"),
+                                   ({"file_path": "relative.csv"}, "csv_path_outside_allowed_roots")]:
+                with self.subTest(changes=changes):
+                    for path, contents in traces.items():
+                        amended = []
+                        for line in contents.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record == row:
+                                line = (json.dumps(dict(record, **changes)) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(csv_path.read_bytes(), original)
+            for path, contents in traces.items():
+                path.write_bytes(contents)
+            with self.create_temp_dir() as outside:
+                result = validate_csv_persistence_trace(paths, data_roots=[outside])
+                self.assertIn("csv_path_outside_allowed_roots", result["issues"])
+            csv_path.write_bytes(original[:-1])
+            self.assertIn("csv_row_truncated", validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"])
+            csv_path.write_bytes(original)
+            original_open = Path.open
+
+            class ChangingReader:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return self.handle.__exit__(*args)
+
+                def read(self, count=-1):
+                    value = self.handle.read(count)
+                    with original_open(csv_path, "ab") as other:
+                        other.write(b"\n")
+                    return value
+
+            def open_changing_file(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                return ChangingReader(handle) if mode == "rb" and path == csv_path else handle
+
+            with patch.object(Path, "open", open_changing_file):
+                result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_file_changed_during_validation", result["issues"])
+
     def test_validator_rejects_terminal_sink_count_mismatch(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)

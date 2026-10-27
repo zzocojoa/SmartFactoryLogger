@@ -1,9 +1,31 @@
 """Preflight immutable JSON payloads before allocating serialization copies."""
 from __future__ import annotations
 
+import csv
 import json
+import threading
+from contextlib import contextmanager
 from itertools import chain
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
+
+
+_csv_parser_lock = threading.RLock()
+
+
+@contextmanager
+def csv_parser_field_limit(limit: int) -> Iterator[None]:
+    """Temporarily align a CSV consumer with its admitted payload limit.
+
+    csv exposes a process-wide field limit, not a reader option. Cooperating
+    consumers serialize this override and restore it even when parsing fails.
+    This limits one field's characters; callers still bound total row bytes.
+    """
+    with _csv_parser_lock:
+        previous = csv.field_size_limit(limit)
+        try:
+            yield
+        finally:
+            csv.field_size_limit(previous)
 
 
 class PayloadBudgetExceeded(ValueError):

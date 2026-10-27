@@ -27,7 +27,7 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
 )
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
-    PayloadBudgetExceeded, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
+    PayloadBudgetExceeded, csv_parser_field_limit, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
 from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter, TRACE_SEGMENT_RECORD_LIMIT
 from backend.FacilityData.spot_observation import (
@@ -1551,7 +1551,7 @@ class CSVLoggerService:
                 raise RuntimeError(
                     "SPOT observation fact runtime summary is unavailable"
                 )
-            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+            with csv_parser_field_limit(CSV_PENDING_PAYLOAD_BYTE_LIMIT), csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
                 runtime_summary = (
                     spot_api_module.get_spot_observation_fact_manifest_summary(
                         fact_path=fact_path,
@@ -1589,7 +1589,7 @@ class CSVLoggerService:
             and not self._require_runtime_manifest_state
         ):
             try:
-                with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                with csv_parser_field_limit(CSV_PENDING_PAYLOAD_BYTE_LIMIT), csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
                     final_row: Optional[dict[str, str]] = None
                     for final_row in csv.DictReader(handle):
                         pass
