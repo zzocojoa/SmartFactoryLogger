@@ -194,6 +194,8 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 2026-10-28 fact 복구·CSV 시각 보완: 실제 fact 쓰기 실패 후 가용성 무효화/재확인을 연결하고, 새 유입이 backoff를 우회하지 않는 20행·1MiB 단위 spool 복구를 추가했다. 손상 원본과 과거 실패는 보존한다. CSV는 접수 당시 1초 flush 스케줄의 단조 예정 시각을 고정하고 세대/출력별 데이터 대기 상태를 메모리로 제공한다. 시스템 시계 역행과 데이터 완료 후 증거 대기 구분을 검사했다. configured destination 해시는 파일 가용성 증거가 아니며, spool/증거 단계 시각·전체 required sink·monitor 연결·17시나리오는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-csv-recovery/verification.json`.
 
+2026-10-28 trace 보완: 최초 증거 기록의 단조 시각/예정 시각·clock domain과 실제 실패 segment의 pending_recovery를 제공한다. 내용 불확실은 수동 복구로 유지하고 CSV 접수를 UNAVAILABLE로 분류한다. 일시 공개 실패의 1→2→4→8→16→30초 재시도는 새 기록/force로 우회하지 못하며 성공 후 초기화한다. 파일 공개 범위의 현재 가용성과 과거 실패를 구분한다. 디렉터리/전체 파일 probe, spool·단계 간 나이/세대 결합·종료 수명, required sink/monitor·17명세 전체는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-recovery-state/verification.json`.
+
 **R06 — 실제 HTTP 취득 억제**
 
 - `_img_fetch_lock` 안에서 새 upstream refresh task를 생성하기 직전에 압력 상태와 양수 요청 간격을 검사한다. 이 검사는 FR02의 발송 직전 검사를 대체하지 않는다. 기존 최소 요청률 계산의 입력을 0으로 바꾸는 방식은 사용하지 않는다. single-flight waiter와 이미 dispatch한 공유 요청은 압력 변화만으로 강제 취소하지 않는다.

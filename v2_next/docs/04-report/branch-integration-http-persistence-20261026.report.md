@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. 온도 fact 쓰기 실패 상태 무효화·제한된 spool 자동 복구와 CSV 데이터 단계 단조 시각을 추가. 전체 required sink·monitor 서비스 연결·감속/온도 우선·전체 대조/작업 공간·7단계/17명세는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `e07f8ef5`와 동일 소스의 backend 전체 1163중1162통과·F01미제공1skip·exit0. 변경5파일 Ruff·기본 mypy12파일 exit0. 마지막 전체 health는 `9f7e1dbf`; 현재 전체 health·빌드·새 설치본은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. trace 증거 단계 시각·실패 복구 수·손상 보류와 CSV 접수 분류·제한된 공개 재시도 추가. 전체 required sink·monitor 서비스 연결·감속/온도 우선·전체 대조/작업 공간·7단계/17명세는 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `3edac6b5`의 backend 전체 1168중1167통과·F01미제공1skip·exit0. 변경4파일 Ruff·기본 mypy12파일 exit0. 마지막 전체 health는 `9f7e1dbf`; 현재 전체 health·빌드·새 설치본은 미완료 |
 
 ## 보존과 통합
 
@@ -1143,3 +1143,18 @@ CSV/관측 fact/trace/spool 가용성·예정 시각·세대별 pending, 생성�
 전용 보안 검토 도구가 없어 원본/파일 식별 보존·불확실 상태 차단·종료 책임·메모리 상태 읽기의 파일 I/O 부재·인증정보/접속 권한 비추가를 직접 검토했다. CSV의 configured destination 해시는 실제 저장 성공이나 파일 접근 성공을 뜻하지 않는다.
 
 남은 범위: CSV/fact/spool/trace의 전체 목적지 가용성·복구/증거 단계 시각·세대별 pending·owner 교체 이력, 온도 fact 초기화 재시도, required writer 제공과 monitor 서비스 연결, PRESSURED 감속·NORMAL 온도 우선, 전체 fact/JPEG 대조·작업 공간·상태/관측 참조·7단계/17명세, 최종 health/build/installer와 master 통합. 이전 점검 턴은 구현 진전 없는 NO_PROGRESS였으며 이번에는 코드·회귀·커밋을 진행했다. 서버·운영 설치본·설정·백업은 변경하지 않았고 일곱 목표를 유지한다.
+
+## 2026-10-28 증거 단계 시각·손상 보류·제한된 재시도
+
+- `e170a0bf`: trace segment 최초 기록의 단조 시각·예정 시각·clock domain을 제공하고 실제 실패한 segment의 기록만 pending_recovery에 포함한다. 강제 조기 flush는 기한을 앞당길 수 있지만 재시도·새 기록이 기존 기한을 미루지 않는다. 정상 예약 대기와 장애 복구 대기를 구분한다.
+- `dba2e81d`: 불일치/부분 기록 등 내용이 불확실한 trace는 수동 복구 상태를 유지한다. 외부에서 bytes를 맞춰 놓더라도 자동 공개·새 접수·정상 완료로 전환하지 않으며 원본 pending을 보존한다.
+- `1fdff0fe`: trace 수동 복구로 막힌 CSV 접수를 REJECTED_UNAVAILABLE로 연결했다. 실제 용량 부족의 REJECTED_LIMIT와 구분하고 종료는 미완료로 남긴다. 실제 CSV 행과 손상 pending 보존을 검사했다.
+- `3edac6b5`: 일시적인 trace 공개 실패는 1→2→4→8→16→30초 상한으로 재시도한다. 새 기록과 force flush가 예약을 우회하지 못하고 성공 후 다음 실패는 1초부터 시작한다. 과거 failure_count는 유지한다. 현재 가용성의 범위는 last_trace_publication이며 디렉터리 전체 probe나 과거 파일 전체 무결성으로 확대하지 않는다.
+
+위 네 행동의 RED→GREEN을 확인했다. 실제 writer/CSV 서비스와 임시 파일을 사용하고 파일 공개 오류·손상·시계만 주입했다. 기존 trace 시험 3개는 실패 직후 즉시 재시도하던 fixture를 첫 재시도 시각 이후로 진행시키도록 조정했으며 원본 보존·복구·손상 보류 주장은 유지했다. 해당 최초 3실패 출력은 제품 RED와 구분해 보존한다. 30초 상한·성공 후 초기 간격·수동 보류의 예약 없음은 후속 회귀이며 별도 RED로 세지 않는다.
+
+clean 소스 `3edac6b51587688e738787bbe7aa91d04541a0d5`의 `npm.cmd run health:backend:test`: **1168중 1167통과·1skip**, 474.908초, exit0. 검사 전후와 커밋 소스의 해시 일치를 확인했다. skip은 기존 private F01자료 미제공이다. 변경4파일 Ruff·기본 mypy12파일·diff 검사 exit0. 13실행/26로그와 backend 전체 로그·소스4개·고정 원문4개·109경로·승인 설치본을 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-recovery-state/verification.json`에 결합했다. 마지막 전체 health는 여전히 `9f7e1dbf`이며 이번 backend 검사를 frontend/Electron/빌드·새 설치본 검증으로 확대하지 않는다.
+
+전용 보안 검토 도구가 없어 원본 보존·불확실 상태 차단·파일 공개 전후 실제 검산·메모리 상태 읽기의 파일 I/O 부재·인증정보/접속 권한 비추가를 직접 검토했다. 재시도 대기 중 force flush는 False이며 성공·완료로 위장하지 않는다.
+
+남은 범위: CSV/fact/spool/trace의 전체 목적지 probe·가용성, spool 및 단계 간 최초 나이/세대 결합, 초기화/종료 수명과 owner 교체 이력, required writer 제공과 monitor 서비스 연결, PRESSURED 감속·NORMAL 온도 우선, 전체 fact/JPEG 대조·작업 공간·상태/관측 참조·7단계/17명세, 최종 health/build/installer와 master 통합. trace 공개 가용성을 다른 파일의 가용성으로 대체하지 않는다. 직전 턴은 CSV 단계 시각 구현·전체 backend 검증·원격 반영의 PROGRESS였으며 이번에도 코드·회귀를 진행했다. 서버·운영 설치본·설정·백업은 변경하지 않았고 일곱 목표를 유지한다.
