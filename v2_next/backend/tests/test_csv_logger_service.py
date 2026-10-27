@@ -67,6 +67,59 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_stale_metadata_closeout(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=False, csv_v2_enabled=True)
+            service.apply_config(csv_v2_sidecar_enabled=True)
+            service.start()
+            try:
+                for second in range(2):
+                    service.enqueue_detailed(self.create_data(f"2026-03-09T07:20:{25 + second}.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            metadata_path, = tmp_dir.glob("Factory_Integrated_Log*.metadata.json")
+            original = metadata_path.read_bytes()
+            metadata = json.loads(original)
+            self.assertEqual(metadata["csv_closeout"]["final_persisted_sample_seq"], 2)
+            metadata["csv_closeout"]["final_persisted_sample_seq"] = 1
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            amended = metadata_path.read_bytes()
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_metadata_closeout_mismatch", result["issues"],
+                          "metadata finalized the first row while the actual CSV ends at the second")
+            self.assertEqual(result["metadata_contract_status"], "INCOMPLETE")
+            self.assertEqual(result["metadata_read_status"], "VERIFIED")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(metadata_path.read_bytes(), amended)
+            metadata_path.write_bytes(original)
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["metadata_contract_status"], "VERIFIED")
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+
+            cases = [("schema_metadata", "active_schema_version", "future", "csv_metadata_schema_mismatch"),
+                     ("schema_metadata", "active_column_hash", "0" * 64, "csv_metadata_schema_mismatch"),
+                     ("schema_metadata", "v2_columns", [], "csv_metadata_schema_mismatch"),
+                     ("csv_closeout", "finalized", False, "csv_metadata_closeout_unfinalized"),
+                     ("csv_closeout", "csv_file_name", "another.csv", "csv_metadata_closeout_mismatch"),
+                     ("csv_closeout", "logger_service_instance_id", "another", "csv_metadata_closeout_mismatch"),
+                     ("csv_closeout", "final_persisted_sample_seq", 3, "csv_metadata_closeout_mismatch"),
+                     ("csv_closeout", "final_persisted_sample_seq", True, "csv_metadata_closeout_mismatch"),
+                     ("csv_closeout", "persisted_at", "", "csv_metadata_closeout_mismatch"),
+                     ("csv_closeout", "closeout_reason", "", "csv_metadata_closeout_mismatch")]
+            for section, key, value, issue in cases:
+                with self.subTest(section=section, key=key, value=value):
+                    amended_metadata = json.loads(original)
+                    amended_metadata[section][key] = value
+                    metadata_path.write_text(json.dumps(amended_metadata), encoding="utf-8")
+                    changed_bytes = metadata_path.read_bytes()
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["metadata_contract_status"], "INCOMPLETE")
+                    self.assertEqual(metadata_path.read_bytes(), changed_bytes)
+            metadata_path.write_bytes(original)
+
     def test_validator_requires_actual_csv_metadata(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=False, csv_v2_enabled=True)

@@ -620,6 +620,72 @@ def _index_csv_metadata_files(database: sqlite3.Connection, roots: Sequence[tupl
     return issues, checked
 
 
+def _csv_metadata_values_issues(metadata: dict[str, Any], contract: dict[str, Any], columns: list[str],
+                               values: list[str], filename: str, producer: str) -> set[str]:
+    schema, closeout = metadata.get("schema_metadata"), metadata.get("csv_closeout")
+    if not isinstance(schema, dict) or not isinstance(closeout, dict):
+        return {"invalid_csv_metadata_contract"}
+    if len(columns) != len(values) or any(columns.count(key) != 1 for key in ("logger_service_instance_id", "sample_seq")):
+        return {"invalid_csv_metadata_row_key"}
+    issues: set[str] = set()
+    if (schema.get("schema_version") != contract.get("csv_v2_schema_version")
+            or schema.get("active_schema_version") != contract.get("csv_v2_schema_version")
+            or schema.get("active_column_hash") != contract.get("csv_v2_column_hash")
+            or schema.get("v2_columns") != columns):
+        issues.add("csv_metadata_schema_mismatch")
+    if closeout.get("finalized") is not True or "spot_observation_fact_closeout" in metadata:
+        issues.add("csv_metadata_closeout_unfinalized")
+    sample = values[columns.index("sample_seq")]
+    if not sample.isascii() or not sample.isdecimal() or int(sample) < 1:
+        issues.add("invalid_csv_metadata_row_key")
+    elif (type(closeout.get("final_persisted_sample_seq")) is not int
+          or closeout["final_persisted_sample_seq"] != int(sample)
+          or values[columns.index("logger_service_instance_id")] != producer
+          or closeout.get("logger_service_instance_id") != producer
+          or closeout.get("csv_file_name") != filename
+          or not isinstance(closeout.get("persisted_at"), str) or not closeout["persisted_at"]
+          or not isinstance(closeout.get("closeout_reason"), str) or not closeout["closeout_reason"]):
+        issues.add("csv_metadata_closeout_mismatch")
+    return issues
+
+
+def _csv_metadata_contract_issues(database: sqlite3.Connection, roots: Sequence[tuple[Path, Path]],
+                                 producer: Any) -> set[str]:
+    issues: set[str] = set()
+    for extent, body in database.execute("SELECT extent, body FROM csv_metadata"):
+        last_row = database.execute("SELECT body FROM csv_rows WHERE extent=? "
+                                    "ORDER BY length(first_byte) DESC, first_byte DESC LIMIT 1", (extent,)).fetchone()
+        if last_row is None or not isinstance(producer, str) or not producer:
+            issues.add("missing_csv_metadata_row_key")
+            continue
+        row = json.loads(last_row[0])
+        contract, errors = _admitted_csv_contract(database, row)
+        issues.update(errors)
+        if contract is None:
+            continue
+        try:
+            path = Path(row["file_path"]).resolve(strict=True)
+            if not any(path.is_relative_to(resolved) for _, resolved in roots):
+                issues.add("csv_path_outside_allowed_roots")
+                continue
+            with path.open("rb") as handle:
+                before = os.fstat(handle.fileno())
+                if not stat.S_ISREG(before.st_mode) or (before.st_dev, before.st_ino) != (row["file_device"], row["file_id"]):
+                    issues.add("csv_file_identity_mismatch")
+                    continue
+                columns = _read_csv_record(handle, min(row["row_byte_offset"], CSV_ROW_READ_LIMIT), header=True)
+                handle.seek(row["row_byte_offset"])
+                values = _read_csv_record(handle, row["row_byte_length"])
+                after = os.fstat(handle.fileno())
+                if _file_signature(before) != _file_signature(after) or _file_signature(after) != _file_signature(path.stat()):
+                    issues.add("csv_file_changed_during_validation")
+                    continue
+            issues.update(_csv_metadata_values_issues(json.loads(body), contract, columns, values, path.name, producer))
+        except (OSError, ValueError, OverflowError, RuntimeError, csv.Error):
+            issues.add("csv_metadata_row_read_error")
+    return issues
+
+
 def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, data_roots: Sequence[Path]) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
@@ -765,9 +831,12 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     extent_issues, checked_files = _csv_file_extent_issues(database, roots)
     file_issues.update(extent_issues)
     metadata_issues: set[str] = set()
+    metadata_contract_issues: set[str] = set()
     checked_metadata = 0
     if data_roots and not (byte_issues or file_issues):
         metadata_issues, checked_metadata = _index_csv_metadata_files(database, roots)
+        if not content_issues:
+            metadata_contract_issues = _csv_metadata_contract_issues(database, roots, identities.get("producer"))
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -784,6 +853,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     issues.update(configuration_issues)
     issues.update(file_issues)
     issues.update(metadata_issues)
+    issues.update(metadata_contract_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -799,6 +869,9 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "checked_csv_metadata": checked_metadata,
             "metadata_read_status": ("INCOMPLETE" if byte_issues or file_issues or metadata_issues else "VERIFIED"
                                      if checked_metadata else "NOT_EVALUATED"),
+            "metadata_contract_status": ("INCOMPLETE" if byte_issues or file_issues or content_issues
+                                         or metadata_issues or metadata_contract_issues else "VERIFIED"
+                                         if checked_metadata else "NOT_EVALUATED"),
             "file_extent_status": "INCOMPLETE" if byte_issues or file_issues else "VERIFIED" if checked_files else "NOT_EVALUATED",
             "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "destination_status": "INCOMPLETE" if byte_issues or destination_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
@@ -842,4 +915,5 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED",
                 "configuration_status": "NOT_EVALUATED", "checked_csv_files": 0,
                 "file_extent_status": "NOT_EVALUATED", "runtime_closeout_status": "NOT_EVALUATED",
-                "checked_csv_metadata": 0, "metadata_read_status": "NOT_EVALUATED"}
+                "checked_csv_metadata": 0, "metadata_read_status": "NOT_EVALUATED",
+                "metadata_contract_status": "NOT_EVALUATED"}
