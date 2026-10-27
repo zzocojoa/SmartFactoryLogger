@@ -4983,6 +4983,26 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.assertTrue(monitor.stop())
 
+    async def test_storage_pressure_headers_are_exposed_to_browser_clients(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'blocked')])
+        try:
+            self.assertTrue(monitor.start())
+            with patch.object(spot_api, '_storage_pressure_monitor', monitor):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=backend_app.app),
+                                             base_url='http://fixture') as client:
+                    response = await client.get('/api/spot/live_image.jpg', headers={'Origin': 'http://viewer.local'})
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json()['detail']['code'], 'storage_pressure')
+            exposed = {name.strip().lower() for name in response.headers.get('access-control-expose-headers', '').split(',')}
+            required = {'x-spot-image-upstream-suppressed', 'x-spot-image-suppression-reason', 'retry-after'}
+            self.assertTrue(required <= exposed, 'browser cannot read the storage pressure headers')
+            self.assertEqual(response.headers['x-spot-image-upstream-suppressed'], '1')
+            self.assertGreaterEqual(int(response.headers['retry-after']), 1)
+        finally:
+            self.assertTrue(monitor.stop())
+
     async def test_snapshot_and_live_callers_share_one_upstream_refresh(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
         image_bytes = _jpeg_bytes("shared-profiles")
