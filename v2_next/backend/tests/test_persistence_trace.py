@@ -10,6 +10,42 @@ from backend.FacilityData.persistence_validation import validate_csv_persistence
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_validator_rejects_foreign_segment_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            writer = PersistenceTraceWriter(Path(folder), "run-a")
+            writer.append({"kind": "producer_start", "after_producer_seq": 0})
+            self.assertTrue(writer.flush(force=True))
+            writer.append({"kind": "producer_stop", "final_producer_seq": 0})
+            self.assertTrue(writer.flush(force=True))
+            writer.append({"kind": "admission_summary", "produced_count": 0, "accounted_count": 0,
+                           "unaccounted_count": 0, "accepted_count": 0, "excluded_count": 0, "rejected_count": 0,
+                           "after_producer_seq": 0, "last_producer_seq": 0, "outcome_counts": {},
+                           "details_incomplete": False})
+            self.assertTrue(writer.flush(force=True))
+            paths = sorted(Path(folder).glob("*.trace.jsonl"))
+            self.assertEqual(len(paths), 3)
+            self.assertEqual(validate_csv_persistence_trace(paths)["issues"], [])
+            header, *records = paths[1].read_bytes().splitlines(keepends=True)
+            foreign = dict(json.loads(header), producer_instance_id="run-b")
+            contents = (json.dumps(foreign) + "\n").encode() + b"".join(records)
+            paths[1].write_bytes(contents)
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "foreign trace segment was not rejected")
+            self.assertIn("mixed_producer_identity", result["issues"])
+            self.assertEqual(paths[1].read_bytes(), contents)
+            for changes, issue in [({"writer_instance_id": "foreign-writer"}, "mixed_writer_identity"),
+                                   ({"producer_instance_id": None}, "invalid_segment_identity"),
+                                   ({"writer_instance_id": ""}, "invalid_segment_identity")]:
+                with self.subTest(changes=changes):
+                    amended = (json.dumps(dict(json.loads(header), **changes)) + "\n").encode() + b"".join(records)
+                    paths[1].write_bytes(amended)
+                    result = validate_csv_persistence_trace(paths)
+                    self.assertEqual(result["status"], "INCOMPLETE")
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(paths[1].read_bytes(), amended)
+            paths[1].write_bytes(header + b"".join(records))
+            self.assertEqual(validate_csv_persistence_trace(list(reversed(paths)))["issues"], [])
+
     def test_csv_trace_parser_rejects_malformed_or_unbounded_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "parser-fixture")

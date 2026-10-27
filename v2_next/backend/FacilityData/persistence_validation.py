@@ -51,6 +51,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     unsupported = False
     boundaries: dict[str, list[int]] = {"producer_start": [], "producer_stop": []}
     summary_bounds: tuple[int, int] | None = None
+    identities: dict[str, str] = {}
     for path in paths:
         try:
             with path.open("rb") as handle:
@@ -78,6 +79,14 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
         except (ValueError, RecursionError):
             issues.add("invalid_segment_header")
             continue
+        for identity in ("producer", "writer"):
+            value = header.get(f"{identity}_instance_id")
+            if not isinstance(value, str) or not value:
+                issues.add("invalid_segment_identity")
+            elif identity in identities and value != identities[identity]:
+                issues.add(f"mixed_{identity}_identity")
+            else:
+                identities[identity] = value
         for line in lines[1:]:
             try:
                 record = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object)
@@ -120,7 +129,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     if unsupported:
         issues.add("unsupported_trace_schema")
     return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1",
-            "coverage": "TRACE_PARSE_AND_ADMISSION_TOTALS",
+            "coverage": "TRACE_PARSE_ADMISSION_TOTALS_AND_PRODUCER_BOUNDARIES",
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED"}
