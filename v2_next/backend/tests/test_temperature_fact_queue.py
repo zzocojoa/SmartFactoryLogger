@@ -334,6 +334,108 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_spool_recovery_batches_run_before_queued_arrivals(self):
+        original_open = Path.open
+        clock, fail, pause = [100.0], [True], [False]
+        entered, release = threading.Event(), threading.Event()
+        dispatches = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def controlled_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    if fail[0]:
+                        raise PermissionError("synthetic append outage")
+                    dispatches.append((clock[0], owner._queue.qsize()))
+                if target != path and mode in ("ab", "xb") and pause[0]:
+                    pause[0] = False
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test spool append not released")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", controlled_open), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    for seq in range(1, 46):
+                        self.assertTrue(owner.enqueue(observation(seq)))
+                    owner._queue.join()
+                    self.assertEqual(owner.snapshot()["spool_pending_count"], 45)
+                    pause[0] = True
+                    clock[0] = 100.5
+                    self.assertTrue(owner.enqueue(observation(46)))
+                    self.assertTrue(entered.wait(2))
+                    self.assertTrue(owner.enqueue(observation(47)))
+                    self.assertEqual(owner.snapshot()["queue_depth"], 1)
+                    fail[0] = False
+                    clock[0] = 101.0
+                    release.set()
+                    owner._queue.join()
+                    self.assertEqual(dispatches, [(101.0, 1)] * 20,
+                                     "recovery waited for an empty queue or exceeded its batch")
+                    self.assertEqual(owner.snapshot()["spool_pending_count"], 27)
+                    clock[0] = 101.99
+                    threading.Event().wait(.08)
+                    self.assertEqual(len(dispatches), 20)
+                    for now, recovered in [(102.0, 40), (103.0, 47)]:
+                        clock[0] = now
+                        for _ in range(150):
+                            if owner.snapshot()["spool_recovered_count"] == recovered:
+                                break
+                            threading.Event().wait(.01)
+                        self.assertEqual(owner.snapshot()["spool_recovered_count"], recovered)
+                    state = owner.snapshot()
+                    self.assertEqual(state["spool_pending_count"], 0)
+                    self.assertEqual(state["pending_payload_bytes"], 0)
+                    self.assertEqual(state["write_failure_count"], 1)
+                    self.assertEqual(state["accepted_count"], 47)
+                    self.assertEqual(state["completed_count"], 47)
+                finally:
+                    release.set()
+                    owner.close(3)
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)],
+                             [str(seq) for seq in range(1, 48)])
+
+    def test_corrupt_idle_spool_is_preserved_and_held_for_manual_recovery(self):
+        original_open = Path.open
+        clock, fail = [100.0], [True]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            fact_before = path.read_bytes()
+
+            def failed_append(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a" and fail[0]:
+                    raise PermissionError("synthetic append outage")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", failed_append), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    self.assertTrue(owner.enqueue(observation(1)))
+                    owner._queue.join()
+                    spool = writer._active_spool_segment
+                    damaged = spool.read_bytes() + b'{broken-json\n'
+                    spool.write_bytes(damaged)
+                    fail[0] = False
+                    clock[0] = 101.0
+                    owner._thread.join(2)
+                    state = owner.snapshot()
+                    self.assertFalse(state["writer_alive"])
+                    self.assertTrue(state["spool_manual_recovery"])
+                    self.assertFalse(state["writes_drained"])
+                    self.assertIsNone(state["spool_next_recovery_monotonic"])
+                    self.assertEqual(owner.enqueue_detailed(observation(2)).status, "REJECTED_UNAVAILABLE")
+                    self.assertEqual(spool.read_bytes(), damaged)
+                    self.assertEqual(path.read_bytes(), fact_before)
+                finally:
+                    owner.close(2)
+
     def test_new_observations_do_not_bypass_spool_backoff(self):
         original_open = Path.open
         clock, attempts, fail = [100.0], [], [True]
