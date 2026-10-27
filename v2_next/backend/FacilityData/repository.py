@@ -477,6 +477,7 @@ class CSVLoggerService:
         # Only current and still-admitted generations retain probe metadata.
         self._csv_storage_probes: dict[tuple[int, str], dict[str, Any]] = {}
         self._csv_probe_files: dict[tuple[int, str], dict[str, Any]] = {}
+        self._csv_recovery_sinks: set[tuple[int, str]] = set()
         self._csv_probe_failure_count = 0
         self._csv_probe_workspace_bytes = 0
         self._uncertain_csv_paths: set[Path] = set()
@@ -633,6 +634,7 @@ class CSVLoggerService:
                 self._csv_next_flush_monotonic = time.monotonic() + CSV_FLUSH_INTERVAL_SECONDS
                 self._csv_storage_probes.clear()
                 self._csv_probe_files.clear()
+                self._csv_recovery_sinks.clear()
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
@@ -3321,6 +3323,23 @@ class CSVLoggerService:
                 buffer[:] = pending
         return not pending
 
+    @contextmanager
+    def _csv_data_attempt(self, sink: str) -> Iterator[None]:
+        settings = getattr(self._writer_context, "settings", None)
+        key = (settings.generation, sink) if settings is not None else None
+        try:
+            yield
+        except Exception:
+            if key is not None:
+                with self._runtime_lock:
+                    self._csv_recovery_sinks.add(key)
+                    self._runtime_write_failure_observed = True
+            raise
+        else:
+            if key is not None:
+                with self._runtime_lock:
+                    self._csv_recovery_sinks.discard(key)
+
     def _flush_buffer(
         self,
         writer: Optional[_CSVWriter],
@@ -3333,12 +3352,13 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
-        written = self._write_csv_rows(writer, rows, "csv_v1")
-        handle.flush()
-        new_rows = self._unreported_csv_rows(written, "csv_v1")
-        if new_rows:
-            self._mark_write_completed()
-            self._report_csv_data(new_rows, "csv_v1")
+        with self._csv_data_attempt("csv_v1"):
+            written = self._write_csv_rows(writer, rows, "csv_v1")
+            handle.flush()
+            new_rows = self._unreported_csv_rows(written, "csv_v1")
+            if new_rows:
+                self._mark_write_completed()
+                self._report_csv_data(new_rows, "csv_v1")
         return self._reconcile_csv_evidence(rows, buffer, "csv_v1")
 
     def _flush_v2_buffer(
@@ -3352,18 +3372,19 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
-        new_rows = self._unreported_csv_rows(rows, "csv_v2")
-        if new_rows:
-            self._prepare_v2_rows_persisted(new_rows)  # Validate new data before any write.
-        flush_started = time.perf_counter()
-        written = self._write_csv_rows(writer, rows, "csv_v2")
-        handle.flush()
-        self._last_csv_flush_duration_ms = (time.perf_counter() - flush_started) * 1000.0
-        new_rows = self._unreported_csv_rows(written, "csv_v2")
-        if new_rows:
-            self._commit_v2_rows_persisted(self._prepare_v2_rows_persisted(new_rows))
-            self._mark_write_completed()
-            self._report_csv_data(new_rows, "csv_v2")
+        with self._csv_data_attempt("csv_v2"):
+            new_rows = self._unreported_csv_rows(rows, "csv_v2")
+            if new_rows:
+                self._prepare_v2_rows_persisted(new_rows)  # Validate new data before any write.
+            flush_started = time.perf_counter()
+            written = self._write_csv_rows(writer, rows, "csv_v2")
+            handle.flush()
+            self._last_csv_flush_duration_ms = (time.perf_counter() - flush_started) * 1000.0
+            new_rows = self._unreported_csv_rows(written, "csv_v2")
+            if new_rows:
+                self._commit_v2_rows_persisted(self._prepare_v2_rows_persisted(new_rows))
+                self._mark_write_completed()
+                self._report_csv_data(new_rows, "csv_v2")
         return self._reconcile_csv_evidence(rows, buffer, "csv_v2")
 
     def _prepare_v2_rows_persisted(
@@ -3869,6 +3890,7 @@ class CSVLoggerService:
                 "retry_delay_sec": 1.0, "clock_domain": clock_domain_id(),
                 "required_file_key": None, "file_check_scope": "not_checked", "file_check_error": None,
                 "file_check_failure_count": 0, "manual_recovery_required": False,
+                "pending_recovery_count": 0, "recovery_reason": None,
                 "current_storage_availability": "unknown"}
 
     def _remember_csv_probe_file(self, sink: str, path: Path,
@@ -3932,6 +3954,13 @@ class CSVLoggerService:
     def _csv_storage_snapshot_locked(self, current: CSVWriteConfig) -> list[dict[str, Any]]:
         results = [dict(self._csv_storage_probes.get(key) or self._new_csv_probe_state(*key, directory))
                    for key, directory in self._csv_storage_targets_locked(current).items()]
+        pending = {(item["config_generation"], item["sink_id"]): item["pending_count"]
+                   for item in self._csv_pending_data_stages_locked()} if self._csv_recovery_sinks else {}
+        for state in results:
+            key = state["config_generation"], state["sink_id"]
+            if key in self._csv_recovery_sinks:
+                state.update(current_storage_availability="blocked", pending_recovery_count=max(1, pending.get(key, 0)),
+                             recovery_reason="csv_data_write_failed")
         if self._csv_manual_recovery_required:
             for state in results:
                 state.update(current_storage_availability="blocked", manual_recovery_required=True)
@@ -3947,6 +3976,7 @@ class CSVLoggerService:
         with self._runtime_lock:
             targets = self._csv_storage_targets_locked(current)
             self._csv_probe_files = {key: value for key, value in self._csv_probe_files.items() if key in targets}
+            self._csv_recovery_sinks.intersection_update(targets)
             self._csv_storage_probes = {key: self._csv_storage_probes.get(key)
                                        or self._new_csv_probe_state(*key, directory)
                                        for key, directory in targets.items()}

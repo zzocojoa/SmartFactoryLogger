@@ -2310,6 +2310,124 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     closed = service.stop(timeout_sec=5)
             self.assertTrue(closed)
 
+    def test_csv_probe_tracks_current_and_admitted_destinations(self) -> None:
+        entered, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        with self.create_temp_dir() as tmp_dir:
+            old_dir, new_dir = tmp_dir / "old", tmp_dir / "new"
+            service = self.create_service(old_dir, True)
+
+            def open_file(path, mode="r", *args, **kwargs):
+                if path.parent == old_dir and path.suffix == ".csv" and mode == "a":
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("CSV generation test did not release file open")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", open_file):
+                service.start()
+                try:
+                    receipt = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertTrue(entered.wait(3))
+                    service.apply_config(log_path=new_dir, auto_save=False)
+                    retained, = service.get_runtime_state()["csv_storage_destinations"]
+                    self.assertEqual(retained["config_generation"], receipt["config_generation"])
+                    service.apply_config(auto_save=True, csv_v1_enabled=False, csv_v2_enabled=True)
+                    states = service.get_runtime_state()["csv_storage_destinations"]
+                    self.assertEqual(len(states), 2)
+                    old, new = sorted(states, key=lambda state: state["config_generation"])
+                    self.assertEqual(old["config_generation"], receipt["config_generation"])
+                    self.assertEqual((old["sink_id"], new["sink_id"]), ("csv_v1", "csv_v2"))
+                    self.assertNotEqual(old["destination_key"], new["destination_key"])
+                    self.assertEqual(new["current_storage_availability"], "unknown")
+                    self.assertFalse(new_dir.exists(), "configuration reader performed owner I/O")
+                    release.set()
+                    deadline = time.perf_counter() + 5
+                    while time.perf_counter() < deadline:
+                        runtime = service.get_runtime_state()
+                        states = runtime["csv_storage_destinations"]
+                        if (runtime["pending_event_count"] == 0 and len(states) == 1
+                                and states[0]["current_storage_availability"] == "available"):
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(runtime["pending_event_count"], 0)
+                    self.assertEqual(len(states), 1)
+                    self.assertEqual(states[0]["config_generation"], new["config_generation"])
+                    self.assertEqual(states[0]["probe_status"], "available")
+                    self.assertEqual(list(new_dir.glob("*.csv")), [], "probe created synthetic CSV observations")
+                    service.apply_config(auto_save=False)
+                    self.assertEqual(service.get_runtime_state()["csv_storage_destinations"], [])
+                    time.sleep(.25)
+                    self.assertEqual(service.get_runtime_state()["csv_storage_destinations"], [])
+                finally:
+                    release.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            csv_path, = old_dir.glob("*.csv")
+            self.assertEqual(len(self.read_rows(csv_path)), 2)
+
+    def test_csv_probe_success_does_not_clear_pending_write_recovery(self) -> None:
+        original_open = Path.open
+        retry_entered, release = threading.Event(), threading.Event()
+        fail_write = [True]
+        append_count = [0]
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+
+            class WriteFailure:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def write(self, text):
+                    if text.startswith("2026-") and fail_write[0]:
+                        fail_write[0] = False
+                        raise OSError("injected CSV failure before data bytes")
+                    return self.handle.write(text)
+
+            def open_file(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    append_count[0] += 1
+                    if append_count[0] == 2:
+                        retry_entered.set()
+                        if not release.wait(5):
+                            raise TimeoutError("CSV recovery test did not release retry")
+                    return WriteFailure(original_open(path, mode, *args, **kwargs))
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", open_file):
+                service.start()
+                try:
+                    for index in range(20):
+                        service.enqueue(self.create_data("2026-03-09T07:20:25.000", float(index)))
+                    self.assertTrue(retry_entered.wait(5))
+                    failed, = service.get_runtime_state()["csv_storage_destinations"]
+                    self.assertEqual(failed.get("pending_recovery_count", 0), 20,
+                                     "successful directory probe erased pending CSV write recovery")
+                    self.assertEqual(failed["probe_status"], "available")
+                    self.assertEqual(failed["current_storage_availability"], "blocked")
+                    self.assertEqual(failed["recovery_reason"], "csv_data_write_failed")
+                    release.set()
+                    deadline = time.perf_counter() + 5
+                    while time.perf_counter() < deadline:
+                        runtime = service.get_runtime_state()
+                        recovered, = runtime["csv_storage_destinations"]
+                        if runtime["pending_event_count"] == 0 and recovered["current_storage_availability"] == "available":
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(runtime["pending_event_count"], 0)
+                    self.assertEqual(recovered["pending_recovery_count"], 0)
+                    self.assertIsNone(recovered["recovery_reason"])
+                    self.assertGreaterEqual(runtime["csv_write_failure_count"], 1)
+                finally:
+                    release.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed, "recovery erased the historical write failure")
+            csv_path, = tmp_dir.glob("Factory_Integrated_Log_*.csv")
+            self.assertEqual(len(self.read_rows(csv_path)), 21)
+
     def test_csv_file_access_failure_is_not_hidden_by_directory_probe(self) -> None:
         blocked = [False]
         attempts = []
