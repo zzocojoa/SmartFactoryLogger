@@ -411,13 +411,15 @@ class SpotObservationQueue:
                 self._state["last_error_code"] = "initialization_failed"
             return  # Accepted-but-unwritten items remain visible; never claim clean.
         while not self._stop.is_set() or not self._queue.empty():
+            self._recover_spool_if_due(writer)
+            if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
+                break
+            self._probe_required_file_access(writer)
+            if self._state["required_file_manual_recovery"]:
+                break
             try:
                 event = self._queue.get(timeout=.05)
             except queue.Empty:
-                self._recover_spool_if_due(writer)
-                self._probe_required_file_access(writer)
-                if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
-                    break
                 continue
             started = time.monotonic()
             decoded = None
@@ -443,12 +445,19 @@ class SpotObservationQueue:
                     self._state["processing_payload_bytes"] -= processing_bytes - decoded_bytes
                     processing_bytes = decoded_bytes
                 failures_before = writer.failure_count
-                writer.write_fact(decoded)
-                if writer.failure_count > failures_before:
-                    self._record_failure("fact_or_spool_write_failed", event.observation_key, worker_failure=False)
+                spool_failures_before = writer.spool_failure_count
+                # During normal collection, new arrivals do not override the
+                # recovery owner's backoff. Keep existing terminal queue-drain
+                # behavior for already admitted events after close is requested.
+                deferred = self._state["spool_pending_count"] > 0 and not self._stop.is_set()
+                stored = (writer.write_fact(decoded, defer_to_spool=True) if deferred
+                          else writer.write_fact(decoded))
+                if writer.failure_count > failures_before or writer.spool_failure_count > spool_failures_before:
+                    self._record_failure("fact_or_spool_write_failed", event.observation_key,
+                                         worker_failure=writer.failure_count == failures_before)
                 self._refresh_state(writer)
                 with self._lock:
-                    if writer.failure_count == failures_before:
+                    if stored is not None and writer.failure_count == failures_before:
                         self._state["last_success_at"] = time.time()
             except _PayloadBudgetExceeded:
                 self._record_failure("decode_byte_limit", event.observation_key, worker_failure=True)

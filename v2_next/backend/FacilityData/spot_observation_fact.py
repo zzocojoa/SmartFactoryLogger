@@ -278,7 +278,7 @@ class SpotObservationFactWriter:
             self.failure_count += 1
             return False
 
-    def write_fact(self, snapshot: Mapping[str, Any]) -> Optional[dict[str, str]]:
+    def write_fact(self, snapshot: Mapping[str, Any], *, defer_to_spool: bool = False) -> Optional[dict[str, str]]:
         if _poll_identity(snapshot) is None and not _is_startup_pending_snapshot(snapshot):
             self.invalid_input_count += 1
             self.failure_count += 1
@@ -286,6 +286,11 @@ class SpotObservationFactWriter:
         fact = build_spot_observation_fact(snapshot)
         key = fact["spot_observation_key"]
         if not key or key in self._seen_keys:
+            return None
+        if defer_to_spool:
+            # The owner has an existing bounded recovery schedule. Preserve
+            # this new fact without retrying earlier writes through arrival.
+            self._spool_fact(fact)
             return None
         try:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)

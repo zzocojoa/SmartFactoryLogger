@@ -334,6 +334,59 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_new_observations_do_not_bypass_spool_backoff(self):
+        original_open = Path.open
+        clock, attempts, fail = [100.0], [], [True]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def failed_append(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    attempts.append(clock[0])
+                    if fail[0]:
+                        raise PermissionError("synthetic append outage")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", failed_append), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    self.assertTrue(owner.enqueue(observation(1)))
+                    owner._queue.join()
+                    for seq, now in [(2, 100.25), (3, 100.5)]:
+                        clock[0] = now
+                        self.assertTrue(owner.enqueue(observation(seq)))
+                        owner._queue.join()
+                        self.assertEqual(attempts, [100.0], "new arrival bypassed owned recovery backoff")
+                    self.assertEqual(owner.snapshot()["spool_pending_count"], 3)
+                    self.assertEqual(owner.snapshot()["write_failure_count"], 1)
+                    self.assertIsNone(owner.snapshot()["last_success_at"], "spooling was reported as a fact write")
+                    clock[0] = 101.0
+                    for _ in range(100):
+                        if owner.snapshot()["spool_recovery_failure_count"] == 1:
+                            break
+                        threading.Event().wait(.01)
+                    self.assertEqual(owner.snapshot()["spool_next_recovery_monotonic"], 103.0)
+                    clock[0] = 101.25
+                    self.assertTrue(owner.enqueue(observation(4)))
+                    owner._queue.join()
+                    self.assertEqual(attempts, [100.0, 101.0])
+                    self.assertEqual(owner.snapshot()["write_failure_count"], 1)
+                    fail[0] = False
+                    clock[0] = 103.0
+                    for _ in range(100):
+                        if owner.snapshot()["spool_pending_count"] == 0:
+                            break
+                        threading.Event().wait(.01)
+                    self.assertEqual(owner.snapshot()["spool_pending_count"], 0)
+                    self.assertEqual(owner.snapshot()["spool_recovered_count"], 4)
+                    self.assertEqual(owner.snapshot()["accepted_count"], 4)
+                finally:
+                    owner.close(2)
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "2", "3", "4"])
+
     def test_spooled_fact_recovers_on_idle_owner_with_backoff(self):
         original_open = Path.open
         clock, attempts, fail = [100.0], [], [True]
