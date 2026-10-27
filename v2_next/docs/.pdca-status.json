@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T23:33:38.036863+09:00",
+  "lastUpdated": "2026-10-27T15:13:43.014758+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "f8da5043133e50aff229775c4d4bfe672880d724",
+      "currentDevelopmentCommit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
       "lastBackendVerification": {
-        "commit": "3e89f937a465c094ead94d57598580130d35f9b8",
-        "total": 1108,
-        "passed": 1107,
+        "commit": "9f7e1dbf7628faa0d17ee9065e0c17f75e886cab",
+        "total": 1140,
+        "passed": 1139,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-recovery-budget/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48315,29 +48315,30 @@
         "Image owner reactivates after off/on and destination changes, reprobes changed UTC dates, retries directory failures with capped monotonic backoff, invalidates prior probe results on reactivation, and drains admitted captures before new destination initialization",
         "Pressure monitor expires stale NORMAL snapshots after two one-second controller intervals and requires spaced recovery after a delayed sample; no production integration yet",
         "Image gate rechecks BLOCKED after device lock; same-sensor cache/503 with profile retry seconds, distinct dispatch/suppressed-task counters, preserved already-dispatched acquisitions, CORS and strict frontend metadata parsing; pressure monitor is not started by production lifecycle yet",
-        "Explicit pressure 200/503 responses use a separate positive recheck timer without consuming/resetting ordinary retry attempts; preserve capture metadata, bound pending/displayed object URLs, ignore stale callbacks and configuration responses, use real visibility/config/shutdown/drain cleanup, and avoid timer overflow. Tested with actual React effects and controlled network responses; runtime monitor activation remains incomplete."
+        "Explicit pressure 200/503 responses use a separate positive recheck timer without consuming/resetting ordinary retry attempts; preserve capture metadata, bound pending/displayed object URLs, ignore stale callbacks and configuration responses, use real visibility/config/shutdown/drain cleanup, and avoid timer overflow. Tested with actual React effects and controlled network responses; runtime monitor activation remains incomplete.",
+        "Periodic diagnostics gate both task creation and actual dispatch on BLOCKED; preserve received values/real errors, explicitly mark current suppressed and remaining unrequested fields, keep distinct counters, and persist/recover v2 suppression separately from failures with legacy v1 reads and malformed-schema rejection. Production monitor remains unconnected."
       ],
       "remainingScope": [
         "Complete required-file and CSV/fact availability, fixed stage deadlines and per-generation pending contracts; preserve per-destination history across writer replacement",
         "Initializer failure/restart ownership and bounded retry lifecycle remain unverified; directory probes are not complete file availability proof",
-        "Wire required writer state providers and monitor lifecycle; implement PRESSURED cadence, periodic diagnostic gate/journal, full status/observation-reference contracts and runtime end-to-end integration",
+        "Wire required writer state providers and monitor lifecycle; implement PRESSURED cadence, NORMAL interval/temperature priority, full status/observation-reference contracts and runtime end-to-end integration",
         "Complete fact/JPEG reconciliation, recovery and aggregate workspace reservations; all 17 r4 scenarios",
         "Final whole-state health/build/installer verification and master integration"
       ],
       "lastWholeHealth": {
-        "commit": "4d671d6c",
+        "commit": "9f7e1dbf7628faa0d17ee9065e0c17f75e886cab",
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_RECHECK_20261027_63a52959/health-result.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/health-result.json"
       },
-      "updatedAt": "2026-10-27T23:33:38.036863+09:00",
+      "updatedAt": "2026-10-27T15:13:43.014758+00:00",
       "lastRelatedBackendVerification": {
-        "commit": "66635d0f528894c69eb5edd72071415b58bf7913",
-        "total": 156,
-        "passed": 156,
+        "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
+        "total": 190,
+        "passed": 190,
         "skipped": 0,
         "exitCode": 0,
-        "scope": "shutdown closeout, image shutdown evidence and temperature observation fact modules",
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-row-contract/verification.json"
+        "scope": "complete SPOT API module after canonical counter fields",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json"
       },
       "lastPressureVerification": {
         "commit": "e6a592847f0dbac0e6db4004ec57380335cd0ed6",
@@ -48385,6 +48386,16 @@
         "lintExitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-ui/verification.json",
         "productionMonitorStarted": false
+      },
+      "lastPressureDiagnosticVerification": {
+        "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
+        "relatedExitCode": 0,
+        "wholeHealthBaseCommit": "9f7e1dbf7628faa0d17ee9065e0c17f75e886cab",
+        "wholeHealthBaseExitCode": 0,
+        "productionMonitorStarted": false,
+        "legacyJournalRead": true,
+        "oldReaderRollbackVerified": false,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json"
       }
     }
   },

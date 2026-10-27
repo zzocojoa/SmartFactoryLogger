@@ -1081,3 +1081,21 @@ off→on·목적지/날짜 변경·probe backoff와 설정 세대별 결합, CSV
 전체 목표1~4 완료·5~7 일부 진행을 유지한다. required writer 상태/가용성·monitor 서비스 연결, 초기화 실패 재기동, PRESSURED 감속·주기 진단/journal, 전체 상태/관측 참조·fact/JPEG/작업 공간과17시나리오, 최종 전체 health·새 설치본·master 병합은 남는다. 운영 monitor는 여전히 기본 None이며 이번에 서버·설치본·설정·백업을 변경하지 않았다. 별도 보안 검토 도구가 없어 새 권한/인증정보 노출 없음·명시적 억제 분기·실제 오류 보존·URL/정수 timer·설정 세대 경계를 직접 검토했다.
 
 직전 재점검은 HEAD/원격·109경로·원문·운영 설치본/승격 근거와32로그를 검산한 PROGRESS다. 이번 턴은 위 화면 코드·회귀의 구현과 검증을 진행했다. 목표를 축소하거나 완료로 표시하지 않는다.
+
+
+## 2026-10-28 주기 진단의 저장 압력 차단·기록 복원
+
+- `77adc129`: journal v2의 queued→suppressed/storage_pressure를 실제 실패와 분리한다. 미발송에는 시작/소요 시각을 만들지 않고 active를 종결한다. v1 원문은 유지하고 새 reader에서 읽는다.
+- `c8bf19ee`: 장치 잠금 대기 중 BLOCKED 전환 시 진단 발송0건. 필드별 결과로 중간 억제의 길이 예외를 제거하고 받은 값·실제 오류·억제 현재 항목·미접수 나머지를 구분한다. field status parser와 관측 fact 직렬화도 연결했다.
+- `f7b50e29`: BLOCKED에서 진단 task/journal을 만들지 않고 별도 poll 억제 계수를 남긴다. 회복 후 정상8항목 수신과 기존 단일 작업 제한을 유지한다.
+- `e52bcab3`: 이미 발송한 성공/timeout을 사후 억제로 바꾸지 않음, 부분 결과·fact 상태·journal 재시작 복원, v1/v2 혼합 읽기·v1의 잘못된 억제 거부, running/exception 요청의 억제 전환 거부를 회귀 검사했다.
+- `9f7e1dbf`: schema_version 배열/객체 입력으로 복원이 TypeError로 끝나는 행동 RED를 확인하고 타입 검사를 추가했다. 정상 오류 기록은 복원하고 잘못된6행만 거부한다.
+- `ba093228`: 계획의 `image_dispatch_attempt_count`·`diagnostic_dispatch_attempt_count`·`pre_dispatch_suppressed_count`를 공개 상태에 연결했다. 기존 필드는 유지한다. 마지막 항목은 현재 프로세스에서 장치 발송 gate를 넘지 못한 이미지 작업+개별 진단 요청의 합이며, 작업 생성 전 poll 억제·coalesced waiter·task 없는 캐시/503 응답은 포함하지 않는다. 이미지 두 waiter를 억제1건으로 집계하고 회복 후 실제 발송1건을 별도로 확인했다.
+
+총5행동 RED→GREEN은 journal 상태, 잠금 뒤 발송, 작업 생성 전 차단, 잘못된 schema 값, 계획의 계측 필드다. 보완4메서드는 후속 회귀이며 새 RED가 아니다. 시험 도중 잘못된 journal 변수명·fact 키·일반 fixture의 비UUID 서비스 식별자 때문에 나온 실패는 수정·보존했으며 제품 실패로 집계하지 않는다.
+
+`9f7e1dbf7628faa0d17ee9065e0c17f75e886cab`의 `npm.cmd run health` exit0. backend 전체 **1140중1139통과·1skip**, 473.975초; frontend Node9/Vitest460, 타입·lint, 기본 mypy12파일, Electron/의존성 및 QA selftest 체인이 완료됐다. skip은 기존 private F01자료 미제공이다. 이후 계획의 계측 필드와 관련 시험을 보완한 최종 소스 `2976c9a3d86e44ed57e661634775226b84a42b9c`는 SPOT API 전체 **190시험 exit0**, 변경 파일 Ruff·diff 검사 exit0을 확인했다. 전체 health를 이 후속 commit에서 다시 실행한 것으로 표시하지 않는다. 명령·전체 출력·종료 코드·SHA256, 소스4개/고정 원문4개 검산: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json`.
+
+IC02의 로컬 구현/기록 계약만 완료 표시했다. 운영 monitor 시작/required writer 제공, PRESSURED 감속·NORMAL 온도 우선/간격, 전체 상태/관측 참조·fact/JPEG·작업 공간·17시나리오, 최종 새 설치본과 master 통합은 계속 미완료다. v2의 구버전 reader 복구는 아직 검증하지 않았다. 최종 배포 전 관련 호환성을 검증해야 하며 승인 운영본을 자동 교체하지 않는다.
+
+전용 security-review 도구가 없어 strict schema·타입·민감정보 비추가·기록 보존·발송/실패 분리·잠금 내 I/O/backoff 없음·명시 제어 경로 비변경을 직접 검토했다. 서버·운영 설치본·설정·백업은 변경하지 않았다. 직전 목표 턴은 재점검 보고로 구현 진전이 없었으므로 이번 턴에는 위 코드·시험을 이어갔다. 일곱 목표와 운영 승격 범위는 유지하고 전체 완료로 표시하지 않는다.
