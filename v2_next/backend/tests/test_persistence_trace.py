@@ -9,6 +9,35 @@ from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_first_record_deadline_is_not_postponed_by_later_records(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            clock = [10.]
+            writer = PersistenceTraceWriter(root, "deadline-producer", clock=lambda: clock[0])
+            writer.append({"event_id": 1})
+            clock[0] = 10.9
+            writer.append({"event_id": 2})
+            self.assertTrue(writer.flush())
+            self.assertEqual(list(root.glob("*.trace.jsonl")), [], "trace flushed before first record deadline")
+            self.assertEqual(writer.snapshot()["next_flush_monotonic"], 11.)
+            clock[0] = 11.
+            self.assertTrue(writer.flush())
+            self.assertEqual(writer.snapshot()["pending_records"], 0)
+            self.assertIsNone(writer.snapshot()["next_flush_monotonic"])
+            files = list(root.glob("*.trace.jsonl"))
+            self.assertEqual(len(files), 1)
+            self.assertEqual([json.loads(line) for line in files[0].read_text(encoding="utf-8").splitlines()][1:],
+                             [{"event_id": 1}, {"event_id": 2}])
+            clock[0] = 11.2
+            writer.append({"event_id": 3})
+            self.assertEqual(writer.snapshot()["next_flush_monotonic"], 12.2)
+            clock[0] = 12.1
+            self.assertTrue(writer.flush())
+            self.assertEqual(len(list(root.glob("*.trace.jsonl"))), 1)
+            clock[0] = 12.2
+            self.assertTrue(writer.flush())
+            self.assertEqual(len(list(root.glob("*.trace.jsonl"))), 2)
+
     def test_trace_byte_limits_reject_oversized_records_without_copying(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

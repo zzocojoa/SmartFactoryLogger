@@ -16,12 +16,14 @@ TRACE_PENDING_SEGMENT_LIMIT = 2
 TRACE_SEGMENT_BYTE_LIMIT = 1024**2
 TRACE_PENDING_BYTE_LIMIT = 2 * TRACE_SEGMENT_BYTE_LIMIT
 TRACE_READBACK_BYTES = 4096
+TRACE_FLUSH_INTERVAL_SEC = 1.0
 
 
 @dataclass
 class _TraceSegment:
     sequence: int
     header: bytes
+    flush_due_monotonic: float
     records: list[bytes] = field(default_factory=list)
     sealed: bool = False
 
@@ -91,7 +93,7 @@ class PersistenceTraceWriter:
                 header = encode_json_payload(header_source, sort_keys=True, compact=True, newline=True)
             payload = encode_json_payload(prepared, sort_keys=True, compact=True, newline=True)
             if segment is None:
-                segment = _TraceSegment(self._next_sequence, header)
+                segment = _TraceSegment(self._next_sequence, header, self.clock() + TRACE_FLUSH_INTERVAL_SEC)
                 self._next_sequence += 1
                 self._segments.append(segment)
             segment.records.append(payload)
@@ -152,6 +154,9 @@ class PersistenceTraceWriter:
                 if not self._segments:
                     return True
                 segment = self._segments[0]
+                if (not force and not segment.sealed and len(segment.records) < TRACE_SEGMENT_RECORD_LIMIT
+                        and segment.size < TRACE_SEGMENT_BYTE_LIMIT and self.clock() < segment.flush_due_monotonic):
+                    return True
                 segment.sealed = True
                 self._processing_bytes = TRACE_READBACK_BYTES
             try:
@@ -178,4 +183,5 @@ class PersistenceTraceWriter:
                     "committed_segment_seq": self._committed_sequence,
                     "failure_count": self._failure_count,
                     "refused_count": self._refused_count, "incomplete": self._incomplete,
-                    "last_error": self._last_error}
+                    "last_error": self._last_error,
+                    "next_flush_monotonic": self._segments[0].flush_due_monotonic if self._segments else None}
