@@ -294,6 +294,36 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(final['pending_payload_bytes'], 0)
         self.assertTrue(final['accounting_consistent'])
 
+    def test_capture_interval_starts_at_successful_admission(self):
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC', 1.))
+        clock = [100.]
+        original_put = queue.Queue.put_nowait
+
+        def delayed_put(target, item):
+            # Real queue insertion succeeds two seconds after its producer
+            # started. The clock boundary is deterministic, without sleeping.
+            original_put(target, item)
+            if target is spot._SPOT_IMAGE_CAPTURE_QUEUE:
+                clock[0] = 102.
+
+        with patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(queue.Queue, 'put_nowait', delayed_put):
+            self.assertTrue(self.enqueue().accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        with patch.object(spot.time, 'monotonic', return_value=102.5):
+            receipt = self.enqueue()
+        self.assertEqual((receipt.status, receipt.reason), ('DISABLED', 'policy_skipped_interval'))
+        with patch.object(spot.time, 'monotonic', return_value=103.):
+            self.assertTrue(self.enqueue().accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 2)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([row['spot_image_captured_at'] for row in rows],
+                         ['2026-09-29T00:00:01Z', '2026-09-29T00:00:03Z'])
+
     def test_capture_interval_ignores_wall_clock_changes(self):
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC', 1.))
 

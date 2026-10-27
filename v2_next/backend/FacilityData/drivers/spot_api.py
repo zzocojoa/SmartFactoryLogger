@@ -1309,7 +1309,6 @@ def _enqueue_spot_image_capture_locked(
     if not _should_enqueue_spot_image_capture(mode, snapshot):
         return ImageCaptureAdmissionResult("DISABLED", "policy_skipped_mode", capture_id)
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
-    now = time.time()
     monotonic_now = time.monotonic()
     with _spot_image_capture_lock:
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
@@ -1372,8 +1371,8 @@ def _enqueue_spot_image_capture_locked(
                 return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
             transferred_bytes = payload_size
             _spot_image_capture_enqueued_count += 1
-            _spot_image_capture_last_enqueue_at = now
-            _spot_image_capture_last_enqueue_monotonic = monotonic_now
+            _spot_image_capture_last_enqueue_at = time.time()
+            _spot_image_capture_last_enqueue_monotonic = time.monotonic()
     except PayloadBudgetExceeded:
         with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
