@@ -307,6 +307,11 @@ _spot_image_capture_dropped_payload_limit_count = 0
 _spot_image_capture_dropped_invalid_count = 0
 _spot_image_capture_pending_payload_bytes = 0
 _spot_image_capture_failure_count = 0
+_spot_image_capture_recovery: Optional[_SpotImageCaptureEvent] = None
+_spot_image_capture_retry_at: Optional[float] = None
+_spot_image_capture_retry_delay = 1.0
+_spot_image_capture_retry_error_count = 0
+_spot_image_capture_recovered_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 _spot_image_shutdown_baseline: Optional[Dict[str, Any]] = None
 
@@ -704,11 +709,24 @@ def _spot_image_capture_worker() -> None:
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_write_at, _spot_image_capture_written_count
     global _spot_image_capture_pending_payload_bytes
+    global _spot_image_capture_recovery, _spot_image_capture_retry_at, _spot_image_capture_retry_delay
+    global _spot_image_capture_retry_error_count, _spot_image_capture_recovered_count
     writer: Optional[SpotImageCaptureWriter] = None
     try:
         while (not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty()
-               or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()):
-            if _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set():
+               or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
+               or _spot_image_capture_recovery is not None):
+            if _spot_image_capture_recovery is not None:
+                # The same single owner retains the original queue task and
+                # payload reservation. Shutdown must not schedule another try.
+                if _SPOT_IMAGE_CAPTURE_STOP.is_set() or _spot_image_shutdown_baseline is not None:
+                    break
+                remaining = max(0.0, (_spot_image_capture_retry_at or 0.0) - time.monotonic())
+                if remaining:
+                    _SPOT_IMAGE_CAPTURE_STOP.wait(min(remaining, 0.1))
+                    continue
+                event = _spot_image_capture_recovery
+            elif _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set():
                 _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
                 try:
                     current_writer = _get_spot_image_capture_writer()
@@ -721,17 +739,18 @@ def _spot_image_capture_worker() -> None:
                     _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.set()
                     _logger.exception("SPOT image manifest initialization failed")
                 continue
-            try:
-                event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
-            except queue.Empty:
-                if writer is not None and not _SPOT_IMAGE_CAPTURE_STOP.is_set():
-                    if (writer is not _spot_image_capture_writer
-                            or _spot_image_capture_writer_signature != _spot_image_capture_config_signature()):
-                        writer.close_retention_scan()
-                        writer = None
-                    else:
-                        writer._cleanup_retention(time.time(), allow_start=False)
-                continue
+            else:
+                try:
+                    event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
+                except queue.Empty:
+                    if writer is not None and not _SPOT_IMAGE_CAPTURE_STOP.is_set():
+                        if (writer is not _spot_image_capture_writer
+                                or _spot_image_capture_writer_signature != _spot_image_capture_config_signature()):
+                            writer.close_retention_scan()
+                            writer = None
+                        else:
+                            writer._cleanup_retention(time.time(), allow_start=False)
+                    continue
             fact: Optional[Dict[str, str]] = None
             capture_error: Optional[Exception] = None
             failure_stage = "writer_initialization"
@@ -785,7 +804,16 @@ def _spot_image_capture_worker() -> None:
                         event, capture_error, stage=failure_stage, error_at=time.time(),
                         failure_count=_spot_image_capture_failure_count + 1,
                     )
+                retain_for_retry = (
+                    isinstance(capture_error, OSError)
+                    and not (writer is not None and writer._fact_append_uncertain)
+                    and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
+                    and _spot_image_shutdown_baseline is None
+                )
                 reserved_bytes = event.reserved_payload_bytes
+                if retain_for_retry:
+                    with _spot_image_capture_lock:
+                        _spot_image_capture_recovery = event
                 # Release the payload and any exception traceback owning it
                 # before returning the reservation to another producer.
                 del event
@@ -795,7 +823,17 @@ def _spot_image_capture_worker() -> None:
                 # transition. Shutdown can therefore never observe a recorded
                 # failure while the same capture still appears unfinished.
                 with _spot_image_capture_lock:
-                    if failure_evidence is None and fact is not None:
+                    if retain_for_retry:
+                        _spot_image_capture_retry_error_count += 1
+                        _spot_image_capture_retry_at = time.monotonic() + _spot_image_capture_retry_delay
+                        _spot_image_capture_retry_delay = min(30.0, _spot_image_capture_retry_delay * 2.0)
+                        _spot_image_capture_pending_payload_bytes -= processing_bytes
+                        assert failure_evidence is not None
+                        failure_evidence["event"] = "spot_image_capture_retry_pending"
+                        failure_evidence["failure_count"] = _spot_image_capture_failure_count
+                        failure_evidence["retry_error_count"] = _spot_image_capture_retry_error_count
+                        failure_evidence["next_retry_at_monotonic"] = _spot_image_capture_retry_at
+                    elif failure_evidence is None and fact is not None:
                         _spot_image_capture_written_count += 1
                         _spot_image_capture_last_write_at = time.time()
                         _spot_image_capture_last_fact = dict(fact)
@@ -804,11 +842,18 @@ def _spot_image_capture_worker() -> None:
                     else:
                         assert failure_evidence is not None
                         _spot_image_capture_failure_count += 1
+                    if failure_evidence is not None:
                         _spot_image_capture_last_error_at = failure_evidence["error_at"]
                         _spot_image_capture_last_error_code = failure_evidence["error_type"]
                         _spot_image_capture_last_error_message = "capture writer failed"
-                    _spot_image_capture_pending_payload_bytes -= reserved_bytes + processing_bytes
-                    _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
+                    if not retain_for_retry:
+                        if _spot_image_capture_recovery is not None and fact is not None:
+                            _spot_image_capture_recovered_count += 1
+                        _spot_image_capture_recovery = None
+                        _spot_image_capture_retry_at = None
+                        _spot_image_capture_retry_delay = 1.0
+                        _spot_image_capture_pending_payload_bytes -= reserved_bytes + processing_bytes
+                        _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
             if failure_evidence is not None:
                 # Default stderr formatting drops LogRecord.extra. Keep the safe
                 # capture identity in the message even after later writes recover.
@@ -886,6 +931,11 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "enqueued_count": _spot_image_capture_enqueued_count,
         "written_count": _spot_image_capture_written_count,
         "failure_count": failures,
+        "pending_recovery": int(_spot_image_capture_recovery is not None),
+        "retry_error_count": _spot_image_capture_retry_error_count,
+        "recovered_count": _spot_image_capture_recovered_count,
+        "next_retry_at_monotonic": _spot_image_capture_retry_at,
+        "historical_retry_errors": baseline.get("historical_retry_errors"),
         "dropped_count": _spot_image_capture_dropped_count,
         "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
         "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
@@ -900,7 +950,8 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "manifest_initialization_failed": initialization_failed,
         "writes_drained": writes_drained,
         # This is evidence of unresolved writes, not an image-loss estimate.
-        "integrity_unresolved": failures > 0 or _spot_image_capture_dropped_count > 0
+        "integrity_unresolved": failures > 0 or _spot_image_capture_retry_error_count > 0
+        or _spot_image_capture_dropped_count > 0
         or not writes_drained or delta is None or initialization_failed,
     }
 
@@ -918,6 +969,7 @@ def begin_spot_image_capture_shutdown() -> Dict[str, Any]:
                 "shutdown_id": uuid4().hex,
                 "requested_at": datetime.now(timezone.utc).isoformat(),
                 "historical_failures": _spot_image_capture_failure_count,
+                "historical_retry_errors": _spot_image_capture_retry_error_count,
                 "historical_dropped_count": _spot_image_capture_dropped_count,
                 "historical_last_error_at": _spot_image_capture_last_error_at or None,
             }
@@ -945,7 +997,8 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     stopped = stop_spot_image_capture_writer(timeout_sec=timeout_sec)
     with _spot_image_capture_lock:
         failure_count_after = _spot_image_capture_failure_count
-    return stopped and failure_count_after == 0
+        retry_errors = _spot_image_capture_retry_error_count
+    return stopped and failure_count_after == 0 and retry_errors == 0
 
 
 def _reset_spot_image_capture_state_for_tests() -> None:
@@ -959,7 +1012,12 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
     global _spot_image_capture_last_enqueue_monotonic
+    global _spot_image_capture_recovery, _spot_image_capture_retry_at, _spot_image_capture_retry_delay
+    global _spot_image_capture_retry_error_count, _spot_image_capture_recovered_count
     stop_spot_image_capture_writer(timeout_sec=0.5)
+    if _spot_image_capture_recovery is not None:
+        _spot_image_capture_recovery = None
+        _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
     while True:
         try:
             _SPOT_IMAGE_CAPTURE_QUEUE.get_nowait()
@@ -981,6 +1039,10 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_dropped_invalid_count = 0
         _spot_image_capture_pending_payload_bytes = 0
         _spot_image_capture_failure_count = 0
+        _spot_image_capture_retry_at = None
+        _spot_image_capture_retry_delay = 1.0
+        _spot_image_capture_retry_error_count = 0
+        _spot_image_capture_recovered_count = 0
         _spot_image_capture_last_enqueue_at = 0.0
         _spot_image_capture_last_enqueue_monotonic = None
         _spot_image_capture_last_write_at = 0.0
@@ -1117,6 +1179,10 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "pending_payload_bytes": _spot_image_capture_pending_payload_bytes,
             "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
             "failure_count": _spot_image_capture_failure_count,
+            "pending_recovery": int(_spot_image_capture_recovery is not None),
+            "retry_error_count": _spot_image_capture_retry_error_count,
+            "recovered_count": _spot_image_capture_recovered_count,
+            "next_retry_at_monotonic": _spot_image_capture_retry_at,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
             "last_write_at": _spot_image_capture_last_write_at or None,
             "last_error_at": _spot_image_capture_last_error_at or None,

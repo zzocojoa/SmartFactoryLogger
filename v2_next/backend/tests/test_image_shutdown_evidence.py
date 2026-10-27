@@ -93,7 +93,9 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
     def history(self, count=13):
         def fail(path, data):
             if path.is_relative_to(self.root / 'images'):
-                raise OSError('synthetic file write failure')
+                # This fixture creates terminal historical failures. Temporary
+                # OSError now remains pending and is covered by owned recovery.
+                raise RuntimeError('synthetic terminal capture failure')
             return self.write_bytes(path, data)
         with patch.object(Path, 'write_bytes', fail):
             for _ in range(count):
@@ -446,6 +448,73 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 with (log_path / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
                     self.assertEqual(len(list(csv.DictReader(handle))), count)
             self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
+
+    def test_transient_fact_open_failure_retries_owned_capture(self):
+        image = io.BytesIO()
+        Image.new('RGB', (2, 2), (3, 4, 5)).save(image, format='JPEG')
+        base = image.getvalue()
+        padding = bytearray()
+        remaining = 1_500_000 - len(base)
+        while remaining:
+            size = min(remaining, 65537)
+            if 0 < remaining - size < 4:
+                size -= 4 - (remaining - size)
+            padding.extend(b'\xff\xfe' + (size - 2).to_bytes(2, 'big') + b'x' * (size - 4))
+            remaining -= size
+        jpeg = base[:2] + bytes(padding) + base[2:]
+        with Image.open(io.BytesIO(jpeg)) as decoded:
+            decoded.verify()
+        opened = Path.open
+        failures = []
+
+        def fail_once(path, mode='r', *args, **kwargs):
+            if path == self.root / 'spot_image_fact.csv' and mode == 'ab' and not failures:
+                failures.append(time.monotonic())
+                raise PermissionError(13, 'transient fact open failure')
+            return opened(path, mode, *args, **kwargs)
+
+        with patch.object(Path, 'open', new=fail_once):
+            receipt = spot._maybe_enqueue_spot_image_capture(
+                image_bytes=jpeg, captured_at=1790640001.,
+                image_url='http://synthetic.invalid/image.jpg', source='test', image_age_ms=7,
+                capture_id='spotimg_20260929T000001000000Z_' + 'b' * 32,
+            )
+            self.assertTrue(receipt.accepted)
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                pending = spot.get_spot_image_capture_shutdown_status()
+                if pending.get('retry_error_count') or pending['failure_count']:
+                    break
+                time.sleep(.01)
+            self.assertEqual(pending['unfinished_tasks'], 1, 'failed capture must remain owned for recovery')
+            self.assertEqual(pending['pending_payload_bytes'], len(jpeg))
+            self.assertEqual(pending['pending_recovery'], 1)
+            self.assertEqual(pending['retry_error_count'], 1)
+            self.assertEqual(pending['failure_count'], 0)
+            self.assertTrue(pending['accounting_consistent'])
+            image_path, = self.root.rglob('*.jpg')
+            sentinel = 1700000000123456000
+            os.utime(image_path, ns=(sentinel, sentinel))
+            new_root = self.root / 'new-destination'
+            with patch.object(spot.config, 'LOG_PATH', str(new_root)), \
+                 patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MAX_BYTES', 1024):
+                self.assertTrue(spot.flush_spot_image_capture_queue(4))
+            self.assertFalse(new_root.exists())
+        self.assertEqual(image_path.read_bytes(), jpeg)
+        self.assertEqual(image_path.stat().st_mtime_ns, sentinel)
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['spot_image_capture_id'], receipt.capture_id)
+        self.assertEqual(rows[0]['spot_image_sha256'], hashlib.sha256(jpeg).hexdigest())
+        self.assertEqual(rows[0]['spot_image_age_ms'], '7.000')
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 1)
+        self.assertEqual(final['pending_recovery'], 0)
+        self.assertEqual(final['retry_error_count'], 1)
+        self.assertEqual(final['recovered_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertTrue(final['accounting_consistent'])
 
     def test_existing_capture_verification_reserves_worker_payload(self):
         data = io.BytesIO()
