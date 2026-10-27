@@ -35,7 +35,9 @@ from backend.FacilityData.spot_diagnostics import (
 )
 
 
-from backend.FacilityData.freshness import spot_poll_duration_output, spot_poll_duration_metadata
+from backend.FacilityData.freshness import (
+    clock_domain_id, finite_number, spot_poll_duration_output, spot_poll_duration_metadata,
+)
 
 SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.4.0"
 SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION = "1.3.0"
@@ -251,6 +253,7 @@ class SpotObservationFactWriter:
     )
     _spool_read_offsets: dict[Path, int] = field(default_factory=dict, init=False, repr=False)
     _spool_file_stamps: dict[Path, tuple[int, int, int, int]] = field(default_factory=dict, init=False, repr=False)
+    _spool_timed_paths: set[Path] = field(default_factory=set, init=False, repr=False)
     _active_spool_segment: Path | None = field(default=None, init=False, repr=False)
     _uncertain_spool_path: Path | None = field(default=None, init=False, repr=False)
     _initial_read_retryable: bool = field(default=False, init=False, repr=False)
@@ -296,7 +299,10 @@ class SpotObservationFactWriter:
             self.failure_count += 1
             return False
 
-    def write_fact(self, snapshot: Mapping[str, Any], *, defer_to_spool: bool = False) -> Optional[dict[str, str]]:
+    def write_fact(
+        self, snapshot: Mapping[str, Any], *, defer_to_spool: bool = False,
+        admission: tuple[float, str] | None = None,
+    ) -> Optional[dict[str, str]]:
         if _poll_identity(snapshot) is None and not _is_startup_pending_snapshot(snapshot):
             self.invalid_input_count += 1
             self.failure_count += 1
@@ -308,7 +314,7 @@ class SpotObservationFactWriter:
         if defer_to_spool:
             # The owner has an existing bounded recovery schedule. Preserve
             # this new fact without retrying earlier writes through arrival.
-            self._spool_fact(fact)
+            self._spool_fact(fact, admission=admission)
             return None
         try:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,7 +329,7 @@ class SpotObservationFactWriter:
             raise
         except Exception:
             self.failure_count += 1
-            self._spool_fact(fact)
+            self._spool_fact(fact, admission=admission)
             return None
 
     def _append_fact(self, fact: Mapping[str, str]) -> None:
@@ -404,6 +410,7 @@ class SpotObservationFactWriter:
                     if end_offset == spool_path.stat().st_size and spool_path != self._effective_spool_path():
                         spool_path.unlink()
                         self._spool_file_stamps.pop(spool_path, None)
+                        self._spool_timed_paths.discard(spool_path)
                         self._spool_read_offsets.pop(spool_path, None)
                         if spool_path == self._active_spool_segment:
                             self._active_spool_segment = None
@@ -523,7 +530,7 @@ class SpotObservationFactWriter:
             raise error from cause
         raise error
 
-    def _spool_fact(self, fact: Mapping[str, str]) -> None:
+    def _spool_fact(self, fact: Mapping[str, str], *, admission: tuple[float, str] | None = None) -> None:
         writing_path: Path | None = None
         try:
             with self._spool_state_lock:
@@ -531,11 +538,17 @@ class SpotObservationFactWriter:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_write_uncertain"
                     return
+                timed = (admission is not None and finite_number(admission[0]) is not None
+                         and 0 <= admission[0] <= time.monotonic() and admission[1] == clock_domain_id())
+                serialized: dict[str, Any] = dict(fact)
+                if timed:
+                    assert admission is not None
+                    serialized['_sfl_admission_v1'] = {'monotonic': admission[0], 'clock_domain': admission[1]}
                 try:
                     # Any valid row can need at most 1x UTF-8 bytes plus 4x
                     # Unicode character contents. Reject before rendering it.
                     source, payload_size, text_characters, text_width = prepare_json_payload(
-                        dict(fact), 5 * FACT_SPOOL_RECOVERY_BYTE_LIMIT)
+                        serialized, 5 * FACT_SPOOL_RECOVERY_BYTE_LIMIT)
                 except PayloadBudgetExceeded:
                     self.spool_failure_count += 1
                     self.spool_last_error_code = "spool_row_too_large"
@@ -569,6 +582,10 @@ class SpotObservationFactWriter:
                                 raise OSError("Incomplete SPOT observation spool write")
                         self._active_spool_segment = spool_path
                         self._spool_file_stamps[spool_path] = _spool_file_stamp(spool_path.stat())
+                        if timed and mode == 'xb':
+                            self._spool_timed_paths.add(spool_path)
+                        elif not timed:
+                            self._spool_timed_paths.discard(spool_path)
                         if self._spool_pending_count_cache is not None:
                             self._spool_pending_count_cache += 1
                     finally:
@@ -640,6 +657,56 @@ class SpotObservationFactWriter:
                 self._reject_invalid_spool(self._uncertain_spool_path, "missing-file")
             self._spool_file_stamps.update(present)
             return pending, retained
+
+    def spool_oldest_pending_monotonic(self) -> float | None:
+        """Read bounded head rows on the owner; legacy/replaced-owner clocks remain unknown."""
+        with self._spool_state_lock:
+            self.spool_storage_usage()
+            oldest = None
+            for path in self._spool_pending_paths():
+                stamp = self._spool_file_stamps.get(path)
+                offset = self._spool_read_offsets.get(path, 0)
+                if stamp is None or stamp[2] <= offset:
+                    continue
+                if path not in self._spool_timed_paths:
+                    return None
+                admitted = self._read_spool_admission_time(path, stamp, offset)
+                if admitted is None:
+                    return None
+                oldest = admitted if oldest is None else min(oldest, admitted)
+            return oldest
+
+    def _read_spool_admission_time(
+        self, path: Path, expected: tuple[int, int, int, int], offset: int,
+    ) -> float | None:
+        limit = min(FACT_SPOOL_RECOVERY_BYTE_LIMIT, expected[2] - offset)
+        with self._reserve_recovery_payload(2 * limit + io.DEFAULT_BUFFER_SIZE):
+            line = b''
+            try:
+                with path.open('rb') as handle:
+                    self._require_spool_stamp(path, expected, os.fstat(handle.fileno()))
+                    handle.seek(offset)
+                    line = handle.readline(limit)
+                    self._require_spool_stamp(path, expected, os.fstat(handle.fileno()))
+                self._require_spool_stamp(path, expected, path.stat())
+                if not line.endswith(b'\n'):
+                    return None
+                with self._reserve_recovery_payload(12 * len(line)):
+                    row = metadata = None
+                    try:
+                        try:
+                            row = json.loads(line)
+                        except (ValueError, UnicodeError):
+                            return None
+                        metadata = row.get('_sfl_admission_v1') if isinstance(row, dict) else None
+                        if not isinstance(metadata, dict) or metadata.get('clock_domain') != clock_domain_id():
+                            return None
+                        admitted = finite_number(metadata.get('monotonic'))
+                        return admitted if admitted is not None and 0 <= admitted <= time.monotonic() else None
+                    finally:
+                        row = metadata = None
+            finally:
+                line = b''
 
     def spool_pending_count(self) -> int:
         with self._spool_state_lock:

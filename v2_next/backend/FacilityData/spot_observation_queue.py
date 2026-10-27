@@ -66,6 +66,7 @@ class _FactEvent:
     text_storage_bytes: int
     observation_key: str
     enqueued_at: float
+    clock_domain: str
 
 
 class SpotObservationQueue:
@@ -97,6 +98,7 @@ class SpotObservationQueue:
             "spool_pending_byte_limit": FACT_SPOOL_PENDING_BYTE_LIMIT,
             "spool_usage_status": "unknown", "spool_usage_error_type": None,
             "spool_usage_failure_count": 0, "spool_usage_checked_monotonic": None,
+            "spool_timing_status": "unknown", "spool_oldest_pending_monotonic": None,
             "initialization_duration_ms": None, "last_write_duration_ms": None,
             "last_error_code": None, "last_success_at": None, "accepting": True,
             "last_queue_residence_ms": None, "existing_fact_hash_ms": None, "existing_fact_index_ms": None,
@@ -163,7 +165,8 @@ class SpotObservationQueue:
                 payload = _encode_json_payload(source)
                 if len(payload) != payload_size:
                     raise ValueError("JSON payload size changed after reservation")
-                event = _FactEvent(payload, text_characters * text_width, observation_key, time.monotonic())
+                event = _FactEvent(payload, text_characters * text_width, observation_key,
+                                   time.monotonic(), clock_domain_id())
                 self._queue.put_nowait(event)
                 self._pending_enqueued_at.append(event.enqueued_at)
                 self._state["accepted_count"] += 1
@@ -193,6 +196,10 @@ class SpotObservationQueue:
         with self._lock:
             state = dict(self._state)
             oldest = self._pending_enqueued_at[0] if self._pending_enqueued_at else None
+            if state['spool_pending_count'] or state['spool_pending_bytes']:
+                spool_oldest = state['spool_oldest_pending_monotonic']
+                oldest = (None if state['spool_timing_status'] != 'known'
+                          else spool_oldest if oldest is None else min(oldest, spool_oldest))
             state["oldest_pending_monotonic"] = oldest
             # Fact data has no scheduled flush delay. Retries or newer arrivals
             # must not postpone the immediate stage deadline fixed at admission.
@@ -290,17 +297,22 @@ class SpotObservationQueue:
         # All stat/read/manifest work is performed by the single owner thread.
         try:
             pending_bytes, retained_bytes = writer.spool_storage_usage()
+            pending = writer.spool_pending_count()
+            spool_oldest = writer.spool_oldest_pending_monotonic()
         except Exception as exc:
             with self._lock:
                 self._state["spool_usage_status"] = "unknown"
                 self._state["spool_usage_error_type"] = type(exc).__name__
                 self._state["spool_usage_failure_count"] += 1
+                self._state["spool_timing_status"] = "unknown"
             raise
         with self._lock:
             self._state.update(spool_pending_bytes=pending_bytes, spool_retained_bytes=retained_bytes,
                                spool_usage_status="measured", spool_usage_error_type=None,
-                               spool_usage_checked_monotonic=time.monotonic())
-        pending = writer.spool_pending_count()
+                               spool_usage_checked_monotonic=time.monotonic(),
+                               spool_oldest_pending_monotonic=spool_oldest,
+                               spool_timing_status=('empty' if pending == 0 and pending_bytes == 0
+                                                    else 'known' if spool_oldest is not None else 'unknown'))
         summary = writer.manifest_summary()
         stat = writer.output_path.stat()
         with self._lock:
@@ -507,8 +519,8 @@ class SpotObservationQueue:
                 # recovery owner's backoff. Keep existing terminal queue-drain
                 # behavior for already admitted events after close is requested.
                 deferred = self._state["spool_pending_count"] > 0 and not self._stop.is_set()
-                stored = (writer.write_fact(decoded, defer_to_spool=True) if deferred
-                          else writer.write_fact(decoded))
+                stored = writer.write_fact(decoded, defer_to_spool=deferred,
+                                           admission=(event.enqueued_at, event.clock_domain))
                 if writer.failure_count > failures_before or writer.spool_failure_count > spool_failures_before:
                     self._record_failure("fact_or_spool_write_failed", event.observation_key,
                                          worker_failure=writer.failure_count == failures_before)

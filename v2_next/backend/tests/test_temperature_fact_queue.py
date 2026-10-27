@@ -874,8 +874,126 @@ class FactQueueTests(unittest.TestCase):
             self.assertFalse(closed, 'recovery erased historical failures')
             self.assertEqual([row['spot_poll_seq'] for row in self.read_rows(path)], ['1'])
 
+    def test_spool_preserves_admission_deadline_and_advances_after_recovery(self):
+        clock, blocked = [100.0], [True]
+        original_open = Path.open
+
+        def wait_state(owner, predicate):
+            deadline = time.perf_counter() + 3
+            while time.perf_counter() < deadline:
+                state = owner.snapshot()
+                if predicate(state):
+                    return state
+                threading.Event().wait(.01)
+            self.fail(f'Owner state did not reach expected boundary: {state}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.csv'
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def failing_append(target, mode='r', *args, **kwargs):
+                if target == path and mode == 'a' and blocked[0]:
+                    raise PermissionError('fact append unavailable')
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, 'open', failing_append), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    wait_state(owner, lambda state: state['initialization_state'] == 'ready')
+                    for seq in range(1, 21):
+                        self.assertTrue(owner.enqueue(observation(seq)))
+                    state = wait_state(owner, lambda state: state['completed_count'] == 20)
+                    self.assertEqual(state['pending_write_count'], 0)
+                    self.assertEqual(state['spool_pending_count'], 20)
+                    self.assertEqual(state['oldest_pending_monotonic'], 100.0,
+                                     'admission time was lost when events moved into the spool')
+                    self.assertEqual(state['stage_due_monotonic'], 100.0)
+                    clock[0] = 100.5
+                    self.assertTrue(owner.enqueue(observation(21)))
+                    state = wait_state(owner, lambda state: state['completed_count'] == 21)
+                    self.assertEqual(state['oldest_pending_monotonic'], 100.0)
+                    self.assertEqual(state['stage_due_monotonic'], 100.0)
+                    self.assertEqual(state['spool_next_recovery_monotonic'], 101.0)
+                    blocked[0], clock[0] = False, 101.0
+                    state = wait_state(owner, lambda state: state['spool_recovered_count'] == 20)
+                    self.assertEqual(state['spool_pending_count'], 1)
+                    self.assertEqual(state['oldest_pending_monotonic'], 100.5)
+                    self.assertEqual(state['stage_due_monotonic'], 100.5)
+                    self.assertEqual(state['spool_timing_status'], 'known')
+                    self.assertEqual(state['clock_domain'], clock_domain_id())
+                    with patch.object(Path, 'open', side_effect=AssertionError('snapshot opened a file')):
+                        self.assertEqual(owner.snapshot()['oldest_pending_monotonic'], 100.5)
+                    clock[0] = 102.0
+                    state = wait_state(owner, lambda state: state['spool_recovered_count'] == 21)
+                    self.assertIsNone(state['oldest_pending_monotonic'])
+                    self.assertIsNone(state['stage_due_monotonic'])
+                    self.assertEqual(state['spool_timing_status'], 'empty')
+                    self.assertEqual(state['write_failure_count'], 1)
+                finally:
+                    blocked[0] = False
+                    closed = owner.close(3)
+            self.assertFalse(closed)
+            self.assertEqual([row['spot_poll_seq'] for row in self.read_rows(path)],
+                             [str(seq) for seq in range(1, 22)])
+
     def test_missing_spool_segment_requires_manual_recovery(self):
         self._assert_changed_spool_requires_manual_recovery('missing')
+
+    def test_preexisting_spool_clock_remains_unknown_until_its_rows_are_drained(self):
+        for stored_clock in (None, 'previous-process', clock_domain_id()):
+            with self.subTest(stored_clock=stored_clock), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'facts.csv'
+                spool = Path(tmp) / 'legacy.jsonl'
+                rows = []
+                for seq in range(1, 22):
+                    row = build_spot_observation_fact(observation(seq))
+                    if stored_clock is not None:
+                        row['_sfl_admission_v1'] = {'monotonic': 99.0, 'clock_domain': stored_clock}
+                    rows.append(json.dumps(row) + '\n')
+                spool.write_text(''.join(rows), encoding='utf-8')
+                original = spool.read_bytes()
+                clock = [100.0]
+
+                def wait_state(owner, predicate):
+                    deadline = time.perf_counter() + 3
+                    while time.perf_counter() < deadline:
+                        state = owner.snapshot()
+                        if predicate(state):
+                            return state
+                        threading.Event().wait(.01)
+                    self.fail(f'Owner state did not reach expected boundary: {state}')
+
+                with patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                    writer = SpotObservationFactWriter(path, spool_path=spool)
+                    owner = SpotObservationQueue(lambda: writer)
+                    try:
+                        state = wait_state(owner, lambda state: state['initialization_state'] == 'ready')
+                        self.assertEqual(state['spool_pending_count'], 1)
+                        self.assertIsNone(state['oldest_pending_monotonic'])
+                        self.assertIsNone(state['stage_due_monotonic'])
+                        self.assertEqual(state['spool_timing_status'], 'unknown')
+                        clock[0] = 100.5
+                        self.assertTrue(owner.enqueue(observation(22)))
+                        state = wait_state(owner, lambda state: state['completed_count'] == 1)
+                        self.assertEqual(state['spool_pending_count'], 2)
+                        self.assertIsNone(state['oldest_pending_monotonic'])
+                        clock[0] = 101.0
+                        state = wait_state(owner, lambda state: state['spool_recovered_count'] == 1)
+                        self.assertEqual(state['spool_pending_count'], 1)
+                        self.assertEqual(state['oldest_pending_monotonic'], 100.5)
+                        self.assertEqual(state['spool_timing_status'], 'known')
+                        clock[0] = 102.0
+                        state = wait_state(owner, lambda state: state['spool_recovered_count'] == 2)
+                        self.assertEqual(state['spool_timing_status'], 'empty')
+                        self.assertEqual(spool.read_bytes(), original)
+                    finally:
+                        closed = owner.close(3)
+                self.assertTrue(closed)
+                stored = self.read_rows(path)
+                self.assertEqual([row['spot_poll_seq'] for row in stored], [str(seq) for seq in range(1, 23)])
+                self.assertTrue(all('_sfl_admission_v1' not in row for row in stored))
 
     def test_truncated_spool_segment_requires_manual_recovery(self):
         self._assert_changed_spool_requires_manual_recovery('truncated')
