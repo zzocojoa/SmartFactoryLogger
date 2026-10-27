@@ -476,6 +476,9 @@ class CSVLoggerService:
         self._csv_file_extents: dict[int, dict[str, Any]] = {}
         # Only current and still-admitted generations retain probe metadata.
         self._csv_storage_probes: dict[tuple[int, str], dict[str, Any]] = {}
+        # A probe can leave resources without ever opening a CSV. Retain that
+        # destination until manual recovery, even after OFF/config replacement.
+        self._csv_probe_manual_targets: dict[tuple[int, str], Path] = {}
         self._csv_probe_files: dict[tuple[int, str], dict[str, Any]] = {}
         self._csv_recovery_sinks: set[tuple[int, str]] = set()
         self._csv_probe_failure_count = 0
@@ -3875,6 +3878,7 @@ class CSVLoggerService:
 
     def _csv_storage_targets_locked(self, current: CSVWriteConfig) -> dict[tuple[int, str], Path]:
         targets = {(current.generation, sink): current.log_dir for sink in current.required_sinks}
+        targets.update(self._csv_probe_manual_targets)
         for envelope, sinks in self._pending_events.values():
             for sink in sinks:
                 targets[(envelope.write_config.generation, sink)] = envelope.write_config.log_dir
@@ -3985,6 +3989,8 @@ class CSVLoggerService:
             current = self._capture_write_config_locked()
         now = time.monotonic()
         with self._runtime_lock:
+            if self._csv_manual_recovery_required:
+                return  # Unresolved probe/file ownership is not an access retry.
             targets = self._csv_storage_targets_locked(current)
             self._csv_probe_files = {key: value for key, value in self._csv_probe_files.items() if key in targets}
             self._csv_recovery_sinks.intersection_update(targets)
@@ -4001,7 +4007,13 @@ class CSVLoggerService:
         file_scope = "not_checked"
         try:
             with self._reserve_csv_output(128, probe=True):
-                _probe_storage_directory(targets[key])
+                try:
+                    _probe_storage_directory(targets[key])
+                except RuntimeError:
+                    with self._runtime_lock:
+                        self._csv_probe_manual_targets[key] = targets[key]
+                        self._csv_manual_recovery_required = True
+                    raise
         except Exception as exc:
             error = type(exc).__name__
         required = self._csv_probe_files.get(key)
@@ -4022,7 +4034,9 @@ class CSVLoggerService:
                      current_storage_availability="blocked" if error or file_error or manual else "available")
         state["probe_failure_count"] += int(error is not None)
         state["file_check_failure_count"] += int(file_error is not None)
-        if error or file_error or manual:
+        if manual:
+            state["next_probe_monotonic"] = None
+        elif error or file_error:
             state["next_probe_monotonic"] = finished + state["retry_delay_sec"]
             state["retry_delay_sec"] = min(30.0, state["retry_delay_sec"] * 2)
         else:

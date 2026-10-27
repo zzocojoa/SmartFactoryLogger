@@ -2612,6 +2612,60 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 rows = list(csv.DictReader(stream))
             self.assertEqual(len(rows), 20)
 
+    def test_csv_probe_cleanup_failure_requires_manual_recovery(self) -> None:
+        original_unlink = Path.unlink
+        clock, retained = [100.0], []
+        with self.create_temp_dir() as tmp_dir:
+            log_dir = tmp_dir / "csv"
+            log_dir.mkdir()
+            historical = log_dir / "retained.csv"
+            historical.write_bytes(b"original historical bytes\n")
+            service = self.create_service(log_dir, True)
+
+            def failed_cleanup(path, *args, **kwargs):
+                if path.parent == log_dir and path.name.startswith(".sfl-storage-probe-"):
+                    retained.append(path)
+                    raise PermissionError("injected CSV probe cleanup denial")
+                return original_unlink(path, *args, **kwargs)
+
+            with patch.object(Path, "unlink", failed_cleanup), \
+                    patch("backend.FacilityData.repository.time.monotonic", side_effect=lambda: clock[0]):
+                service.start()
+                try:
+                    deadline = time.perf_counter() + 3
+                    while time.perf_counter() < deadline:
+                        state = service.get_runtime_state()
+                        if state["csv_probe_failure_count"]:
+                            break
+                        time.sleep(.01)
+                    self.assertTrue(state["csv_manual_recovery_required"],
+                                    "unremoved CSV probes must require manual recovery")
+                    destination = state["csv_storage_destinations"][0]
+                    self.assertTrue(destination["manual_recovery_required"])
+                    self.assertIsNone(destination["next_probe_monotonic"])
+                    receipt = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertEqual(receipt["status"], "REJECTED_UNAVAILABLE")
+                    self.assertEqual(state["pending_event_count"], 0)
+                    self.assertEqual(state["csv_probe_workspace_bytes"], 0)
+                    self.assertEqual(len(retained), 1)
+                    before = tuple(retained)
+                    # No pending CSV file exists: the failed directory itself
+                    # must survive disabling persistence and changing generation.
+                    service.apply_config(auto_save=False, log_path=tmp_dir / "next")
+                    clock[0] = 1000.0
+                    time.sleep(.5)
+                    final = service.get_runtime_state()
+                    self.assertEqual(final["csv_storage_destinations"], [destination])
+                    self.assertEqual(final["csv_probe_failure_count"], 1)
+                    self.assertEqual(tuple(retained), before, "manual recovery generated another probe")
+                    self.assertTrue(retained[0].exists())
+                    self.assertEqual(historical.read_bytes(), b"original historical bytes\n")
+                finally:
+                    closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed, "unresolved probe ownership was reported as clean shutdown")
+            with self.assertRaisesRegex(RuntimeError, "manual recovery"):
+                service.start()
+
     def test_csv_storage_probe_recovers_without_arrivals(self) -> None:
         clock = [100.0]
         attempts = []
