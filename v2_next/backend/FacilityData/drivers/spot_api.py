@@ -74,6 +74,7 @@ from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FILENAME, SpotI
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
+from backend.FacilityData.persistence_pressure import StoragePressureMonitor
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -245,6 +246,7 @@ _http_client: Optional[httpx.AsyncClient] = None
 _spot_http_transport: Optional[SpotHttpTransport] = None
 _spot_http_transport_enforcement_required = False
 _spot_http_transport_shutdown_started = False
+_storage_pressure_monitor: Optional[StoragePressureMonitor] = None
 _logger = logging.getLogger("spot_control")
 
 
@@ -316,6 +318,14 @@ _spot_image_capture_retry_error_count = 0
 _spot_image_capture_recovered_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 _spot_image_shutdown_baseline: Optional[Dict[str, Any]] = None
+
+
+class SpotStoragePressureError(RuntimeError):
+    """A local storage gate, not a sensor or transport failure."""
+
+    def __init__(self, retry_after_sec: int = 1) -> None:
+        super().__init__("Image acquisition is suppressed by storage pressure")
+        self.retry_after_sec = retry_after_sec
 
 
 class SpotImageConfigError(ValueError):
@@ -2146,6 +2156,9 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
         async with _spot_device_request_lock:
+            if (_storage_pressure_monitor is not None
+                    and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED"):
+                raise SpotStoragePressureError
             request_started_at = time.monotonic()
             response = await _request_spot_http_response(
                 client,
@@ -3896,13 +3909,15 @@ async def fetch_image_async(
 
         try:
             refreshed_entry = await asyncio.shield(refresh_task)
-        except SpotImageFetchError:
+        except (SpotImageFetchError, SpotStoragePressureError) as exc:
             try:
                 current_image_url = _resolve_spot_image_url()
             except SpotImageConfigError:
                 continue
             if current_image_url != image_url:
                 continue
+            if isinstance(exc, SpotStoragePressureError):
+                raise SpotStoragePressureError(math.ceil(max(1.0, _spot_image_cache_ttl_sec(normalized_profile)))) from exc
             raise
         finally:
             async with _img_fetch_lock:

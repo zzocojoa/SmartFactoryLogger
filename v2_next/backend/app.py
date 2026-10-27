@@ -3562,6 +3562,13 @@ async def spot_image(request: Request):
         headers.update(_spot_internal_temperature_headers())
         observability_service.record_spot_image_result(200, path=route_path)
         return Response(content=data, media_type="image/jpeg", headers=headers)
+    except spot_control.SpotStoragePressureError as exc:
+        headers.update({"X-Spot-Image-Upstream-Suppressed": "1",
+                        "X-Spot-Image-Suppression-Reason": "storage_pressure",
+                        "Retry-After": str(exc.retry_after_sec)})
+        observability_service.record_spot_image_result(503, path=route_path)
+        raise HTTPException(status_code=503, detail={"code": "storage_pressure",
+                            "message": "Image acquisition is waiting for storage recovery."}, headers=headers) from exc
     except spot_control.SpotImageConfigError as exc:
         diagnostics = spot_control.get_spot_diagnostics()
         observability_service.record_spot_image_result(404, path=route_path)

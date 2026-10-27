@@ -44,6 +44,7 @@ from backend.FacilityData.spot_image_fact import (
     _under_range_cause_candidate,
 )
 from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
+from backend.FacilityData.persistence_pressure import StoragePressureMonitor, StoragePressureSample
 
 FocusUrlopenTarget = str | UrlRequest
 
@@ -4862,6 +4863,59 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             5.466667,
         )
         self.assertTrue(diagnostics["request_budget_within_target"])
+
+    async def test_storage_blocked_while_waiting_for_device_lock_returns_503_without_dispatch(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        blocked = threading.Event()
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'blocked' if blocked.is_set() else 'available')])
+        transport = FakeSpotHttpTransport()
+        tasks = []
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2
+            while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, 'NORMAL')
+            with patch.object(spot_api, '_storage_pressure_monitor', monitor, create=True), \
+                    patch.object(spot_api, '_spot_http_transport', transport), \
+                    patch.object(backend_app.observability_service, 'record_error') as errors, \
+                    patch.object(backend_app.observability_service, 'record_spot_image_result') as results:
+                await spot_api._spot_device_request_lock.acquire()
+                for path in ('/api/spot/image.jpg', '/api/spot/live_image.jpg'):
+                    tasks.append(asyncio.create_task(backend_app.spot_image(
+                        StarletteRequest({'type': 'http', 'method': 'GET', 'path': path, 'headers': []}))))
+                deadline = time.monotonic() + 2
+                while spot_api._img_coalesced_waiter_count == 0 and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertEqual(spot_api._img_coalesced_waiter_count, 1)
+                blocked.set()
+                deadline = time.monotonic() + 2
+                while monitor.snapshot().state != 'PERSISTENCE_BLOCKED' and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                spot_api._spot_device_request_lock.release()
+                responses = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 2)
+                self.assertEqual(len(transport.requests), 0,
+                                 'blocked image request crossed the transport dispatch boundary')
+                for response in responses:
+                    self.assertIsInstance(response, HTTPException)
+                    self.assertEqual(response.status_code, 503)
+                    self.assertEqual(response.detail['code'], 'storage_pressure')
+                    self.assertEqual(response.headers['X-Spot-Image-Upstream-Suppressed'], '1')
+                    self.assertGreaterEqual(int(response.headers['Retry-After']), 1)
+                self.assertEqual(spot_api._img_failure_count, 0)
+                self.assertEqual(spot_api._img_refresh_failure_count, 0)
+                self.assertIsNone(spot_api._img_refresh_task)
+                errors.assert_not_called()
+                self.assertEqual([call.args[0] for call in results.call_args_list], [503, 503])
+        finally:
+            if spot_api._spot_device_request_lock.locked():
+                spot_api._spot_device_request_lock.release()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self.assertTrue(monitor.stop())
 
     async def test_snapshot_and_live_callers_share_one_upstream_refresh(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
