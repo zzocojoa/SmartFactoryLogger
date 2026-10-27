@@ -49,6 +49,8 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     records = 0
     summaries = 0
     unsupported = False
+    boundaries: dict[str, list[int]] = {"producer_start": [], "producer_stop": []}
+    summary_bounds: tuple[int, int] | None = None
     for path in paths:
         try:
             with path.open("rb") as handle:
@@ -85,15 +87,35 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
                 issues.add("invalid_trace_record")
                 continue
             records += 1
+            kind = record.get("kind")
+            if isinstance(kind, str) and kind in boundaries:
+                field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
+                value = record.get(field)
+                if type(value) is not int or value < 0:
+                    issues.add("invalid_producer_boundary")
+                elif len(boundaries[kind]) < 2:
+                    boundaries[kind].append(value)
             if record.get("kind") == "admission_summary":
                 summaries += 1
                 issues.update(_admission_total_issues(record))
+                if all(type(record.get(key)) is int for key in ("after_producer_seq", "last_producer_seq")):
+                    summary_bounds = record["after_producer_seq"], record["last_producer_seq"]
     if not paths:
         issues.add("missing_trace")
     if paths and not unsupported and summaries == 0:
         issues.add("missing_admission_summary")
     if summaries > 1:
         issues.add("multiple_admission_summaries")
+    if paths and not unsupported:
+        for kind, values in boundaries.items():
+            if not values:
+                issues.add(f"missing_{kind}")
+            elif len(values) > 1:
+                issues.add(f"multiple_{kind}")
+        if all(len(values) == 1 for values in boundaries.values()):
+            observed = boundaries["producer_start"][0], boundaries["producer_stop"][0]
+            if observed[1] < observed[0] or (summary_bounds is not None and observed != summary_bounds):
+                issues.add("producer_boundary_mismatch")
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")

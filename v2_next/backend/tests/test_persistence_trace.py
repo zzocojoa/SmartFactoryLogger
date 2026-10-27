@@ -13,6 +13,8 @@ class PersistenceTraceTests(unittest.TestCase):
     def test_csv_trace_parser_rejects_malformed_or_unbounded_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "parser-fixture")
+            writer.append({"kind": "producer_start", "after_producer_seq": 0})
+            writer.append({"kind": "producer_stop", "final_producer_seq": 1})
             writer.append({"kind": "admission_summary", "produced_count": 1, "accounted_count": 1,
                            "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 0, "rejected_count": 0,
                            "after_producer_seq": 0, "last_producer_seq": 1, "outcome_counts": {"ACCEPTED": 1},
@@ -20,7 +22,8 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertTrue(writer.flush(force=True))
             path = next(Path(folder).glob("*.trace.jsonl"))
             original = path.read_bytes()
-            header, summary = original.splitlines(keepends=True)
+            header, start, stop, summary = original.splitlines(keepends=True)
+            prefix = header + start + stop
             result = validate_csv_persistence_trace([path])
             self.assertEqual(result["status"], "NOT_EVALUATED")
             self.assertEqual(result["issues"], [])
@@ -41,7 +44,7 @@ class PersistenceTraceTests(unittest.TestCase):
             for changes, issue in total_cases:
                 with self.subTest(summary_changes=changes):
                     amended = dict(valid_summary, **changes)
-                    contents = header + (json.dumps(amended) + "\n").encode("utf-8")
+                    contents = prefix + (json.dumps(amended) + "\n").encode("utf-8")
                     path.write_bytes(contents)
                     result = validate_csv_persistence_trace([path])
                     self.assertEqual(result["status"], "INCOMPLETE")
@@ -50,6 +53,13 @@ class PersistenceTraceTests(unittest.TestCase):
                     self.assertEqual(path.read_bytes(), contents)
             cases = [
                 (original[:-1], "INCOMPLETE", "incomplete_segment"),
+                (header + start + summary, "INCOMPLETE", "missing_producer_stop"),
+                (header + start + start + stop + summary, "INCOMPLETE", "multiple_producer_start"),
+                (header + start + stop + stop + summary, "INCOMPLETE", "multiple_producer_stop"),
+                (header + start + b'{"kind":"producer_stop","final_producer_seq":2}\n' + summary,
+                 "INCOMPLETE", "producer_boundary_mismatch"),
+                (header + start + b'{"kind":"producer_stop","final_producer_seq":true}\n' + summary,
+                 "INCOMPLETE", "invalid_producer_boundary"),
                 (header + summary + summary, "INCOMPLETE", "multiple_admission_summaries"),
                 (header + b'{"kind":"admission_summary","kind":"admission_summary"}\n', "INCOMPLETE", "invalid_trace_record"),
                 (b'{"schema_version":1,"schema_version":1}\n' + summary, "INCOMPLETE", "invalid_segment_header"),

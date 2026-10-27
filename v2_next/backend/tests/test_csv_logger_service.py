@@ -67,6 +67,35 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_persistence_validation_requires_producer_boundaries(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            service.start()
+            try:
+                service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertTrue(paths)
+            original = {path: path.read_bytes() for path in paths}
+            self.assertEqual(validate_csv_persistence_trace(paths)["issues"], [])
+            removed = 0
+            for path, contents in original.items():
+                kept = []
+                for line in contents.splitlines(keepends=True):
+                    if json.loads(line).get("kind") == "producer_start":
+                        removed += 1
+                    else:
+                        kept.append(line)
+                path.write_bytes(b"".join(kept))
+            self.assertEqual(removed, 1)
+            before = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "missing producer boundary was not rejected")
+            self.assertIn("missing_producer_start", result["issues"])
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
     def test_persistence_validation_rejects_inconsistent_admission_totals(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)
