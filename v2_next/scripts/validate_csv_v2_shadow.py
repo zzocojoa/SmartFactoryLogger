@@ -3175,7 +3175,26 @@ def main() -> int:
         "--metadata-glob",
         help="Glob for v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json files",
     )
+    parser.add_argument("--persistence-trace", type=Path, nargs="+",
+                        help="Validate one CSV producer's closed persistence trace segments as JSON.")
+    parser.add_argument("--persistence-data-root", type=Path, action="append",
+                        help="Explicit allowed root for original CSV/metadata files; repeat for multiple roots.")
     args = parser.parse_args()
+    if args.persistence_trace is not None:
+        if not args.persistence_data_root:
+            parser.error("--persistence-data-root is required for persistence validation")
+        if any(value for key, value in vars(args).items()
+               if key not in {"persistence_trace", "persistence_data_root"}):
+            parser.error("persistence validation cannot be mixed with legacy CSV/fact options")
+        from backend.FacilityData.persistence_validation import validate_csv_persistence_trace
+
+        result = validate_csv_persistence_trace(args.persistence_trace, data_roots=args.persistence_data_root)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+        # This exit code covers the named producer's CSV ranges only. Broader
+        # fact/image integrity and release promotion remain separate judgments.
+        return 0 if result["csv_integrity_status"] == "VERIFIED" else 1
+    if args.persistence_data_root:
+        parser.error("--persistence-data-root requires --persistence-trace")
     if args.v2_glob or args.metadata_glob or args.v1_glob:
         if not args.v2_glob or not args.metadata_glob:
             parser.error("--v2-glob and --metadata-glob are required for multi-file validation")

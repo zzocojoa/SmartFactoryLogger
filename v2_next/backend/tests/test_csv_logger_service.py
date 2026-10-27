@@ -10,6 +10,7 @@ import queue
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 import time
 import tracemalloc
@@ -67,6 +68,57 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_csv_persistence_cli_rejects_missing_trace_and_checks_real_files(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            command = [sys.executable, str(_TEST_ROOT / "scripts" / "validate_csv_v2_shadow.py")]
+            options = ["--persistence-data-root", str(tmp_dir), "--persistence-trace"]
+            result = subprocess.run(command + options + [str(tmp_dir / "missing.trace.jsonl")],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1, "the QA CLI ignored an unreadable persistence trace")
+            self.assertEqual(json.loads(result.stdout)["csv_integrity_status"], "INCOMPLETE")
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.apply_config(csv_v2_sidecar_enabled=True)
+            service.start()
+            try:
+                service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            originals = {path: path.read_bytes() for path in tmp_dir.rglob("*") if path.is_file()}
+            result = subprocess.run(command + options + [str(path) for path in reversed(paths)],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            output = json.loads(result.stdout)
+            self.assertEqual(output["csv_integrity_status"], "VERIFIED")
+            self.assertEqual(output["csv_integrity_scope"], "CSV_CURRENT_PRODUCER_OWNED_RANGES")
+            self.assertEqual(output["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual(output["checked_csv_rows"], 2)
+            self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+            csv_path, = tmp_dir.glob("Factory_Integrated_Log_v2_*.csv")
+            trace_arguments = [str(path) for path in paths]
+            for arguments in (["--persistence-trace", *trace_arguments],
+                              ["--persistence-data-root", str(tmp_dir)],
+                              options + trace_arguments + ["--v2", str(csv_path)]):
+                with self.subTest(arguments=arguments):
+                    result = subprocess.run(command + arguments, capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 2)
+            for path in paths:
+                records = [json.loads(line) for line in originals[path].splitlines()]
+                for record in records:
+                    if record.get("kind") == "admission_summary":
+                        record.pop("runtime_closeout")
+                path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+            result = subprocess.run(command + options + trace_arguments, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1, "legacy closeout evidence must not silently pass the new QA mode")
+            self.assertEqual(json.loads(result.stdout)["csv_integrity_status"], "NOT_EVALUATED")
+            for path in paths:
+                path.write_bytes(originals[path])
+            csv_path.write_bytes(csv_path.read_bytes() + b"unexpected bytes")
+            result = subprocess.run(command + options + [str(path) for path in paths],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)["csv_integrity_status"], "INCOMPLETE")
+
     def test_csv_integrity_does_not_hide_accounted_rejections(self) -> None:
         for reject_input in (True, False):
             with self.subTest(reject_input=reject_input), self.create_temp_dir() as tmp_dir:
