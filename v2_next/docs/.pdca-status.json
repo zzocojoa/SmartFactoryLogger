@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T22:04:47.266183+00:00",
+  "lastUpdated": "2026-10-27T22:43:14.325200+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "47d9c3b988917ceaec5545c41504beefcd15492d",
+      "currentDevelopmentCommit": "c6901ab51cab43ad9c135e7a7874a6121ae355b8",
       "lastBackendVerification": {
-        "commit": "47d9c3b988917ceaec5545c41504beefcd15492d",
-        "total": 1203,
-        "passed": 1202,
+        "commit": "c6901ab51cab43ad9c135e7a7874a6121ae355b8",
+        "total": 1207,
+        "passed": 1206,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-idle-access/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-pressure-join/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48333,28 +48333,32 @@
         "Disabled historical destinations retain manual recovery in pressure evaluation; new fact spool rows preserve original admission deadlines while untrusted historical clocks remain unknown.",
         "Temperature owner independently probes fact/spool directories with bounded workspace and retry; idle loss/recovery, stop, changed probe identity and unresolved cleanup retain truthful current/manual state.",
         "CSV/image probe cleanup uncertainty survives OFF/generation changes, blocks automatic probes/new admission/clean closeout and preserves originals; image service retains its unresolved owner. Idle image destinations recheck every second, retain failure history and stop with the owner.",
-        "The existing CSV owner rechecks idle trace directory and latest published file access without arrivals/UI, preserves retry deadlines and history, reserves probe bytes, and retains deletion/replacement/close uncertainty. New trace publication cannot bypass a failed required file. This is not full historical segment integrity or complete runtime monitor integration."
+        "The existing CSV owner rechecks idle trace directory and latest published file access without arrivals/UI, preserves retry deadlines and history, reserves probe bytes, and retains deletion/replacement/close uncertainty. New trace publication cannot bypass a failed required file. This is not full historical segment integrity or complete runtime monitor integration.",
+        "Trace owner pressure samples retain their original generation and hashed destination; active workspace clocks and admission exhaustion feed the actual controller.",
+        "CSV owner joins per-generation destination/data-stage state with shared budget occupancy and trace state, without reader file I/O; this does not activate the production monitor.",
+        "Active CSV probe workspace and deadline retain their original destination across OFF/path changes; delayed probes enter PRESSURED without resetting completed data-stage clocks."
       ],
       "remainingScope": [
-        "Complete required fact/spool/trace/sidecar file integrity, destination/generation and stage-clock joins, initialization/close and owner-replacement history.",
-        "Complete generic factory/header-write/spool initialization recovery, spool append/close/unlink races and aggregate metadata/workspace budgets.",
-        "Wire all required providers and monitor lifecycle; PRESSURED cadence, NORMAL interval/temperature priority and status/observation-reference contracts.",
-        "Complete full fact/JPEG reconciliation and all 7 stages / 17 r4 scenarios; final build/installer verification and master integration."
+        "Complete required fact/spool/trace/image/sidecar file integrity, remaining providers, generation joins, stage clocks and owner replacement history.",
+        "Complete initialization and spool append/close/unlink recovery, aggregate metadata/workspace accounting and untimed pre-admission work.",
+        "Connect monitor lifecycle; implement PRESSURED cadence and NORMAL interval/temperature priority without false storage failures.",
+        "Complete fact/JPEG reconciliation, observation-reference and public status/validator contracts, all 7 stages and 17 r4 scenarios.",
+        "Final build/installer validation and master integration; current source is not the approved operating installer."
       ],
       "lastWholeHealth": {
-        "commit": "47d9c3b988917ceaec5545c41504beefcd15492d",
+        "commit": "c6901ab51cab43ad9c135e7a7874a6121ae355b8",
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-idle-access/health-result.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-pressure-join/health-result.json"
       },
-      "updatedAt": "2026-10-27T22:04:47.266183+00:00",
+      "updatedAt": "2026-10-27T22:43:14.325200+00:00",
       "lastRelatedBackendVerification": {
-        "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
-        "total": 190,
-        "passed": 190,
+        "commit": "c6901ab51cab43ad9c135e7a7874a6121ae355b8",
+        "total": 15,
+        "passed": 15,
         "skipped": 0,
         "exitCode": 0,
-        "scope": "complete SPOT API module after canonical counter fields",
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json"
+        "scope": "CSV live probe, recovery, generation and pressure controller",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/csv-live-probe-pressure-green/result.json"
       },
       "lastPressureVerification": {
         "commit": "e6a592847f0dbac0e6db4004ec57380335cd0ed6",
