@@ -187,10 +187,17 @@ class PersistenceTraceWriter:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            admission_blocked_reason = None
+            if len(self._segments) >= TRACE_PENDING_SEGMENT_LIMIT:
+                tail = self._segments[-1]
+                if (tail.sealed or len(tail.records) >= TRACE_SEGMENT_RECORD_LIMIT
+                        or tail.size >= TRACE_SEGMENT_BYTE_LIMIT):
+                    admission_blocked_reason = "trace_segments_full"
             return {"pending_records": sum(len(segment.records) for segment in self._segments),
                     "pending_bytes": sum(segment.size for segment in self._segments) + self._processing_bytes,
                     "processing_bytes": self._processing_bytes,
                     "pending_segments": len(self._segments),
+                    "admission_blocked_reason": admission_blocked_reason,
                     "committed_segment_seq": self._committed_sequence,
                     "failure_count": self._failure_count,
                     "refused_count": self._refused_count, "incomplete": self._incomplete,

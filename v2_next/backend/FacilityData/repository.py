@@ -668,6 +668,13 @@ class CSVLoggerService:
                     self._last_drop_at = now
                     return {**result, "status": "REJECTED_UNAVAILABLE",
                             "reason": "csv_owner_requires_manual_recovery"}
+            trace = self._persistence_trace
+            blocked_reason = trace.snapshot()["admission_blocked_reason"] if trace is not None else None
+            if blocked_reason is not None:
+                with self._runtime_lock:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                return {**result, "status": "REJECTED_LIMIT", "reason": blocked_reason}
             reserved_bytes = 0
             payload = None
             envelope = None

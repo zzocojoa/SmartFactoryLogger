@@ -510,6 +510,73 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
+    def test_trace_capacity_blocks_new_csv_admission_until_recovered(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            entered, release, allow_publish = threading.Event(), threading.Event(), threading.Event()
+            original_open, original_replace = Path.open, Path.replace
+
+            def held_open(path, mode="r", *args, **kwargs):
+                if path.suffix == ".csv" and mode == "a":
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("trace capacity test did not release CSV initialization")
+                return original_open(path, mode, *args, **kwargs)
+
+            def fail_trace(source, target):
+                if str(target).endswith(".trace.jsonl") and not allow_publish.is_set():
+                    raise OSError("injected full trace publication failure")
+                return original_replace(source, target)
+
+            with patch("backend.FacilityData.persistence_trace.TRACE_SEGMENT_RECORD_LIMIT", 4), \
+                    patch.object(Path, "open", held_open), patch.object(Path, "replace", fail_trace):
+                service.start()
+                try:
+                    receipts = [service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))]
+                    self.assertTrue(entered.wait(2))
+                    for index in range(1, 6):
+                        receipts.append(service.enqueue_detailed(self.create_data(
+                            f"2026-03-09T07:20:25.{index}00", 30.0 + index)))
+                    self.assertTrue(all(receipt["status"] == "ACCEPTED" for receipt in receipts))
+                    release.set()
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        state = service.get_runtime_state()
+                        if (state["persistence_trace"]["pending_segments"] == 2
+                                and state["persistence_trace"]["pending_records"] == 8
+                                and state["persistence_trace"]["failure_count"] >= 1):
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(state["persistence_trace"]["pending_records"], 8)
+                    self.assertGreaterEqual(state["persistence_trace"]["failure_count"], 1,
+                                            "trace publication fault was never exercised")
+                    self.assertTrue(list(tmp_dir.rglob("*.pending")))
+                    self.assertEqual(state["pending_event_count"], 6)
+                    refused = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 40.0))
+                    self.assertEqual(refused["status"], "REJECTED_LIMIT",
+                                     "CSV admission ignored saturated persistence evidence")
+                    self.assertEqual(refused["reason"], "trace_segments_full")
+                    self.assertEqual(service.get_runtime_state()["pending_event_count"], 6)
+                    allow_publish.set()
+                    deadline = time.monotonic() + 5
+                    while service.get_runtime_state()["pending_event_count"] and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertEqual(service.get_runtime_state()["pending_event_count"], 0)
+                    resumed = service.enqueue_detailed(self.create_data("2026-03-09T07:20:27.000", 50.0))
+                    self.assertEqual(resumed["status"], "ACCEPTED")
+                    self.assertGreater(resumed["producer_seq"], refused["producer_seq"])
+                finally:
+                    release.set()
+                    allow_publish.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed, "trace recovery erased earlier persistence failures")
+            self.assertEqual([float(row[3]) for row in self.read_rows(self.list_v1_files(tmp_dir)[0])[1:]],
+                             [30., 31., 32., 33., 34., 35., 50.])
+            state = service.get_runtime_state()
+            self.assertEqual(state["pending_event_count"], 0)
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            self.assertGreaterEqual(state["persistence_trace"]["failure_count"], 1)
+
     def test_producer_stop_boundary_excludes_post_stop_rejections(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, auto_save=True)
