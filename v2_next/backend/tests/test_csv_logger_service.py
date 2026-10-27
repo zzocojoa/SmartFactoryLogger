@@ -135,6 +135,37 @@ class CSVLoggerServiceTests(unittest.TestCase):
             Billet_Cycle_ID="C1",
         )
 
+    def test_trace_publish_failure_prevents_clean_csv_shutdown(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, auto_save=True)
+            original_replace = Path.replace
+
+            def fail_trace(source, target):
+                if str(target).endswith(".trace.jsonl"):
+                    self.assertGreater(source.stat().st_size, 0)
+                    raise OSError("synthetic trace publication failure")
+                return original_replace(source, target)
+
+            with patch.object(Path, "replace", fail_trace):
+                service.start()
+                first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                last = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.100", 31.0))
+                closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed, "CSV shutdown ignored missing producer trace evidence")
+            rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
+            self.assertEqual([float(row[3]) for row in rows[1:]], [30.0, 31.0])
+            state = service.get_runtime_state()["persistence_trace"]
+            self.assertGreaterEqual(state["failure_count"], 1)
+            self.assertGreaterEqual(state["pending_records"], 2)
+            self.assertEqual(list(tmp_dir.rglob("*.trace.jsonl")), [])
+            pending = list(tmp_dir.rglob("*.pending"))
+            self.assertEqual(len(pending), 1)
+            records = [json.loads(line) for line in pending[0].read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(records[0]["producer_instance_id"], first["producer_instance_id"])
+            self.assertEqual([record["kind"] for record in records[1:]], ["producer_start", "producer_stop"])
+            self.assertEqual(records[1]["after_producer_seq"], first["producer_seq"] - 1)
+            self.assertEqual(records[2]["final_producer_seq"], last["producer_seq"])
+
     def read_rows(self, path: Path) -> list[list[str]]:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             return list(csv.reader(handle))

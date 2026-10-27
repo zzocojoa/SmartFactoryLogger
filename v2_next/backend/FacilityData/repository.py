@@ -28,6 +28,7 @@ from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
+from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
     SPOT_INVALID_SENTINEL_VALUES,
@@ -459,6 +460,9 @@ class CSVLoggerService:
         self._lifecycle_lock = threading.Lock()
         self._sample_seq = 0
         self._producer_seq = 0
+        self._trace_start_seq = 0
+        self._persistence_trace: Optional[PersistenceTraceWriter] = None
+        self._trace_boundary_failed = False
         self.logger_service_instance_id = str(uuid4())
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self._sidecar_paths_written: set[str] = set()
@@ -509,6 +513,14 @@ class CSVLoggerService:
                     "CSV logger cannot start until the previous worker generation "
                     "has completed stop()."
                 )
+            if self._persistence_trace is not None and (
+                self._persistence_trace.snapshot()["pending_records"] or self._trace_boundary_failed
+            ):
+                raise RuntimeError("CSV trace evidence remains unresolved for the previous generation.")
+            with self._runtime_lock:
+                self._trace_start_seq = self._producer_seq
+            self._persistence_trace = None
+            self._trace_boundary_failed = False
             self.thread = None
             self._shutdown_flush_succeeded = False
             self._runtime_write_failure_observed = False
@@ -3134,6 +3146,36 @@ class CSVLoggerService:
                 self._v2_persisted_at_by_path.pop(str(csv_path), None)
         return succeeded
 
+    def _begin_persistence_trace(self, settings: CSVWriteConfig) -> None:
+        if self._persistence_trace is not None or not settings.auto_save:
+            return
+        trace = PersistenceTraceWriter(settings.log_dir / ".sfl_trace" / self.logger_service_instance_id,
+                                       self.logger_service_instance_id)
+        token = trace.append({
+            "kind": "producer_start", "after_producer_seq": self._trace_start_seq,
+            "config_generation": settings.generation, "required_sinks": settings.required_sinks,
+            "coverage": "PRODUCER_BOUNDARIES_ONLY",
+        })
+        self._trace_boundary_failed |= token is None
+        self._persistence_trace = trace
+
+    def _finish_persistence_trace(self) -> bool:
+        trace = self._persistence_trace
+        if trace is None:
+            return True
+        with self._runtime_lock:
+            final_sequence = self._producer_seq
+            pending_events = len(self._pending_events)
+        token = trace.append({"kind": "producer_stop", "final_producer_seq": final_sequence,
+                              "pending_event_count": pending_events, "coverage": "PRODUCER_BOUNDARIES_ONLY"})
+        self._trace_boundary_failed |= token is None
+        while trace.snapshot()["pending_records"]:
+            if not trace.flush(force=True):
+                break
+        state = trace.snapshot()
+        return not (self._trace_boundary_failed or state["pending_records"]
+                    or state["failure_count"] or state["incomplete"])
+
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
             auto_save = self.auto_save
@@ -3160,6 +3202,7 @@ class CSVLoggerService:
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
         estimated_queue_bytes = int(queue_size * payload_bytes_ema) if payload_bytes_ema is not None else 0
+        trace = self._persistence_trace
         return {
             "queue_size": queue_size,
             "queue_maxsize": queue_maxsize,
@@ -3181,6 +3224,8 @@ class CSVLoggerService:
             "last_processing_failure_seq": last_processing_failure_seq,
             "last_processing_failure_reason": last_processing_failure_reason,
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
+            "persistence_trace": trace.snapshot() if trace is not None else None,
+            "persistence_trace_coverage": "PRODUCER_BOUNDARIES_ONLY" if trace is not None else "NOT_EVALUATED",
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
             "running": self.running,
@@ -3212,12 +3257,15 @@ class CSVLoggerService:
         settings = self._write_settings()
         self._writer_context.settings = settings
         auto_save, csv_v1_enabled, csv_v2_enabled = settings.auto_save, settings.v1_enabled, settings.v2_enabled
+        self._begin_persistence_trace(settings)
 
         while True:
             decoded_sequence: Optional[int] = None
             row = None
             v2_row = None
             try:
+                if self._persistence_trace is not None:
+                    self._persistence_trace.flush()
                 item: Optional[FactoryData] = None
                 envelope: Optional[CSVEventEnvelope] = None
                 if deferred_item is not None:
@@ -3278,6 +3326,7 @@ class CSVLoggerService:
                     csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
 
                 if envelope is not None:
+                    self._begin_persistence_trace(envelope.write_config)
                     decoded_sequence = envelope.producer_seq
                     item = self._decode_csv_event(envelope)
                     if item is None:
@@ -3553,6 +3602,8 @@ class CSVLoggerService:
         with self._runtime_lock:
             if self._pending_events or self._processing_failure_count:
                 shutdown_flush_succeeded = False
+        if not self._finish_persistence_trace():
+            shutdown_flush_succeeded = False
         self._close_file(f_handle)
         if not self._close_v2_file(
             v2_handle,
