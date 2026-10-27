@@ -415,9 +415,15 @@ class SpotImageCaptureWriter:
         try:
             expected_size = self.fact_path.stat().st_size
             digest = hashlib.sha256()
+            last_byte = b""
             with self.fact_path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                     digest.update(chunk)
+                    last_byte = chunk[-1:]
+            if last_byte != b"\n":
+                with _SPOT_IMAGE_FACT_FILE_LOCK:
+                    self._mark_fact_append_uncertain()
+                return
             self._fact_digest = digest
             self._fact_has_content = True
             self._load_fact_row_count()
