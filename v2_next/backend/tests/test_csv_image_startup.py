@@ -358,13 +358,83 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertTrue(all(item['probe_status'] == 'available' for item in calls[-1][2]))
                 self.assertIsNone(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'])
                 self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 8)
-                clock[0] += 100
+                next_check = clock[0] + 1
+                self.assertEqual(writer.destination_probe_retry_snapshot()['next_check_at_monotonic'], next_check)
+                clock[0] = next_check - .01
                 self.assertFalse(wait_for_count(10, timeout=.2))
+                clock[0] = next_check
+                self.assertTrue(wait_for_count(10), 'recovered destination did not resume periodic checks')
+                self.assertTrue(all(item['current_storage_availability'] == 'available' for item in calls[-1][2]))
+                self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 8)
                 self.assertEqual(len({call[1] for call in calls}), 1)
                 self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
                 self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
         finally:
             self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
+    def test_image_owner_detects_idle_destination_loss_and_recovery(self):
+        replace = spot_image_fact.os.replace
+        blocked, clock, attempts = [False], [100.0], []
+        historical = self.root / 'retained.txt'
+        historical.write_bytes(b'preserve historical data')
+
+        def replace_file(source, target):
+            if Path(source).name.startswith('.sfl-storage-probe-'):
+                attempts.append((clock[0], threading.current_thread(), Path(source).parent))
+                if blocked[0] and Path(source).parent != self.root:
+                    raise PermissionError('idle image directory temporarily unavailable')
+            return replace(source, target)
+
+        def wait_for(predicate, message):
+            deadline = time.perf_counter() + 2
+            while time.perf_counter() < deadline:
+                writer = spot_api._spot_image_capture_writer
+                if writer is not None:
+                    results = {item['sink_id']: item for item in writer.destination_probe_snapshot()}
+                    if len(results) == 2 and predicate(results):
+                        return writer, results
+                time.sleep(.01)
+            self.fail(message)
+
+        with patch.object(spot_image_fact.os, 'replace', replace_file), \
+                patch.object(spot_image_fact.time, 'monotonic', side_effect=lambda: clock[0]):
+            try:
+                self.request_initializer()
+                writer, _ = wait_for(lambda result: all(item['probe_status'] == 'available'
+                                                       for item in result.values()), 'initial probe missing')
+                self.assertEqual(len(attempts), 2)
+                blocked[0] = True
+                clock[0] = 100.99
+                time.sleep(.15)
+                self.assertEqual(len(attempts), 2)
+                clock[0] = 101.0
+                _, failed = wait_for(lambda result: result['image_jpeg']['probe_status'] == 'blocked',
+                                     'idle image destination was not rechecked')
+                self.assertEqual(failed['image_fact']['current_storage_availability'], 'available')
+                self.assertEqual(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'], 102.0)
+                self.assertEqual(len(attempts), 4)
+                blocked[0] = False
+                clock[0] = 101.99
+                time.sleep(.15)
+                self.assertEqual(len(attempts), 4)
+                clock[0] = 102.0
+                _, recovered = wait_for(lambda result: all(item['current_storage_availability'] == 'available'
+                                                           for item in result.values()), 'idle recovery missing')
+                self.assertEqual(len(attempts), 6)
+                self.assertEqual(len({item[1] for item in attempts}), 1)
+                self.assertIsNot(attempts[0][1], threading.current_thread())
+                self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                with patch.object(Path, 'open', side_effect=AssertionError('snapshot performed file I/O')):
+                    self.assertEqual({item['sink_id']: item for item in writer.destination_probe_snapshot()}, recovered)
+            finally:
+                self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+            count = len(attempts)
+            clock[0] = 1000.0
+            time.sleep(.15)
+            self.assertEqual(len(attempts), count)
+        self.assertEqual(historical.read_bytes(), b'preserve historical data')
+        self.assertEqual(list(self.root.rglob('.sfl-storage-probe-*')), [])
 
     def test_image_owner_recovers_required_file_without_new_capture(self):
         original_writer = SpotImageCaptureWriter(log_path=self.root, capture_root=self.root / 'spot_images')

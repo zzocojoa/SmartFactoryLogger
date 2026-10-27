@@ -174,6 +174,7 @@ class SpotImageCaptureWriter:
     _retention_scan: Optional[Generator[None, None, None]] = field(default=None, init=False, repr=False)
     _destination_probe_results: tuple[dict[str, Any], ...] = field(default=(), init=False, repr=False)
     _destination_probe_retry_at: Optional[float] = field(default=None, init=False, repr=False)
+    _destination_probe_check_at: Optional[float] = field(default=None, init=False, repr=False)
     _destination_probe_retry_delay: float = field(default=1.0, init=False, repr=False)
     _destination_probe_failure_count: int = field(default=0, init=False, repr=False)
     _destination_probe_generation: int = field(default=0, init=False, repr=False)
@@ -258,6 +259,11 @@ class SpotImageCaptureWriter:
                 self._destination_probe_retry_delay = 1.0
             if self._destination_probe_manual_recovery:
                 self._destination_probe_retry_at = None
+                self._destination_probe_check_at = None
+            else:
+                self._destination_probe_check_at = (self._destination_probe_retry_at
+                                                   if self._destination_probe_retry_at is not None
+                                                   else time.monotonic() + 1.0)
             self._destination_probe_results = tuple(results)
         return self.destination_probe_snapshot()
 
@@ -288,6 +294,7 @@ class SpotImageCaptureWriter:
     def destination_probe_retry_snapshot(self) -> dict[str, Any]:
         with self._destination_probe_lock:
             return {"next_retry_at_monotonic": self._destination_probe_retry_at,
+                    "next_check_at_monotonic": self._destination_probe_check_at,
                     "retry_delay_sec": self._destination_probe_retry_delay,
                     "config_generation": self._destination_probe_generation,
                     "failure_count": self._destination_probe_failure_count}
@@ -301,6 +308,7 @@ class SpotImageCaptureWriter:
                 return  # Preserve the original failed destination and generation.
             self._destination_probe_results = ()
             self._destination_probe_retry_at = None
+            self._destination_probe_check_at = None
             self._destination_probe_retry_delay = 1.0
 
     def destination_probe_due(self, *, captured_at: float, now_monotonic: float) -> bool:
@@ -312,7 +320,7 @@ class SpotImageCaptureWriter:
         with self._destination_probe_lock:
             observed = {(item["sink_id"], item["destination_path"]) for item in self._destination_probe_results}
             return (observed != expected or (
-                self._destination_probe_retry_at is not None and now_monotonic >= self._destination_probe_retry_at))
+                self._destination_probe_check_at is not None and now_monotonic >= self._destination_probe_check_at))
 
     @property
     def fact_row_count(self) -> int:
