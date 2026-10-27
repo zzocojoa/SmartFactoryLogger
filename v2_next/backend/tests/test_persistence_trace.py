@@ -8,9 +8,55 @@ from unittest.mock import patch
 
 from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, AdmissionRejectionRange, PersistenceTraceWriter
 from backend.FacilityData.persistence_validation import validate_csv_persistence_trace
+from backend.FacilityData.freshness import clock_domain_id
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_trace_stage_clocks_survive_failure_and_new_segment(self):
+        clock = [100.0]
+        with tempfile.TemporaryDirectory() as folder:
+            writer = PersistenceTraceWriter(Path(folder), "clock-run", clock=lambda: clock[0])
+            self.assertIsNone(writer.snapshot().get("oldest_pending_monotonic"))
+            writer.append({"kind": "first"})
+            clock[0] = 100.6
+            writer.append({"kind": "second"})
+            initial = writer.snapshot()
+            self.assertEqual(initial.get("oldest_pending_monotonic"), 100.0,
+                             "trace evidence age has no first-record monotonic clock")
+            self.assertEqual(initial["stage_due_monotonic"], 101.0)
+            self.assertEqual(initial["pending_recovery"], 0)
+            self.assertEqual(initial["clock_domain"], clock_domain_id())
+            with patch.object(Path, "replace", side_effect=PermissionError("injected publish outage")):
+                self.assertFalse(writer.flush(force=True))
+            pending = next(Path(folder).glob("*.pending"))
+            original = pending.read_bytes()
+            clock[0] = 105.0
+            writer.append({"kind": "third"})
+            with patch.object(Path, "open", side_effect=AssertionError("snapshot performed file I/O")):
+                failed = writer.snapshot()
+            self.assertEqual(failed["oldest_pending_monotonic"], 100.0)
+            self.assertEqual(failed["stage_due_monotonic"], 100.6,
+                             "forced early publication did not preserve its original due time")
+            self.assertEqual(failed["pending_records"], 3)
+            self.assertEqual(failed["pending_recovery"], 2)
+            self.assertEqual(pending.read_bytes(), original)
+            clock[0] = 105.2
+            self.assertTrue(writer.flush(force=True))
+            recovered = writer.snapshot()
+            self.assertEqual(recovered["oldest_pending_monotonic"], 105.0)
+            self.assertEqual(recovered["stage_due_monotonic"], 106.0)
+            self.assertEqual(recovered["pending_recovery"], 0)
+            self.assertEqual(recovered["failure_count"], 1)
+            clock[0] = 106.0
+            self.assertTrue(writer.flush())
+            empty = writer.snapshot()
+            self.assertIsNone(empty["oldest_pending_monotonic"])
+            self.assertIsNone(empty["stage_due_monotonic"])
+            self.assertEqual(empty["pending_records"], 0)
+            records = [json.loads(line)["kind"] for path in sorted(Path(folder).glob("*.trace.jsonl"))
+                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(records, ["first", "second", "third"])
+
     @staticmethod
     def terminal_outcomes(v1_committed=0):
         return {"contract_version": "CSV_PERSISTENCE_OUTCOMES_V1", "coverage": "TERMINAL_REQUIRED_SINK_COUNTS",

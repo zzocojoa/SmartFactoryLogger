@@ -10,6 +10,7 @@ import time
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
+from backend.FacilityData.freshness import clock_domain_id
 
 TRACE_SEGMENT_RECORD_LIMIT = 1000
 TRACE_PENDING_SEGMENT_LIMIT = 2
@@ -145,9 +146,11 @@ class _TraceContentUncertain(OSError):
 class _TraceSegment:
     sequence: int
     header: bytes
+    created_monotonic: float
     flush_due_monotonic: float
     records: list[bytes] = field(default_factory=list)
     sealed: bool = False
+    recovery_required: bool = False
 
     @property
     def size(self) -> int:
@@ -225,7 +228,8 @@ class PersistenceTraceWriter:
                 header = encode_json_payload(header_source, sort_keys=True, compact=True, newline=True)
             payload = encode_json_payload(prepared, sort_keys=True, compact=True, newline=True)
             if segment is None:
-                segment = _TraceSegment(self._next_sequence, header, self.clock() + TRACE_FLUSH_INTERVAL_SEC)
+                created = self.clock()
+                segment = _TraceSegment(self._next_sequence, header, created, created + TRACE_FLUSH_INTERVAL_SEC)
                 self._next_sequence += 1
                 self._segments.append(segment)
             segment.records.append(payload)
@@ -290,16 +294,21 @@ class PersistenceTraceWriter:
                 if not self._segments:
                     return True
                 segment = self._segments[0]
+                now = self.clock()
                 if (not force and not segment.sealed and len(segment.records) < TRACE_SEGMENT_RECORD_LIMIT
-                        and segment.size < TRACE_SEGMENT_BYTE_LIMIT and self.clock() < segment.flush_due_monotonic):
+                        and segment.size < TRACE_SEGMENT_BYTE_LIMIT and now < segment.flush_due_monotonic):
                     return True
                 segment.sealed = True
+                # Early publication may advance the deadline. Retries may
+                # never postpone that first scheduled/attempted completion.
+                segment.flush_due_monotonic = min(segment.flush_due_monotonic, now)
                 self._processing_bytes = TRACE_READBACK_BYTES
             try:
                 self._publish(segment)
             except OSError as exc:
                 with self._lock:
                     self._failure_count += 1
+                    segment.recovery_required = True
                     uncertain = isinstance(exc, _TraceContentUncertain)
                     self._incomplete |= uncertain
                     self._last_error = str(exc) if uncertain else "trace_io_failed"
@@ -329,6 +338,11 @@ class PersistenceTraceWriter:
                         or tail.size >= TRACE_SEGMENT_BYTE_LIMIT):
                     admission_blocked_reason = "trace_segments_full"
             return {"pending_records": sum(len(segment.records) for segment in self._segments),
+                    "oldest_pending_monotonic": self._segments[0].created_monotonic if self._segments else None,
+                    "stage_due_monotonic": min((segment.flush_due_monotonic for segment in self._segments), default=None),
+                    "clock_domain": clock_domain_id(),
+                    "pending_recovery": sum(len(segment.records) for segment in self._segments
+                                            if segment.recovery_required),
                     "pending_bytes": sum(segment.size for segment in self._segments) + self._processing_bytes,
                     "processing_bytes": self._processing_bytes,
                     "pending_segments": len(self._segments),
