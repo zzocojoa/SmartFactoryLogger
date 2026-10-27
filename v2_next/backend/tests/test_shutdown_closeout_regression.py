@@ -1514,6 +1514,41 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             with writer.fact_path.open(encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(sum(1 for _ in csv.DictReader(handle)), 12_005)
 
+    def test_image_history_corruption_guards_preserve_originals(self) -> None:
+        for failure in ("utf8", "quotes", "extra_column", "blank_row", "duplicate_id", "lookup_utf8"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                args = dict(image_bytes=b"\xff\xd8corruption-guards\xff\xd9", captured_at=1782910800.123456,
+                            source_url="http://synthetic.invalid/image.jpg", source='test\nline,"quoted"',
+                            image_age_ms=0.0, link_checked_at=None, observation_snapshot=None)
+                writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+                fact = writer.write_capture(**args)
+                valid = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+                self.assertEqual(valid.write_capture(**args), fact)
+                self.assertEqual(valid.fact_row_count, 1)
+                original = writer.fact_path.read_bytes()
+                row = original.split(b"\r\n", 1)[1]
+                corruptions = {
+                    "utf8": original + b"\xff\r\n",
+                    "quotes": original + b'"unterminated\r\n',
+                    "extra_column": original + row[:-2] + b",extra\r\n",
+                    "blank_row": original + b"\r\n",
+                    "duplicate_id": original + row,
+                    "lookup_utf8": original + b"\xff\r\n",
+                }
+                if failure == "lookup_utf8":
+                    restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+                writer.fact_path.write_bytes(corruptions[failure])
+                if failure != "lookup_utf8":
+                    restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+                originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+                with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                    restarted.write_capture(**args)
+                self.assertFalse(restarted.try_manifest_stats()[2])
+                self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+                with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                    restarted.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+
     def test_image_uncertainty_survives_writer_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
