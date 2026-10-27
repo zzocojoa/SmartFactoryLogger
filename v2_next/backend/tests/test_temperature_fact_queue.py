@@ -19,6 +19,7 @@ from backend.FacilityData.drivers import spot_api
 from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter, build_spot_observation_fact
 from backend.FacilityData.spot_observation_queue import SpotObservationQueue, FactPersistencePending
 from backend.FacilityData.freshness import clock_domain_id
+from backend.FacilityData.persistence_pressure import StoragePressureController
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.drivers.real_plc import RealPLCDriver
@@ -1185,7 +1186,7 @@ class FactQueueTests(unittest.TestCase):
 
             with patch('tempfile.mkstemp', side_effect=failed_probe), \
                     patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
-                owner = SpotObservationQueue(lambda: writer)
+                owner = SpotObservationQueue(lambda: writer, config_generation=7)
                 try:
                     state = wait_state(owner, lambda state: state['required_file_availability'] == 'available')
                     destinations = {item['sink_id']: item for item in state.get('storage_destinations', ())}
@@ -1199,6 +1200,20 @@ class FactQueueTests(unittest.TestCase):
                                         destinations['temperature_spool']['destination_key'])
                     self.assertEqual(state['accepted_count'], 0)
                     self.assertEqual(state['pending_payload_bytes'], 0)
+                    controller = StoragePressureController()
+                    with patch.object(Path, 'open', side_effect=AssertionError('pressure sample opened file')), \
+                            patch.object(Path, 'stat', side_effect=AssertionError('pressure sample statted file')):
+                        samples = owner.storage_pressure_samples()
+                    decision = controller.evaluate(samples, now_monotonic=100.0)
+                    self.assertEqual(decision.state, 'PERSISTENCE_BLOCKED',
+                                     'unavailable spool was omitted from required storage pressure')
+                    self.assertEqual(decision.current_storage_availability, 'blocked')
+                    self.assertEqual({sample.sink_id for sample in samples}, set(destinations))
+                    for sample in samples:
+                        self.assertEqual(sample.config_generation, 7)
+                        self.assertEqual(sample.destination_key, destinations[sample.sink_id]['destination_key'])
+                        self.assertEqual(sample.pending_count, 0)
+                        self.assertTrue(sample.writer_alive)
                     with patch.object(Path, 'open', side_effect=AssertionError('snapshot opened file')):
                         self.assertEqual(len(owner.snapshot()['storage_destinations']), 2)
                     clock[0] = 100.99
@@ -1212,6 +1227,10 @@ class FactQueueTests(unittest.TestCase):
                     self.assertEqual(spool_state['probe_failure_count'], 1)
                     self.assertEqual(spool_state['last_probe_success_monotonic'], 101.0)
                     self.assertEqual(spool_state['next_probe_monotonic'], 102.0)
+                    for now, expected in ((101.0, 'PRESSURED'), (102.0, 'PRESSURED'), (103.0, 'NORMAL')):
+                        decision = controller.evaluate(owner.storage_pressure_samples(), now_monotonic=now)
+                        self.assertEqual(decision.state, expected)
+                        self.assertEqual(decision.current_storage_availability, 'available')
                     self.assertTrue(all(thread is owner._thread for _, _, thread in attempts))
                     self.assertEqual(state['accepted_count'], 0)
                     self.assertEqual(state['pending_payload_bytes'], 0)

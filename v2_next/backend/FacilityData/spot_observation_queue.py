@@ -30,6 +30,7 @@ from backend.FacilityData.spot_observation_fact import (
 )
 from backend.FacilityData.freshness import clock_domain_id
 from backend.FacilityData.spot_image_fact import _probe_storage_directory
+from backend.FacilityData.persistence_pressure import StoragePressureSample
 
 
 FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
@@ -73,7 +74,8 @@ class _FactEvent:
 
 
 class SpotObservationQueue:
-    def __init__(self, factory: Callable[[], SpotObservationFactWriter], capacity: int = 256):
+    def __init__(self, factory: Callable[[], SpotObservationFactWriter], capacity: int = 256,
+                 *, config_generation: int | None = None):
         if isinstance(capacity, bool) or capacity <= 0:
             raise ValueError("capacity must be positive")
         self._factory = factory
@@ -95,6 +97,7 @@ class SpotObservationQueue:
         self._storage_directories: dict[str, Path] = {}
         self._storage_probes: dict[str, dict[str, Any]] = {}
         self._state: dict[str, Any] = {
+            "config_generation": config_generation,
             "queue_capacity": capacity, "accepted_count": 0, "completed_count": 0,
             "rejected_count": 0, "write_failure_count": 0, "spool_failure_count": 0,
             "spool_last_error_code": None,
@@ -204,6 +207,7 @@ class SpotObservationQueue:
             state = dict(self._state)
             state["storage_destinations"] = [dict(probe) for probe in self._storage_probes.values()]
             oldest = self._pending_enqueued_at[0] if self._pending_enqueued_at else None
+            state["memory_oldest_pending_monotonic"] = oldest
             if state['spool_pending_count'] or state['spool_pending_bytes']:
                 spool_oldest = state['spool_oldest_pending_monotonic']
                 oldest = (None if state['spool_timing_status'] != 'known'
@@ -225,6 +229,42 @@ class SpotObservationQueue:
             and not state["storage_probe_manual_recovery"]
         )
         return state
+
+    def storage_pressure_samples(self, *, enabled: bool = True) -> list[StoragePressureSample]:
+        state = self.snapshot()
+        destinations = {item["sink_id"]: item for item in state["storage_destinations"]}
+        samples = []
+        for sink_id in ("temperature_fact", "temperature_spool"):
+            probe = destinations.get(sink_id, {})
+            fact = sink_id == "temperature_fact"
+            manual = (state["initialization_manual_recovery"] or probe.get("manual_recovery_required", False)
+                      or (state["required_file_manual_recovery"] if fact else state["spool_manual_recovery"]))
+            statuses = [probe.get("probe_status", "unknown")]
+            if state["initialization_state"] != "ready":
+                statuses.append("blocked" if state["initialization_state"] == "failed" else "unknown")
+            if fact:
+                statuses.append(state["required_file_availability"])
+            elif state["spool_usage_status"] != "measured":
+                statuses.append("unknown")
+            availability = ("blocked" if manual or "blocked" in statuses else
+                            "available" if all(value == "available" for value in statuses) else "unknown")
+            oldest = (state["memory_oldest_pending_monotonic"] if fact else
+                      state["spool_oldest_pending_monotonic"] if state["spool_timing_status"] == "known" else None)
+            samples.append(StoragePressureSample(
+                sink_id=sink_id, config_generation=state["config_generation"],
+                destination_key=probe.get("destination_key", ""), enabled=enabled, availability=availability,
+                pending_count=state["pending_write_count"] if fact else 0,
+                pending_bytes=state["pending_payload_bytes"] if fact else 0,
+                count_limit=state["queue_capacity"], byte_limit=state["pending_payload_byte_limit"],
+                spool_bytes=0 if fact else (state["spool_retained_bytes"] or 0),
+                spool_limit=state["spool_pending_byte_limit"],
+                pending_recovery=0 if fact else state["spool_pending_count"],
+                oldest_pending_monotonic=oldest, stage_due_monotonic=oldest,
+                writer_alive=state["writer_alive"], manual_recovery_required=bool(manual),
+                budget_pending_count=state["pending_write_count"],
+                budget_pending_bytes=state["pending_payload_bytes"],
+            ))
+        return samples
 
     def _record_failure(self, code: str, observation_key: str, *, worker_failure: bool) -> None:
         with self._lock:
