@@ -516,6 +516,113 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(final['pending_payload_bytes'], 0)
         self.assertTrue(final['accounting_consistent'])
 
+    def test_image_retry_backoff_and_shutdown_preserve_pending(self):
+        clock = [1000.0]
+        real_monotonic = time.monotonic
+        should_fail = [True]
+        attempts = []
+
+        def write(path, data):
+            if path.is_relative_to(self.root / 'images') and should_fail[0]:
+                attempts.append(clock[0])
+                raise PermissionError(13, 'temporary JPEG write failure')
+            return self.write_bytes(path, data)
+
+        def await_retry(count):
+            deadline = real_monotonic() + 3
+            while real_monotonic() < deadline:
+                state = spot.get_spot_image_capture_shutdown_status()
+                if state['retry_error_count'] == count:
+                    return state
+                time.sleep(.01)
+            self.fail(f'retry count {count} was not observed')
+
+        with patch.object(Path, 'write_bytes', new=write), \
+             patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]):
+            self.assertTrue(self.enqueue().accepted)
+            for number, delay in enumerate((1., 2., 4., 8., 16., 30., 30.), 1):
+                pending = await_retry(number)
+                self.assertEqual(pending['next_retry_at_monotonic'], clock[0] + delay)
+                self.assertEqual(pending['pending_recovery'], 1)
+                self.assertEqual(pending['unfinished_tasks'], 1)
+                self.assertEqual(pending['queue_size'], 0)
+                self.assertGreater(pending['pending_payload_bytes'], 0)
+                self.assertTrue(pending['accounting_consistent'])
+                due = pending['next_retry_at_monotonic']
+                clock[0] = due - .25
+                time.sleep(.03)
+                self.assertEqual(len(attempts), number)
+                if number == 7:
+                    should_fail[0] = False
+                clock[0] = due
+            self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            complete = spot.get_spot_image_capture_shutdown_status()
+            self.assertEqual(complete['written_count'], 1)
+            self.assertEqual(complete['recovered_count'], 1)
+            self.assertEqual(complete['retry_error_count'], 7)
+            self.assertEqual(complete['pending_payload_bytes'], 0)
+            with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+                self.assertEqual(len(list(csv.DictReader(handle))), 1)
+
+            should_fail[0] = True
+            self.assertTrue(self.enqueue().accepted)
+            pending = await_retry(8)
+            self.assertEqual(pending['next_retry_at_monotonic'], clock[0] + 1.)
+            before = spot.begin_spot_image_capture_shutdown()
+            clock[0] += 100
+            self.assertFalse(spot.stop_spot_image_capture_for_shutdown(3))
+            final = spot.get_spot_image_capture_shutdown_status()
+            self.assertEqual(len(attempts), 8, 'shutdown must not schedule a new retry')
+            self.assertFalse(final['worker_alive'])
+            self.assertFalse(final['writes_drained'])
+            self.assertTrue(final['integrity_unresolved'])
+            self.assertTrue(final['accounting_consistent'])
+            self.assertEqual(final['historical_retry_errors'], 8)
+            self.assertEqual(final['pending_recovery'], 1)
+            self.assertEqual(final['unfinished_tasks'], 1)
+            self.assertEqual(final['pending_payload_bytes'], before['pending_payload_bytes'])
+            self.assertEqual(final['failure_count'], 0)
+
+    def test_partial_fact_failure_never_retries_after_config_change(self):
+        opened = Path.open
+        attempts = []
+
+        class PartialAppend:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self.handle.__exit__(*exc)
+
+            def write(self, data):
+                attempts.append(len(data))
+                self.handle.write(data[:37])
+                self.handle.flush()
+                raise OSError('partial image fact write')
+
+        def fail_append(path, mode='r', *args, **kwargs):
+            handle = opened(path, mode, *args, **kwargs)
+            return PartialAppend(handle) if path == self.root / 'spot_image_fact.csv' and mode == 'ab' else handle
+
+        with patch.object(Path, 'open', new=fail_append):
+            self.assertTrue(self.enqueue().accepted)
+            self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            originals = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+            with patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_PATH', 'replacement-images'):
+                self.assertTrue(self.enqueue().accepted)
+                self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual({path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}, originals)
+        state = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(state['failure_count'], 2)
+        self.assertEqual(state['retry_error_count'], 0)
+        self.assertEqual(state['pending_recovery'], 0)
+        self.assertEqual(state['pending_payload_bytes'], 0)
+        self.assertTrue(state['accounting_consistent'])
+
     def test_existing_capture_verification_reserves_worker_payload(self):
         data = io.BytesIO()
         Image.new('RGB', (2, 2), (3, 4, 5)).save(data, format='JPEG')
