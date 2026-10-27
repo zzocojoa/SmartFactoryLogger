@@ -391,7 +391,12 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertFalse(closed, "CSV shutdown ignored missing producer trace evidence")
             rows = self.read_rows(self.list_v1_files(tmp_dir)[0])
             self.assertEqual([float(row[3]) for row in rows[1:]], [30.0, 31.0])
-            state = service.get_runtime_state()["persistence_trace"]
+            runtime = service.get_runtime_state()
+            self.assertEqual(runtime["pending_event_count"], 2,
+                             "CSV events completed before their row evidence was committed")
+            self.assertEqual(runtime["csv_data_written_evidence_pending_count"], 2)
+            self.assertEqual(runtime["csv_evidence_pending_by_sink"], {"csv_v1": 2, "csv_v2": 0})
+            state = runtime["persistence_trace"]
             self.assertGreaterEqual(state["failure_count"], 1)
             self.assertGreaterEqual(state["pending_records"], 2)
             self.assertEqual(list(tmp_dir.rglob("*.trace.jsonl")), [])

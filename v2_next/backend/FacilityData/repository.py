@@ -348,6 +348,9 @@ class _CSVRowLocation:
     length: int
     digest: bytes
     write_completed: bool = False
+    data_reported: bool = False
+    sink_id: Optional[str] = None
+    evidence_sequence: Optional[int] = None
 
 
 class _CSVRecordOutput:
@@ -506,6 +509,7 @@ class CSVLoggerService:
         self._producer_seq = 0
         self._trace_start_seq = 0
         self._trace_stop_seq: Optional[int] = None
+        self._trace_stop_recorded = False
         self._trace_config_generation: Optional[int] = None
         self._persistence_trace: Optional[PersistenceTraceWriter] = None
         self._trace_boundary_failed = False
@@ -568,6 +572,7 @@ class CSVLoggerService:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
                 self._trace_start_seq = self._producer_seq
             self._trace_stop_seq = None
+            self._trace_stop_recorded = False
             self._trace_config_generation = None
             self._persistence_trace = None
             self._trace_boundary_failed = False
@@ -3078,6 +3083,96 @@ class CSVLoggerService:
                 written.append((row, timestamp))
         return written
 
+    def _unreported_csv_rows(self, rows: list[Tuple[list, datetime]], sink: str) -> list[Tuple[list, datetime]]:
+        with self._runtime_lock:
+            result = []
+            for row, timestamp in rows:
+                binding = self._pending_row_events.get(id(row))
+                if binding is not None and sink not in self._pending_events[binding[1]][1]:
+                    continue
+                location = self._pending_csv_locations.get(id(row))
+                if location is None or not location.data_reported:
+                    result.append((row, timestamp))
+            return result
+
+    def _report_csv_data(self, rows: list[Tuple[list, datetime]], sink: str) -> None:
+        with self._runtime_lock:
+            for row, _ in rows:
+                location = self._pending_csv_locations.get(id(row))
+                if location is not None:
+                    location.data_reported = True
+                    location.sink_id = sink
+
+    def _reconcile_csv_evidence(self, rows: list[Tuple[list, datetime]],
+                                buffer: Iterable[Tuple[list, datetime]], sink: str) -> bool:
+        trace = self._persistence_trace
+        envelope: Optional[CSVEventEnvelope] = None
+        for row, _ in rows:
+            with self._runtime_lock:
+                binding = self._pending_row_events.get(id(row))
+                location = self._pending_csv_locations.get(id(row))
+                if binding is None or location is None:
+                    continue
+                envelope, required = self._pending_events[binding[1]]
+                needs_evidence = (sink in required and location.data_reported
+                                  and location.evidence_sequence is None)
+            if trace is None or not needs_evidence:
+                continue
+            record = None
+            try:
+                # The trace owner reserves its serialization and queued bytes.
+                # Account separately for the temporary hex digest created here.
+                with self._reserve_csv_output(2 * CSV_ROW_DIGEST_BYTES):
+                    try:
+                        record = {
+                            "kind": "csv_row_data", "record_version": 1,
+                            "producer_seq": envelope.producer_seq, "sink_id": sink,
+                            "config_generation": envelope.write_config.generation,
+                            "source_payload_hash": envelope.source_payload_hash,
+                            "file_path": str(location.path), "file_device": location.device,
+                            "file_id": location.inode, "row_byte_offset": location.offset,
+                            "row_byte_length": location.length, "output_bytes_sha256": location.digest.hex(),
+                        }
+                        sequence = trace.append(record)
+                        with self._runtime_lock:
+                            location.evidence_sequence = sequence
+                    finally:
+                        record = None
+            except CSVOutputBudgetExceeded:
+                # Data already exists. Keep its original receipt for a later
+                # evidence attempt; never convert this to a terminal row failure.
+                continue
+        # Normal evidence waits for its original deadline. Shutdown may force
+        # publication, but neither path repeats an already accepted trace record.
+        if trace is not None:
+            if not self.running:
+                self._record_persistence_trace_stop()
+            trace.flush(force=not self.running)
+            committed = trace.snapshot()["committed_segment_seq"]
+        else:
+            committed = 0
+        complete: list[Tuple[list, datetime]] = []
+        pending: list[Tuple[list, datetime]] = []
+        with self._runtime_lock:
+            for row, timestamp in rows:
+                binding = self._pending_row_events.get(id(row))
+                location = self._pending_csv_locations.get(id(row))
+                ready = binding is None or sink not in self._pending_events[binding[1]][1]
+                if not ready and location is not None:
+                    ready = (location.evidence_sequence is not None
+                             and location.evidence_sequence <= committed
+                             and location.path not in self._uncertain_csv_paths)
+                (complete if ready else pending).append((row, timestamp))
+        # Release references before the next decode accounting boundary. A
+        # production buffer is a list; direct legacy iterable callers remain
+        # all-or-nothing so completed rows cannot become unbound retry inputs.
+        location = envelope = record = None
+        if isinstance(buffer, list) or not pending:
+            self._complete_pending_rows(complete, sink)
+            if isinstance(buffer, list):
+                buffer[:] = pending
+        return not pending
+
     def _flush_buffer(
         self,
         writer: Optional[_CSVWriter],
@@ -3092,12 +3187,11 @@ class CSVLoggerService:
             return False
         written = self._write_csv_rows(writer, rows, "csv_v1")
         handle.flush()
-        if written:
+        new_rows = self._unreported_csv_rows(written, "csv_v1")
+        if new_rows:
             self._mark_write_completed()
-        self._complete_pending_rows(rows, "csv_v1")
-        # True means the buffer was consumed. Per-sink failures remain latched
-        # and prevent clean shutdown; they are never marked as completed writes.
-        return True
+            self._report_csv_data(new_rows, "csv_v1")
+        return self._reconcile_csv_evidence(rows, buffer, "csv_v1")
 
     def _flush_v2_buffer(
         self,
@@ -3110,16 +3204,19 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
-        self._prepare_v2_rows_persisted(rows)  # Validate ordering before any write.
+        new_rows = self._unreported_csv_rows(rows, "csv_v2")
+        if new_rows:
+            self._prepare_v2_rows_persisted(new_rows)  # Validate new data before any write.
         flush_started = time.perf_counter()
         written = self._write_csv_rows(writer, rows, "csv_v2")
         handle.flush()
         self._last_csv_flush_duration_ms = (time.perf_counter() - flush_started) * 1000.0
-        if written:
-            self._commit_v2_rows_persisted(self._prepare_v2_rows_persisted(written))
+        new_rows = self._unreported_csv_rows(written, "csv_v2")
+        if new_rows:
+            self._commit_v2_rows_persisted(self._prepare_v2_rows_persisted(new_rows))
             self._mark_write_completed()
-        self._complete_pending_rows(rows, "csv_v2")
-        return True
+            self._report_csv_data(new_rows, "csv_v2")
+        return self._reconcile_csv_evidence(rows, buffer, "csv_v2")
 
     def _prepare_v2_rows_persisted(
         self,
@@ -3362,16 +3459,24 @@ class CSVLoggerService:
         self._trace_boundary_failed |= token is None
         self._trace_config_generation = settings.generation
 
-    def _finish_persistence_trace(self) -> bool:
+    def _record_persistence_trace_stop(self) -> None:
         trace = self._persistence_trace
-        if trace is None:
-            return True
+        if trace is None or self._trace_stop_recorded:
+            return
         with self._runtime_lock:
             final_sequence = self._trace_stop_seq if self._trace_stop_seq is not None else self._producer_seq
             pending_events = len(self._pending_events)
         token = trace.append({"kind": "producer_stop", "final_producer_seq": final_sequence,
-                              "pending_event_count": pending_events, "coverage": "PRODUCER_AND_CONFIG_BOUNDARIES"})
+                              "pending_event_count_at_stop": pending_events,
+                              "coverage": "PRODUCER_AND_CONFIG_BOUNDARIES"})
         self._trace_boundary_failed |= token is None
+        self._trace_stop_recorded = True
+
+    def _finish_persistence_trace(self) -> bool:
+        trace = self._persistence_trace
+        if trace is None:
+            return True
+        self._record_persistence_trace_stop()
         while trace.snapshot()["pending_records"]:
             if not trace.flush(force=True):
                 break
@@ -3406,6 +3511,11 @@ class CSVLoggerService:
             uncertain_csv_file_count = len(self._uncertain_csv_paths)
             unclosed_csv_handle_count = len(self._unclosed_csv_handles)
             csv_manual_recovery_required = self._csv_manual_recovery_required
+            csv_evidence_pending_by_sink = {"csv_v1": 0, "csv_v2": 0}
+            for location in self._pending_csv_locations.values():
+                if (location.data_reported and location.sink_id in csv_evidence_pending_by_sink
+                        and location.path not in self._uncertain_csv_paths):
+                    csv_evidence_pending_by_sink[location.sink_id] += 1
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -3436,6 +3546,9 @@ class CSVLoggerService:
             "uncertain_csv_file_count": uncertain_csv_file_count,
             "unclosed_csv_handle_count": unclosed_csv_handle_count,
             "csv_manual_recovery_required": csv_manual_recovery_required,
+            "csv_data_written_evidence_pending_count": sum(csv_evidence_pending_by_sink.values()),
+            "csv_evidence_pending_by_sink": csv_evidence_pending_by_sink,
+            "csv_row_evidence_contract": "CSV_ROW_BYTE_LOCATIONS_V1",
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "persistence_trace": trace.snapshot() if trace is not None else None,
             "persistence_trace_coverage": "PRODUCER_AND_CONFIG_BOUNDARIES" if trace is not None else "NOT_EVALUATED",
