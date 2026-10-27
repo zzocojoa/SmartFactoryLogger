@@ -67,6 +67,73 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_config_interval_mismatch(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir / "before", True)
+            service.start()
+            try:
+                first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                service.apply_config(log_path=tmp_dir / "after", csv_v1_enabled=False, csv_v2_enabled=True)
+                second = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                self.assertEqual([first["status"], second["status"]], ["ACCEPTED", "ACCEPTED"])
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])["issues"], [])
+            originals = {path: path.read_bytes() for path in paths}
+            for path, contents in originals.items():
+                amended = []
+                for line in contents.splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record.get("kind") == "config_activated" and record["config_generation"] == second["config_generation"]:
+                        line = (json.dumps(dict(record, effective_from_producer_seq=second["producer_seq"] + 1)) + "\n").encode()
+                    amended.append(line)
+                path.write_bytes(b"".join(amended))
+            before = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+            self.assertIn("csv_config_interval_mismatch", result["issues"],
+                          "admission was accepted before its configuration became effective")
+            self.assertEqual(result["configuration_status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["destination_status"], "VERIFIED")
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+            cases = [({"effective_from_producer_seq": True}, "invalid_csv_config_activation"),
+                     ({"effective_from_producer_seq": 0}, "invalid_csv_config_activation"),
+                     ({"config_generation": first["config_generation"]}, "duplicate_csv_config_generation"),
+                     ({"effective_from_producer_seq": first["producer_seq"]}, "ambiguous_csv_config_boundary"),
+                     ({"admitted_log_dir": "relative"}, "invalid_csv_config_activation"),
+                     ({"required_sinks": ["csv_v1"]}, "csv_config_contract_mismatch"),
+                     ({"csv_v2_schema_version": "future"}, "csv_config_contract_mismatch"),
+                     ({"admitted_log_dir": str(tmp_dir / "before")}, "csv_config_contract_mismatch"),
+                     ("missing", "missing_csv_config_activation"),
+                     ("duplicate", "duplicate_csv_config_generation")]
+            for changes, issue in cases:
+                with self.subTest(changes=changes):
+                    for path, contents in originals.items():
+                        amended = []
+                        for line in contents.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record.get("kind") == "config_activated":
+                                if changes == "missing":
+                                    continue
+                                if record["config_generation"] == second["config_generation"]:
+                                    if changes == "duplicate":
+                                        amended.append(line)
+                                    else:
+                                        line = (json.dumps(dict(record, **changes)) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["configuration_status"], "INCOMPLETE")
+            for path, contents in originals.items():
+                path.write_bytes(contents)
+            result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["configuration_status"], "VERIFIED")
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual(validate_csv_persistence_trace(paths)["configuration_status"], "NOT_EVALUATED")
+
     def test_validator_rejects_unadmitted_csv_header(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)

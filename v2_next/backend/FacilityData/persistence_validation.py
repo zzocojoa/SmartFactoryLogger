@@ -225,6 +225,56 @@ def _file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
+def _index_csv_configuration(database: sqlite3.Connection, record: dict[str, Any], body: str) -> set[str]:
+    generation, effective = record.get("config_generation"), record.get("effective_from_producer_seq")
+    sinks, destination = record.get("required_sinks"), record.get("admitted_log_dir")
+    if (type(generation) is not int or generation < 0 or type(effective) is not int or effective < 1
+            or not isinstance(sinks, list) or not sinks
+            or any(not isinstance(sink, str) or sink not in {"csv_v1", "csv_v2"} for sink in sinks)
+            or len(set(sinks)) != len(sinks) or not isinstance(destination, str) or not Path(destination).is_absolute()):
+        return {"invalid_csv_config_activation"}
+    database.execute("INSERT INTO csv_configurations VALUES (?, ?, ?)", (str(generation), str(effective), body))
+    return set()
+
+
+def _csv_configuration_issues(database: sqlite3.Connection) -> set[str]:
+    issues: set[str] = set()
+    if database.execute("SELECT 1 FROM csv_configurations GROUP BY generation HAVING count(*)>1 LIMIT 1").fetchone():
+        issues.add("duplicate_csv_config_generation")
+    if database.execute("SELECT 1 FROM csv_configurations GROUP BY effective HAVING count(*)>1 LIMIT 1").fetchone():
+        issues.add("ambiguous_csv_config_boundary")
+    configurations = iter(database.execute(
+        "SELECT effective, body FROM csv_configurations ORDER BY length(effective), effective"))
+    upcoming = next(configurations, None)
+    active: dict[str, Any] | None = None
+    for sequence, body in database.execute("SELECT sequence, body FROM csv_contracts ORDER BY length(sequence), sequence"):
+        admission = json.loads(body)
+        while upcoming is not None and int(upcoming[0]) <= int(sequence):
+            next_config = json.loads(upcoming[1])
+            if active is not None and next_config["config_generation"] <= active["config_generation"]:
+                issues.add("nonmonotonic_csv_config_generations")
+            active = next_config
+            upcoming = next(configurations, None)
+        if active is None:
+            issues.add("missing_csv_config_activation")
+            continue
+        if admission.get("config_generation") != active["config_generation"]:
+            issues.add("csv_config_interval_mismatch")
+        sinks, destination = admission.get("required_sinks"), admission.get("admitted_log_dir")
+        if (not isinstance(sinks, list) or any(not isinstance(sink, str) for sink in sinks)
+                or not isinstance(destination, str)):
+            issues.add("invalid_csv_config_contract")
+            continue
+        if (sorted(sinks) != sorted(active["required_sinks"])
+                or Path(destination) != Path(active["admitted_log_dir"])
+                or any(admission.get(field) != active.get(field)
+                       for field in ("csv_v2_schema_version", "csv_v2_column_hash"))):
+            issues.add("csv_config_contract_mismatch")
+    if upcoming is not None:
+        issues.add("unbound_csv_config_activation")
+    return issues
+
+
 def _admitted_csv_contract(database: sqlite3.Connection, record: dict[str, Any]) -> tuple[dict[str, Any] | None, set[str]]:
     sequence = record.get("producer_seq")
     if type(sequence) is not int or sequence < 1:
@@ -398,6 +448,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     byte_issues: set[str] = set()
     content_issues: set[str] = set()
     destination_issues: set[str] = set()
+    configuration_issues: set[str] = set()
     checked_rows = 0
     roots: list[tuple[Path, Path]] = []
     for root in data_roots:
@@ -469,6 +520,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                                      (str(record["producer_seq"]), line.decode("utf-8")))
                 elif record.get("kind") == "csv_row_data":
                     database.execute("INSERT INTO csv_rows VALUES (?)", (line.decode("utf-8"),))
+                elif record.get("kind") == "config_activated":
+                    configuration_issues.update(_index_csv_configuration(database, record, line.decode("utf-8")))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -512,6 +565,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
         issues.update(_terminal_output_issues(database, terminal_summary))
     issues.update(_required_sink_issues(database))
     issues.update(_csv_location_issues(database))
+    configuration_issues.update(_csv_configuration_issues(database))
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -525,6 +579,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     issues.update(byte_issues)
     issues.update(content_issues)
     issues.update(destination_issues)
+    issues.update(configuration_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -536,6 +591,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "checked_csv_rows": checked_rows,
             "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "destination_status": "INCOMPLETE" if byte_issues or destination_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
+            "configuration_status": "INCOMPLETE" if configuration_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "output_content_status": "INCOMPLETE" if byte_issues or content_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED"}
 
 
@@ -558,10 +614,13 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE TABLE csv_contracts (sequence TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_contract_identity ON csv_contracts(sequence)")
                 database.execute("CREATE TABLE csv_rows (body TEXT)")
+                database.execute("CREATE TABLE csv_configurations (generation TEXT, effective TEXT, body TEXT)")
+                database.execute("CREATE INDEX csv_configuration_order ON csv_configurations(length(effective), effective)")
                 return _validate_csv_trace(paths, database, data_roots)
     except (OSError, sqlite3.Error):
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
                 "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
                 "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",
-                "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED"}
+                "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED",
+                "configuration_status": "NOT_EVALUATED"}
