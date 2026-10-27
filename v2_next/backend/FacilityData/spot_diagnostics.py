@@ -32,7 +32,7 @@ DIAGNOSTICS_BINDING_STATUSES = frozenset(
     {"same_poll", "previous_poll", "future_clock", "unbound", "missing"}
 )
 DIAGNOSTICS_FIELD_STATUSES = frozenset(
-    {"success", "missing", "http_error", "timeout", "parse_error", "not_requested"}
+    {"success", "missing", "http_error", "timeout", "parse_error", "not_requested", "storage_pressure"}
 )
 DIAGNOSTICS_SUPPRESSION_REASONS = frozenset(
     {

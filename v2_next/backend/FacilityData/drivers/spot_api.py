@@ -192,6 +192,7 @@ _spot_diagnostics_last_started_monotonic: Optional[float] = None
 _spot_diagnostics_last_completed_at = 0.0
 _spot_diagnostics_sweep_started_count = 0
 _spot_diagnostics_upstream_request_count = 0
+_spot_diagnostics_storage_suppressed_request_count = 0
 _spot_diagnostics_suppressed_poll_count = 0
 _spot_diagnostics_inflight_suppressed_count = 0
 _spot_diagnostic_journal_lock = threading.RLock()
@@ -326,7 +327,7 @@ class SpotStoragePressureError(RuntimeError):
     """A local storage gate, not a sensor or transport failure."""
 
     def __init__(self, retry_after_sec: int = 1) -> None:
-        super().__init__("Image acquisition is suppressed by storage pressure")
+        super().__init__("Acquisition is suppressed by storage pressure")
         self.retry_after_sec = retry_after_sec
 
 
@@ -1156,6 +1157,7 @@ def _reset_spot_diagnostics_request_state_for_tests() -> None:
     global _spot_diagnostics_last_started_at, _spot_diagnostics_last_started_monotonic
     global _spot_diagnostics_last_completed_at, _spot_diagnostics_sweep_started_count
     global _spot_diagnostics_upstream_request_count, _spot_diagnostics_suppressed_poll_count
+    global _spot_diagnostics_storage_suppressed_request_count
     global _spot_diagnostics_inflight_suppressed_count
     global _spot_diagnostic_journal_shutdown_started
     global _spot_diagnostic_journal_closed_snapshot
@@ -1170,6 +1172,7 @@ def _reset_spot_diagnostics_request_state_for_tests() -> None:
     _spot_diagnostics_last_completed_at = 0.0
     _spot_diagnostics_sweep_started_count = 0
     _spot_diagnostics_upstream_request_count = 0
+    _spot_diagnostics_storage_suppressed_request_count = 0
     _spot_diagnostics_suppressed_poll_count = 0
     _spot_diagnostics_inflight_suppressed_count = 0
     _close_spot_diagnostic_request_journal(timeout_sec=0.5)
@@ -1844,7 +1847,7 @@ def _spot_image_response(
     }
 
 
-def _spot_image_storage_blocked() -> bool:
+def _spot_auxiliary_dispatch_storage_blocked() -> bool:
     return (_storage_pressure_monitor is not None
             and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED")
 
@@ -1941,9 +1944,13 @@ async def _request_spot_diagnostic_output(
     request_context: SpotDiagnosticRequestContext | None = None,
 ) -> tuple[str, str]:
     global _spot_diagnostics_upstream_request_count
+    global _spot_diagnostics_storage_suppressed_request_count
 
     url = _resolve_spot_diagnostic_url(param)
     async with _spot_device_request_lock:
+        if _spot_auxiliary_dispatch_storage_blocked():
+            _spot_diagnostics_storage_suppressed_request_count += 1
+            raise SpotStoragePressureError()
         if journal is not None and request_context is not None:
             journal.mark_running(request_context)
         _spot_diagnostics_upstream_request_count += 1
@@ -2037,7 +2044,7 @@ async def _refresh_spot_diagnostics(
         else "poll:none"
     )
     journal = await _acquire_spot_diagnostic_request_journal_for_sweep()
-    results: list[tuple[str, str] | BaseException] = []
+    results: dict[str, tuple[str, str] | BaseException] = {}
     try:
         for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS:
             api_route = "/control" if param == "appnumber" else "/output"
@@ -2057,34 +2064,45 @@ async def _refresh_spot_diagnostics(
             except asyncio.CancelledError as exc:
                 journal.mark_cancelled(request_context, exception=exc)
                 raise
+            except SpotStoragePressureError as exc:
+                journal.mark_completed(request_context, outcome="storage_pressure")
+                results[param] = exc
+                break
             except httpx.TimeoutException as exc:
                 journal.mark_timed_out(
                     request_context,
                     exception=exc,
                     timeout_phase=_diagnostic_timeout_phase(exc),
                 )
-                results.append(exc)
+                results[param] = exc
             except Exception as exc:
                 journal.mark_completed(
                     request_context,
                     outcome=_diagnostic_journal_error_outcome(exc),
                     exception=exc,
                 )
-                results.append(exc)
+                results[param] = exc
             else:
                 _key, value = request_result
                 journal.mark_completed(
                     request_context,
                     outcome=_diagnostic_value_field_status(param, value),
                 )
-                results.append(request_result)
+                results[param] = request_result
     finally:
         _release_spot_diagnostic_request_journal(journal)
     payload: Dict[str, Any] = {}
     raw_values: dict[str, str] = {}
     errors: list[str] = []
     field_status: dict[str, str] = {}
-    for param, result in zip(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS, results, strict=True):
+    for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS:
+        result = results.get(param)
+        if result is None:
+            field_status[param] = "not_requested"
+            continue
+        if isinstance(result, SpotStoragePressureError):
+            field_status[param] = "storage_pressure"
+            continue
         if isinstance(result, BaseException):
             field_status[param] = _diagnostic_exception_field_status(result)
             errors.append(f"{result.__class__.__name__}: {_format_exception_message(result)}")
@@ -2104,7 +2122,7 @@ async def _refresh_spot_diagnostics(
         field for field in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS if field_status.get(field) != "success"
     )
     if not payload:
-        capture_status = "error"
+        capture_status = "error" if errors else "missing"
     elif missing_fields:
         capture_status = "async_partial"
     else:
@@ -2181,7 +2199,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
         async with _spot_device_request_lock:
-            if _spot_image_storage_blocked():
+            if _spot_auxiliary_dispatch_storage_blocked():
                 _img_storage_suppressed_task_count += 1
                 raise SpotStoragePressureError
             request_started_at = time.monotonic()
@@ -3346,6 +3364,10 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         ),
         "diagnostics_sweep_started_count": int(_spot_diagnostics_sweep_started_count),
         "diagnostics_upstream_request_count": int(_spot_diagnostics_upstream_request_count),
+        "diagnostics_http_dispatch_count": int(_spot_diagnostics_upstream_request_count),
+        "diagnostics_storage_suppressed_request_count": int(
+            _spot_diagnostics_storage_suppressed_request_count
+        ),
         "diagnostics_suppressed_poll_count": int(_spot_diagnostics_suppressed_poll_count),
         "diagnostics_inflight_suppressed_count": int(
             _spot_diagnostics_inflight_suppressed_count
@@ -3889,7 +3911,7 @@ async def fetch_image_async(
             _img_failure_count = min(_img_failure_count + 1, 10)
             raise
 
-        if _spot_image_storage_blocked():
+        if _spot_auxiliary_dispatch_storage_blocked():
             return _spot_image_pressure_response(normalized_profile)
         cache_entry = _img_cache_entry
         if _is_spot_image_cache_fresh(
@@ -3915,7 +3937,7 @@ async def fetch_image_async(
                     image_url=image_url,
                     upstream_status=None,
                 )
-            if _spot_image_storage_blocked():
+            if _spot_auxiliary_dispatch_storage_blocked():
                 return _spot_image_pressure_response(normalized_profile)
             cache_entry = _img_cache_entry
             if _is_spot_image_cache_fresh(

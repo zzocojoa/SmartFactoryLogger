@@ -4866,6 +4866,78 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(diagnostics["request_budget_within_target"])
 
+    async def test_diagnostics_blocked_after_device_lock_wait_do_not_dispatch(self) -> None:
+        spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
+        blocked = threading.Event()
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'temperature_fact', 1, 'fixture', True,
+            'blocked' if blocked.is_set() else 'available')])
+        transport = FakeSpotHttpTransport()
+        task = None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            spot_api.config.LOG_PATH = Path(temp_dir)
+            try:
+                self.assertTrue(monitor.start())
+                deadline = time.monotonic() + 2
+                while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertEqual(monitor.snapshot().state, 'NORMAL')
+                with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                        patch.object(spot_api, '_spot_http_transport', transport):
+                    async with httpx.AsyncClient() as client:
+                        await spot_api._spot_device_request_lock.acquire()
+                        task = asyncio.create_task(spot_api._refresh_spot_diagnostics(client))
+                        deadline = time.monotonic() + 2
+                        while time.monotonic() < deadline:
+                            journal = spot_api.get_spot_diagnostics()['diagnostic_request_journal']
+                            if journal.get('active_request_count') == 1:
+                                break
+                            await asyncio.sleep(.01)
+                        self.assertEqual(journal.get('active_request_count'), 1)
+                        blocked.set()
+                        deadline = time.monotonic() + 2
+                        while monitor.snapshot().state != 'PERSISTENCE_BLOCKED' and time.monotonic() < deadline:
+                            await asyncio.sleep(.01)
+                        self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                        spot_api._spot_device_request_lock.release()
+                        await asyncio.wait_for(task, 2)
+                        self.assertEqual(len(transport.requests), 0,
+                                         'blocked diagnostics crossed the transport dispatch boundary')
+                        snapshot = spot_api._spot_diagnostics_snapshot
+                        self.assertEqual(snapshot['diagnostics_capture_status'], 'missing')
+                        self.assertEqual(snapshot['diagnostics_field_status'], {
+                            name: 'storage_pressure' if index == 0 else 'not_requested'
+                            for index, name in enumerate(spot_api._SPOT_DIAGNOSTIC_OUTPUT_PARAMS)})
+                        self.assertEqual(snapshot['diagnostics_raw_values'], {})
+                        self.assertIsNone(spot_api._spot_diagnostics_last_error_code)
+                        diagnostics = spot_api.get_spot_diagnostics()
+                        self.assertEqual(diagnostics.get('diagnostics_http_dispatch_count'), 0)
+                        self.assertEqual(diagnostics.get('diagnostics_storage_suppressed_request_count'), 1)
+                        journal = diagnostics['diagnostic_request_journal']
+                        self.assertEqual(journal['active_request_count'], 0)
+                        self.assertEqual(journal['state_counts']['queued'], 1)
+                        self.assertEqual(journal['state_counts']['suppressed'], 1)
+                        self.assertEqual(journal['failure_count_total'], 0)
+                        self.assertEqual(journal['pre_dispatch_suppressed_count'], 1)
+                        blocked.clear()
+                        deadline = time.monotonic() + 5
+                        while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                            await asyncio.sleep(.01)
+                        self.assertEqual(monitor.snapshot().state, 'NORMAL')
+                        await spot_api._refresh_spot_diagnostics(client)
+                        self.assertEqual(len(transport.requests), 8)
+                        self.assertEqual(spot_api._spot_diagnostics_snapshot['diagnostics_capture_status'],
+                                         'async_complete')
+                        self.assertEqual(spot_api.get_spot_diagnostics().get('diagnostics_http_dispatch_count'), 8)
+            finally:
+                if spot_api._spot_device_request_lock.locked():
+                    spot_api._spot_device_request_lock.release()
+                if task is not None and not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                monitor.stop()
+                spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
+
     async def test_storage_blocked_while_waiting_for_device_lock_returns_503_without_dispatch(self) -> None:
         spot_api.config.SPOT_IP = 'spot.local'
         spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
