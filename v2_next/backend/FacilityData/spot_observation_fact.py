@@ -250,6 +250,7 @@ class SpotObservationFactWriter:
         repr=False,
     )
     _spool_read_offsets: dict[Path, int] = field(default_factory=dict, init=False, repr=False)
+    _spool_tracked_paths: set[Path] = field(default_factory=set, init=False, repr=False)
     _active_spool_segment: Path | None = field(default=None, init=False, repr=False)
     _uncertain_spool_path: Path | None = field(default=None, init=False, repr=False)
     _initial_read_retryable: bool = field(default=False, init=False, repr=False)
@@ -382,6 +383,7 @@ class SpotObservationFactWriter:
         with self._spool_state_lock:
             if self._uncertain_spool_path is not None:
                 raise ValueError(f"UNCERTAIN spool write requires manual recovery: {self._uncertain_spool_path}")
+            self.spool_storage_usage()
             spool_path = next((path for path in self._spool_recoverable_paths()
                                if path.exists() and path.stat().st_size > self._spool_read_offsets.get(path, 0)), None)
             if spool_path is None:
@@ -401,6 +403,7 @@ class SpotObservationFactWriter:
                     self._spool_read_offsets[spool_path] = end_offset
                     if end_offset == spool_path.stat().st_size and spool_path != self._effective_spool_path():
                         spool_path.unlink()
+                        self._spool_tracked_paths.discard(spool_path)
                         self._spool_read_offsets.pop(spool_path, None)
                         if spool_path == self._active_spool_segment:
                             self._active_spool_segment = None
@@ -552,6 +555,7 @@ class SpotObservationFactWriter:
                             if handle.write(payload) != len(payload):
                                 raise OSError("Incomplete SPOT observation spool write")
                         self._active_spool_segment = spool_path
+                        self._spool_tracked_paths.add(spool_path)
                         if self._spool_pending_count_cache is not None:
                             self._spool_pending_count_cache += 1
                     finally:
@@ -597,14 +601,26 @@ class SpotObservationFactWriter:
     def spool_storage_usage(self) -> tuple[int, int]:
         """Owner-only I/O: remaining recovery bytes and all retained bytes."""
         with self._spool_state_lock:
+            if self._uncertain_spool_path is not None:
+                raise ValueError(f"UNCERTAIN spool requires manual recovery: {self._uncertain_spool_path}")
             pending = retained = 0
+            present: set[Path] = set()
             for path in self._spool_pending_paths():
                 try:
                     size = path.stat().st_size
                 except FileNotFoundError:
-                    continue  # The optional legacy spool need not exist.
+                    if path == self._effective_spool_path() and path not in self._spool_tracked_paths:
+                        continue  # The optional legacy spool need not exist initially.
+                    self._uncertain_spool_path = path
+                    self._reject_invalid_spool(path, "missing-file")
+                present.add(path)
                 retained += size
                 pending += max(0, size - self._spool_read_offsets.get(path, 0))
+            missing = self._spool_tracked_paths - present
+            if missing:
+                self._uncertain_spool_path = next(iter(missing))
+                self._reject_invalid_spool(self._uncertain_spool_path, "missing-file")
+            self._spool_tracked_paths.update(present)
             return pending, retained
 
     def spool_pending_count(self) -> int:
