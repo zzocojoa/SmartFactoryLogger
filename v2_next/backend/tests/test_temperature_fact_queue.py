@@ -2032,6 +2032,8 @@ class FactQueueTests(unittest.TestCase):
 
     def test_pending_byte_limit_includes_inflight_and_releases_after_write(self):
         started, release = threading.Event(), threading.Event()
+        probe_started, probe_release = threading.Event(), threading.Event()
+        clock, hold_probe = [100.0], [False]
         original_open = Path.open
         limit = 16 * 1024**2
         with tempfile.TemporaryDirectory() as tmp:
@@ -2040,13 +2042,18 @@ class FactQueueTests(unittest.TestCase):
             self.assertTrue(writer.ensure_initialized())
 
             def blocked_open(target, mode="r", *args, **kwargs):
+                if target.name.startswith('.sfl-storage-probe-') and mode == 'rb' and hold_probe[0]:
+                    probe_started.set()
+                    if not probe_release.wait(10):
+                        raise TimeoutError('test probe read not released')
                 if target == path and mode == "a":
                     started.set()
                     if not release.wait(10):
                         raise TimeoutError("test disk write not released")
                 return original_open(target, mode, *args, **kwargs)
 
-            with patch.object(Path, "open", blocked_open):
+            with patch.object(Path, "open", blocked_open), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
                 owner = SpotObservationQueue(lambda: writer)
                 accepted, serialized_bytes = 0, 0
                 try:
@@ -2072,12 +2079,24 @@ class FactQueueTests(unittest.TestCase):
                     self.assertEqual(state["last_error_code"], "pending_byte_limit")
                     release.set()
                     owner._queue.join()
-                    self.assertEqual(owner.snapshot()["pending_payload_bytes"], 0)
+                    hold_probe[0], clock[0] = True, 101.0
+                    self.assertTrue(probe_started.wait(2))
+                    state = owner.snapshot()
+                    self.assertEqual(state['pending_write_count'], 0)
+                    self.assertEqual(state['pending_source_payload_bytes'], 0)
+                    # Queue completion releases data ownership, while the
+                    # independent directory probe still owns its reservation.
+                    self.assertEqual(state['processing_payload_bytes'], 128)
+                    self.assertEqual(state['pending_payload_bytes'], state['processing_payload_bytes'])
+                    self.assertLessEqual(state['pending_payload_bytes'], limit)
+                    probe_release.set()
                     self.assertTrue(owner.enqueue(observation(999)))
                 finally:
                     release.set()
+                    probe_release.set()
                     owner.close(30)
                     self.assertFalse(owner.snapshot()["writer_alive"])
+                    self.assertEqual(owner.snapshot()['pending_payload_bytes'], 0)
             self.assertEqual([int(row["spot_poll_seq"]) for row in self.read_rows(path)],
                              [*range(1, accepted + 1), 999])
 
