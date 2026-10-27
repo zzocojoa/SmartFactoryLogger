@@ -439,6 +439,13 @@ class CSVLoggerServiceTests(unittest.TestCase):
                             time.sleep(.01)
                         self.assertEqual(before["pending_event_count"], 2)
                         self.assertEqual(before["csv_data_written_evidence_pending_count"], expected_rows)
+                        outcomes = before["csv_persistence_outcomes"]
+                        self.assertEqual(outcomes["accepted_event_count"], 2)
+                        self.assertEqual(outcomes["fully_committed_event_count"], 0)
+                        self.assertEqual(outcomes["outstanding_event_count"], 2)
+                        self.assertEqual(outcomes["sinks"]["csv_v1"]["committed_count"], 0)
+                        self.assertEqual(outcomes["sinks"]["csv_v2"]["committed_count"], 0)
+                        self.assertTrue(outcomes["counts_reconciled"])
                         before_bytes = {path: path.read_bytes() for path in tmp_dir.glob("*.csv")}
                         self.assertEqual(len(before_bytes), 2 if v2 else 1)
                         self.assertTrue(all(len(self.read_rows(path)) == 3 for path in before_bytes))
@@ -509,6 +516,75 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 receipt = next(item for item in receipts if item["producer_seq"] == record["producer_seq"])
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
+
+    def test_csv_sink_outcomes_do_not_complete_a_partially_saved_event(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+            allow_v2, failed = threading.Event(), threading.Event()
+            original_open = Path.open
+
+            class FailingV2File:
+                def __init__(self, handle):
+                    self.handle = handle
+                    self.writes = 0
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def write(self, text):
+                    self.writes += 1
+                    if self.writes > 1 and not allow_v2.is_set():
+                        failed.set()
+                        raise OSError("injected v2-only write failure")
+                    return self.handle.write(text)
+
+            def open_file(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                if mode == "a" and path.suffix == ".csv" and path.name.startswith("Factory_Integrated_Log_v2"):
+                    return FailingV2File(handle)
+                return handle
+
+            with patch.object(Path, "open", open_file):
+                service.start()
+                try:
+                    receipt = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 33.0))
+                    self.assertEqual(receipt["required_sinks"], ("csv_v1", "csv_v2"))
+                    self.assertTrue(failed.wait(5))
+                    deadline = time.monotonic() + 5
+                    committed_v1 = []
+                    while time.monotonic() < deadline:
+                        records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                                   for line in path.read_text(encoding="utf-8").splitlines()]
+                        committed_v1 = [record for record in records if record.get("kind") == "csv_row_data"
+                                        and record["sink_id"] == "csv_v1"]
+                        if committed_v1 and not service.get_runtime_state()["csv_evidence_pending_by_sink"]["csv_v1"]:
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(len(committed_v1), 1)
+                    outcomes = service.get_runtime_state().get("csv_persistence_outcomes")
+                    self.assertIsNotNone(outcomes, "partially saved CSV outputs have no separate outcome accounting")
+                    self.assertEqual(outcomes["accepted_event_count"], 1)
+                    self.assertEqual(outcomes["fully_committed_event_count"], 0)
+                    self.assertEqual(outcomes["outstanding_event_count"], 1)
+                    self.assertEqual(outcomes["sinks"]["csv_v1"],
+                                     {"accepted_count": 1, "committed_count": 1, "failed_count": 0, "outstanding_count": 0})
+                    self.assertEqual(outcomes["sinks"]["csv_v2"],
+                                     {"accepted_count": 1, "committed_count": 0, "failed_count": 0, "outstanding_count": 1})
+                    self.assertTrue(outcomes["counts_reconciled"])
+                finally:
+                    allow_v2.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed, "recovery erased the prior v2 write failure")
+            outcomes = service.get_runtime_state()["csv_persistence_outcomes"]
+            self.assertEqual(outcomes["fully_committed_event_count"], 1)
+            self.assertEqual(outcomes["failed_event_count"], 0)
+            self.assertEqual(outcomes["outstanding_event_count"], 0)
+            self.assertTrue(outcomes["counts_reconciled"])
+            for sink in ("csv_v1", "csv_v2"):
+                self.assertEqual(outcomes["sinks"][sink],
+                                 {"accepted_count": 1, "committed_count": 1, "failed_count": 0, "outstanding_count": 0})
+            for path in self.list_v1_files(tmp_dir) + self.list_v2_files(tmp_dir):
+                self.assertEqual(len(self.read_rows(path)), 2)
 
     def test_rejection_only_activation_keeps_its_original_trace_destination(self) -> None:
         with self.create_temp_dir() as tmp_dir:
@@ -664,6 +740,12 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(summary["pending_rejection_count"], 0)
             self.assertEqual(summary["committed_rejection_count"], 3)
             self.assertFalse(summary["details_incomplete"])
+            outcomes = service.get_runtime_state()["csv_persistence_outcomes"]
+            self.assertEqual(outcomes["accepted_event_count"], 2)
+            self.assertEqual(outcomes["fully_committed_event_count"], 2)
+            self.assertEqual(outcomes["sinks"]["csv_v2"],
+                             {"accepted_count": 0, "committed_count": 0, "failed_count": 0, "outstanding_count": 0})
+            self.assertTrue(outcomes["counts_reconciled"])
             rows = [row for path in self.list_v1_files(tmp_dir) for row in self.read_rows(path)[1:]]
             self.assertEqual([float(row[3]) for row in rows], [33., 34.])
             service.start()
@@ -678,6 +760,11 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(current["last_producer_seq"], resumed["producer_seq"])
             self.assertEqual(current["rejection_range_count"], 0)
             self.assertEqual(summary["produced_count"], 7)
+            outcomes = service.get_runtime_state()["csv_persistence_outcomes"]
+            self.assertEqual(outcomes["accepted_event_count"], 1)
+            self.assertEqual(outcomes["fully_committed_event_count"], 1)
+            self.assertEqual(outcomes["sinks"]["csv_v1"]["committed_count"], 1)
+            self.assertTrue(outcomes["counts_reconciled"])
 
     def test_trace_capacity_blocks_new_csv_admission_until_recovered(self) -> None:
         with self.create_temp_dir() as tmp_dir:
@@ -1058,6 +1145,15 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(state["processing_failure_count"], 1)
             self.assertEqual(state["last_processing_failure_seq"], first["producer_seq"])
             self.assertEqual(state["last_processing_failure_reason"], "csv_output_byte_limit")
+            outcomes = state["csv_persistence_outcomes"]
+            self.assertEqual(outcomes["accepted_event_count"], 2)
+            self.assertEqual(outcomes["fully_committed_event_count"], 1)
+            self.assertEqual(outcomes["failed_event_count"], 1)
+            self.assertEqual(outcomes["outstanding_event_count"], 0)
+            for sink in ("csv_v1", "csv_v2"):
+                self.assertEqual(outcomes["sinks"][sink],
+                                 {"accepted_count": 2, "committed_count": 1, "failed_count": 1, "outstanding_count": 0})
+            self.assertTrue(outcomes["counts_reconciled"])
             self.assertEqual(state["pending_event_count"], 0)
             self.assertEqual(state["pending_payload_bytes"], 0)
             failures = [record for record in captured.records if record.getMessage() == "CSV processing failed"]

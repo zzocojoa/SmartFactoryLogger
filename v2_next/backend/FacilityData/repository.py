@@ -514,6 +514,11 @@ class CSVLoggerService:
         self._sample_seq = 0
         self._producer_seq = 0
         self._admission_ledger = AdmissionRejectionLedger()
+        self._sink_accepted_counts: Counter[str] = Counter()
+        self._sink_committed_counts: Counter[str] = Counter()
+        self._sink_failed_counts: Counter[str] = Counter()
+        self._fully_committed_event_count = 0
+        self._terminal_failed_event_count = 0
         self._trace_start_seq = 0
         self._trace_stop_seq: Optional[int] = None
         self._trace_stop_recorded = False
@@ -582,6 +587,11 @@ class CSVLoggerService:
                     raise RuntimeError("CSV rejection evidence remains unresolved for the previous generation.")
                 self._trace_start_seq = self._producer_seq
                 self._admission_ledger = AdmissionRejectionLedger(after_sequence=self._producer_seq)
+                self._sink_accepted_counts.clear()
+                self._sink_committed_counts.clear()
+                self._sink_failed_counts.clear()
+                self._fully_committed_event_count = 0
+                self._terminal_failed_event_count = 0
                 self._trace_requested_settings = None
             self._trace_stop_seq = None
             self._trace_stop_recorded = False
@@ -759,6 +769,7 @@ class CSVLoggerService:
                     self._last_drop_at = now
                     return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
                 self._pending_events[envelope.producer_seq] = (envelope, set(write_config.required_sinks))
+                self._sink_accepted_counts.update(write_config.required_sinks)
                 # Transfer the retained bytes out of the serialization
                 # reservation without briefly charging the payload twice.
                 self._pending_source_payload_bytes += len(payload)
@@ -800,7 +811,9 @@ class CSVLoggerService:
                 sequence = binding[1]
                 pending = self._pending_events.get(sequence)
                 if pending is not None:
-                    pending[1].discard(sink)
+                    if sink in pending[1]:
+                        pending[1].remove(sink)
+                        self._sink_committed_counts[sink] += 1
                     if not pending[1]:
                         # Caller buffers and the current decoded item may still
                         # refer to the payload until this iteration finishes.
@@ -863,6 +876,8 @@ class CSVLoggerService:
             self._last_processing_failure_reason = reason
             self._runtime_write_failure_observed = True
             pending = self._pending_events[envelope.producer_seq][1]
+            failed_sinks = set(pending) if sink is None else pending.intersection((sink,))
+            self._sink_failed_counts.update(failed_sinks)
             if sink is None:
                 pending.clear()
             else:
@@ -904,6 +919,10 @@ class CSVLoggerService:
                 if completed in bound_sequences:
                     continue  # A failed flush can still retain its caller's rows.
                 pending = self._pending_events.pop(completed)
+                if completed in self._failed_pending_sequences:
+                    self._terminal_failed_event_count += 1
+                else:
+                    self._fully_committed_event_count += 1
                 source_size = len(pending[0].payload)
                 del pending
                 self._pending_source_payload_bytes -= source_size
@@ -3606,6 +3625,23 @@ class CSVLoggerService:
                     or state["committed_segment_seq"] < summary_token
                     or admission["pending_rejection_count"] or admission["details_incomplete"])
 
+    def _csv_persistence_outcomes_locked(self) -> dict[str, Any]:
+        accepted = self._admission_ledger.snapshot()["accepted_count"]
+        outstanding = Counter(sink for _, required in self._pending_events.values() for sink in required)
+        sinks = {sink: {"accepted_count": self._sink_accepted_counts[sink],
+                        "committed_count": self._sink_committed_counts[sink],
+                        "failed_count": self._sink_failed_counts[sink],
+                        "outstanding_count": outstanding[sink]} for sink in ("csv_v1", "csv_v2")}
+        reconciled = (accepted == self._fully_committed_event_count + self._terminal_failed_event_count
+                      + len(self._pending_events)
+                      and all(counts["accepted_count"] == counts["committed_count"]
+                              + counts["failed_count"] + counts["outstanding_count"] for counts in sinks.values()))
+        return {"contract_version": "CSV_PERSISTENCE_OUTCOMES_V1", "coverage": "IN_MEMORY_REQUIRED_SINK_COUNTS",
+                "accepted_event_count": accepted, "fully_committed_event_count": self._fully_committed_event_count,
+                "failed_event_count": self._terminal_failed_event_count,
+                "outstanding_event_count": len(self._pending_events), "sinks": sinks,
+                "counts_reconciled": reconciled, "data_integrity_status": "NOT_EVALUATED"}
+
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
             auto_save = self.auto_save
@@ -3635,6 +3671,7 @@ class CSVLoggerService:
             csv_manual_recovery_required = self._csv_manual_recovery_required
             csv_evidence_pending_by_sink = {"csv_v1": 0, "csv_v2": 0}
             admission_summary = self._admission_ledger.snapshot()
+            persistence_outcomes = self._csv_persistence_outcomes_locked()
             admission_summary.update(after_producer_seq=self._trace_start_seq,
                                      contract_version="CSV_ADMISSION_SUMMARY_V1", coverage="IN_MEMORY_RECEIPTS")
             for location in self._pending_csv_locations.values():
@@ -3661,6 +3698,7 @@ class CSVLoggerService:
             "estimated_queue_bytes": estimated_queue_bytes,
             "pending_event_count": pending_event_count,
             "admission_summary": admission_summary,
+            "csv_persistence_outcomes": persistence_outcomes,
             "pending_source_payload_bytes": pending_source_payload_bytes,
             "pending_processing_payload_bytes": pending_processing_payload_bytes,
             "pending_payload_bytes": pending_source_payload_bytes + pending_processing_payload_bytes,
