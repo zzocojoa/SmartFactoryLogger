@@ -144,6 +144,14 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
                 issues.add(f"mixed_{identity}_identity")
             else:
                 identities[identity] = value
+        segment_id = header.get("segment_id")
+        if type(segment_id) is not int or segment_id < 1:
+            issues.add("invalid_trace_segment_id")
+        else:
+            try:
+                database.execute("INSERT INTO segments VALUES (?)", (str(segment_id),))
+            except sqlite3.IntegrityError:
+                issues.add("duplicate_trace_segment_id")
         for line in lines[1:]:
             try:
                 record = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object)
@@ -174,6 +182,12 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
         issues.add("missing_admission_summary")
     if summaries > 1:
         issues.add("multiple_admission_summaries")
+    segment_total = database.execute("SELECT count(*) FROM segments").fetchone()[0]
+    if segment_total:
+        largest = database.execute(
+            "SELECT segment_id FROM segments ORDER BY length(segment_id) DESC, segment_id DESC LIMIT 1").fetchone()[0]
+        if int(largest) != segment_total:
+            issues.add("noncontiguous_trace_segments")
     if terminal_summary is not None:
         issues.update(_admission_identity_issues(database, terminal_summary))
     if paths and not unsupported:
@@ -205,6 +219,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
                 database.execute("PRAGMA temp_store=FILE")
                 database.execute("CREATE TABLE outcomes (first_seq TEXT, last_seq TEXT, status TEXT)")
                 database.execute("CREATE INDEX outcome_order ON outcomes(length(first_seq), first_seq)")
+                database.execute("CREATE TABLE segments (segment_id TEXT PRIMARY KEY)")
                 return _validate_csv_trace(paths, database)
     except (OSError, sqlite3.Error):
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_PRODUCER_ADMISSION_IDENTITIES",

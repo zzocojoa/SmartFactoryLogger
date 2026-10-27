@@ -11,6 +11,42 @@ from backend.FacilityData.persistence_validation import validate_csv_persistence
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_validator_rejects_missing_trace_segment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            writer = PersistenceTraceWriter(Path(folder), "segment-run")
+            writer.append({"kind": "producer_start", "after_producer_seq": 0})
+            self.assertTrue(writer.flush(force=True))
+            writer.append({"kind": "config_activated", "config_generation": 1})
+            self.assertTrue(writer.flush(force=True))
+            writer.append({"kind": "producer_stop", "final_producer_seq": 0})
+            writer.append({"kind": "admission_summary", "produced_count": 0, "accounted_count": 0,
+                           "unaccounted_count": 0, "accepted_count": 0, "excluded_count": 0, "rejected_count": 0,
+                           "after_producer_seq": 0, "last_producer_seq": 0, "outcome_counts": {},
+                           "details_incomplete": False})
+            self.assertTrue(writer.flush(force=True))
+            paths = sorted(Path(folder).glob("*.trace.jsonl"))
+            self.assertEqual(len(paths), 3)
+            self.assertEqual(validate_csv_persistence_trace(paths)["issues"], [])
+            original = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace([paths[0], paths[2]])
+            self.assertEqual(result["status"], "INCOMPLETE", "missing trace segment was not rejected")
+            self.assertIn("noncontiguous_trace_segments", result["issues"])
+            self.assertEqual({path: path.read_bytes() for path in paths}, original)
+            self.assertIn("duplicate_trace_segment_id", validate_csv_persistence_trace(paths + [paths[1]])["issues"])
+            self.assertEqual(validate_csv_persistence_trace(list(reversed(paths)))["issues"], [])
+            header, *body = original[paths[1]].splitlines(keepends=True)
+            for value, issue in [(True, "invalid_trace_segment_id"), (0, "invalid_trace_segment_id"),
+                                 ("2", "invalid_trace_segment_id"), (1, "duplicate_trace_segment_id"),
+                                 (2**70, "noncontiguous_trace_segments")]:
+                with self.subTest(segment_id=value):
+                    contents = (json.dumps(dict(json.loads(header), segment_id=value)) + "\n").encode() + b"".join(body)
+                    paths[1].write_bytes(contents)
+                    result = validate_csv_persistence_trace(paths)
+                    self.assertEqual(result["status"], "INCOMPLETE")
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(paths[1].read_bytes(), contents)
+            paths[1].write_bytes(original[paths[1]])
+
     def test_validator_reconciles_ranges_without_expanding_ids(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "range-run")
