@@ -67,6 +67,79 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_unaccounted_csv_file_ranges(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                for second in range(3):
+                    self.assertEqual(service.enqueue_detailed(self.create_data(
+                        f"2026-03-09T07:20:{25 + second}.000", 30.0))["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"], [])
+            originals = {path: path.read_bytes() for path in paths}
+            data_files = {path: path.read_bytes() for path in tmp_dir.glob("*.csv")}
+            for path, content in originals.items():
+                path.write_bytes(b"".join(line for line in content.splitlines(keepends=True)
+                                         if not ((record := json.loads(line)).get("kind") == "csv_row_data"
+                                                 and record["sink_id"] == "csv_v1" and record["producer_seq"] == 2)))
+            amended = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+            self.assertIn("csv_file_coverage_gap", result["issues"],
+                          "an unaccounted physical row inside the owned file range was ignored")
+            self.assertEqual(result["file_extent_status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual({path: path.read_bytes() for path in paths}, amended)
+            self.assertEqual({path: path.read_bytes() for path in data_files}, data_files)
+            cases = [("first-row", "csv_file_coverage_gap"), ("last-row", "csv_file_coverage_gap"),
+                     ("all-rows", "csv_file_coverage_gap"), ("start", "missing_csv_file_boundary"),
+                     ("end", "missing_csv_file_boundary"), ("duplicate", "ambiguous_csv_file_boundary"),
+                     ({"closed": False}, "invalid_csv_file_boundary"),
+                     ({"end_byte": True}, "invalid_csv_file_boundary"),
+                     ({"end_byte": -1}, "invalid_csv_file_boundary"),
+                     ({"config_generation": 999}, "csv_file_boundary_contract_mismatch")]
+            for change, issue in cases:
+                with self.subTest(change=change):
+                    for path, content in originals.items():
+                        amended_lines = []
+                        for line in content.splitlines(keepends=True):
+                            record = json.loads(line)
+                            kind = record.get("kind")
+                            if record.get("sink_id") == "csv_v1":
+                                if kind == "csv_row_data" and (change == "all-rows"
+                                        or change == "first-row" and record["producer_seq"] == 1
+                                        or change == "last-row" and record["producer_seq"] == 3):
+                                    continue
+                                if ((kind == "csv_file_start" and change == "start")
+                                        or (kind == "csv_file_end" and change == "end")):
+                                    continue
+                                if kind == "csv_file_end":
+                                    if change == "duplicate":
+                                        amended_lines.append(line)
+                                    elif isinstance(change, dict):
+                                        line = (json.dumps(dict(record, **change)) + "\n").encode()
+                            amended_lines.append(line)
+                        path.write_bytes(b"".join(amended_lines))
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["file_extent_status"], "INCOMPLETE")
+            for path, content in originals.items():
+                path.write_bytes(content)
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["file_extent_status"], "VERIFIED")
+            self.assertEqual(result["checked_csv_files"], 2)
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual(validate_csv_persistence_trace(paths)["file_extent_status"], "NOT_EVALUATED")
+            file_path = next(iter(data_files))
+            file_path.write_bytes(data_files[file_path] + b"unowned trailing bytes\n")
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_file_end_size_mismatch", result["issues"])
+            self.assertEqual(result["file_extent_status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+
     def test_csv_file_extents_preserve_append_and_rollover(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             prior = self.create_service(tmp_dir, True)

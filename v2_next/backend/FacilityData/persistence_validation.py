@@ -435,6 +435,89 @@ def _csv_row_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]],
     return set(), content_issues
 
 
+def _index_csv_file_boundary(database: sqlite3.Connection, record: dict[str, Any], body: str) -> set[str]:
+    extent, path = record.get("file_extent_id"), record.get("file_path")
+    integer_fields = ("file_device", "file_id", "start_byte", "config_generation")
+    if (record.get("contract_version") != "CSV_FILE_EXTENT_V1" or not isinstance(extent, str) or not extent
+            or not isinstance(path, str) or not Path(path).is_absolute()
+            or record.get("sink_id") not in ("csv_v1", "csv_v2")
+            or any(type(record.get(field)) is not int or record[field] < 0 for field in integer_fields)):
+        return {"invalid_csv_file_boundary"}
+    if record["kind"] == "csv_file_end" and (record.get("closed") is not True
+            or type(record.get("end_byte")) is not int or record["end_byte"] < record["start_byte"]):
+        return {"invalid_csv_file_boundary"}
+    database.execute("INSERT INTO csv_file_boundaries VALUES (?, ?, ?)", (extent, record["kind"], body))
+    return set()
+
+
+def _csv_extent_file_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> set[str]:
+    path = Path(record["file_path"])
+    if (path.suffix.lower() != ".csv"
+            or not any(path.is_relative_to(raw) or path.is_relative_to(resolved) for raw, resolved in roots)):
+        return {"csv_path_outside_allowed_roots"}
+    try:
+        resolved_path = path.resolve(strict=True)
+        if not any(resolved_path.is_relative_to(resolved) for _, resolved in roots):
+            return {"csv_path_outside_allowed_roots"}
+        if not stat.S_ISREG(resolved_path.stat().st_mode):
+            return {"csv_path_not_regular_file"}
+        with resolved_path.open("rb") as handle:
+            info = os.fstat(handle.fileno())
+            if _file_signature(info) != _file_signature(resolved_path.stat()):
+                return {"csv_file_changed_during_validation"}
+            if (info.st_dev, info.st_ino) != (record["file_device"], record["file_id"]):
+                return {"csv_file_identity_mismatch"}
+            if info.st_size != record["end_byte"]:
+                return {"csv_file_end_size_mismatch"}
+    except (OSError, ValueError, OverflowError, RuntimeError):
+        return {"csv_data_read_error"}
+    return set()
+
+
+def _csv_file_extent_issues(database: sqlite3.Connection, roots: Sequence[tuple[Path, Path]]) -> tuple[set[str], int]:
+    issues: set[str] = set()
+    checked = 0
+    if database.execute("SELECT 1 FROM csv_rows AS r LEFT JOIN csv_file_boundaries AS b "
+                        "ON r.extent=b.extent WHERE b.extent IS NULL LIMIT 1").fetchone():
+        issues.add("missing_csv_file_boundary")
+    fields = ("file_path", "file_device", "file_id", "sink_id", "config_generation", "start_byte")
+    for (extent,) in database.execute("SELECT DISTINCT extent FROM csv_file_boundaries"):
+        # At most two records may define an extent; read one extra to reject
+        # ambiguity without loading an unbounded history into memory.
+        records = [json.loads(body) for (body,) in database.execute(
+            "SELECT body FROM csv_file_boundaries WHERE extent=? LIMIT 3", (extent,))]
+        if len(records) != 2 or {record["kind"] for record in records} != {"csv_file_start", "csv_file_end"}:
+            issues.add("missing_csv_file_boundary" if len(records) < 2 else "ambiguous_csv_file_boundary")
+            continue
+        start = next(record for record in records if record["kind"] == "csv_file_start")
+        end = next(record for record in records if record["kind"] == "csv_file_end")
+        if any(start[field] != end[field] for field in fields):
+            issues.add("csv_file_boundary_contract_mismatch")
+            continue
+        checked += 1
+        issues.update(_csv_extent_file_issues(end, roots))
+        next_byte = start["start_byte"]
+        for (body,) in database.execute("SELECT body FROM csv_rows WHERE extent=? "
+                                        "ORDER BY length(first_byte), first_byte", (extent,)):
+            row = json.loads(body)
+            if (any(row.get(field) != start[field] for field in fields if field != "start_byte")
+                    or type(row.get("row_byte_offset")) is not int or row["row_byte_offset"] < 0
+                    or type(row.get("row_byte_length")) is not int or row["row_byte_length"] < 1):
+                issues.add("csv_file_extent_row_contract_mismatch")
+                continue
+            offset, row_end = row["row_byte_offset"], row["row_byte_offset"] + row["row_byte_length"]
+            if offset > next_byte:
+                issues.add("csv_file_coverage_gap")
+            elif offset < next_byte:
+                issues.add("csv_file_coverage_overlap")
+            if offset < start["start_byte"] or row_end > end["end_byte"]:
+                issues.add("csv_row_outside_file_extent")
+            next_byte = max(next_byte, row_end)
+        if next_byte < end["end_byte"]:
+            issues.add("csv_file_coverage_gap")
+    return issues, checked
+
+
 def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, data_roots: Sequence[Path]) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
@@ -449,6 +532,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     content_issues: set[str] = set()
     destination_issues: set[str] = set()
     configuration_issues: set[str] = set()
+    file_issues: set[str] = set()
     checked_rows = 0
     roots: list[tuple[Path, Path]] = []
     for root in data_roots:
@@ -519,9 +603,14 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                     database.execute("INSERT INTO csv_contracts VALUES (?, ?)",
                                      (str(record["producer_seq"]), line.decode("utf-8")))
                 elif record.get("kind") == "csv_row_data":
-                    database.execute("INSERT INTO csv_rows VALUES (?)", (line.decode("utf-8"),))
+                    extent, offset = record.get("file_extent_id"), record.get("row_byte_offset")
+                    database.execute("INSERT INTO csv_rows VALUES (?, ?, ?)",
+                                     (extent if isinstance(extent, str) else None,
+                                      str(offset) if type(offset) is int else "", line.decode("utf-8")))
                 elif record.get("kind") == "config_activated":
                     configuration_issues.update(_index_csv_configuration(database, record, line.decode("utf-8")))
+                elif record.get("kind") in ("csv_file_start", "csv_file_end"):
+                    file_issues.update(_index_csv_file_boundary(database, record, line.decode("utf-8")))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -567,6 +656,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     issues.update(_required_sink_issues(database))
     issues.update(_csv_location_issues(database))
     configuration_issues.update(_csv_configuration_issues(database))
+    extent_issues, checked_files = _csv_file_extent_issues(database, roots)
+    file_issues.update(extent_issues)
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -581,6 +672,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     issues.update(content_issues)
     issues.update(destination_issues)
     issues.update(configuration_issues)
+    issues.update(file_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -590,6 +682,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED",
             "checked_csv_rows": checked_rows,
+            "checked_csv_files": checked_files,
+            "file_extent_status": "INCOMPLETE" if byte_issues or file_issues else "VERIFIED" if checked_files else "NOT_EVALUATED",
             "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "destination_status": "INCOMPLETE" if byte_issues or destination_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "configuration_status": "INCOMPLETE" if configuration_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
@@ -614,7 +708,10 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE INDEX row_location_order ON row_locations(device, file_id, length(first_byte), first_byte)")
                 database.execute("CREATE TABLE csv_contracts (sequence TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_contract_identity ON csv_contracts(sequence)")
-                database.execute("CREATE TABLE csv_rows (body TEXT)")
+                database.execute("CREATE TABLE csv_rows (extent TEXT, first_byte TEXT, body TEXT)")
+                database.execute("CREATE INDEX csv_extent_rows ON csv_rows(extent, length(first_byte), first_byte)")
+                database.execute("CREATE TABLE csv_file_boundaries (extent TEXT, kind TEXT, body TEXT)")
+                database.execute("CREATE INDEX csv_boundary_extent ON csv_file_boundaries(extent)")
                 database.execute("CREATE TABLE csv_configurations (generation TEXT, effective TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_configuration_order ON csv_configurations(length(effective), effective)")
                 return _validate_csv_trace(paths, database, data_roots)
@@ -624,4 +721,5 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
                 "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",
                 "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED",
-                "configuration_status": "NOT_EVALUATED"}
+                "configuration_status": "NOT_EVALUATED", "checked_csv_files": 0,
+                "file_extent_status": "NOT_EVALUATED"}
