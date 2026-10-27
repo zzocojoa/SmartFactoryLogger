@@ -198,6 +198,8 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 2026-10-28 온도 초기 읽기 복구: 헤더 읽기 실패를 스키마 변경으로 처리하지 않고 원본을 보존한다. 초기 hash/행 읽기는 동일 원본 식별을 확인한 뒤 재색인하며 파일 교체·삭제·해석/닫기 불확실은 수동 복구로 유지한다. 같은 owner가 새 유입 없이 1→2→4→8→16→30초로 초기 읽기를 재시도하고 종료 시 예약을 중단한다. 기존 접수와 실패 이력을 보존한다. generic factory/헤더 쓰기/스풀 초기화, 전체 가용성/monitor/17명세는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-initialization-recovery/verification.json`.
 
+2026-10-28 CSV owner 가용성 보완: 현재/이전 접수 세대 폴더와 알려진 CSV 파일 접근을 분리하고 원본·합산 probe 예산·실제 데이터 복구를 보존한다. 새 파일 접수는 실패 probe backoff를 우회하지 않으며 저장 OFF 뒤에도 불확실 파일의 원래 목적지를 유지한다. Windows 경로 표기 차이로 발생한 정상/복구 종료 실패를 수정하고 전체 health를 통과했다. 전체 required 상태/monitor/17명세는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/verification.json`.
+
 **R06 — 실제 HTTP 취득 억제**
 
 - `_img_fetch_lock` 안에서 새 upstream refresh task를 생성하기 직전에 압력 상태와 양수 요청 간격을 검사한다. 이 검사는 FR02의 발송 직전 검사를 대체하지 않는다. 기존 최소 요청률 계산의 입력을 0으로 바꾸는 방식은 사용하지 않는다. single-flight waiter와 이미 dispatch한 공유 요청은 압력 변화만으로 강제 취소하지 않는다.

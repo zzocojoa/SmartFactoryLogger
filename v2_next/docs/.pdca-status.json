@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T18:17:32.472126+00:00",
+  "lastUpdated": "2026-10-27T19:27:45.088842+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,15 +48293,15 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "82de3a6bb1de6f606bace11bd9092c1af9729462",
+      "currentDevelopmentCommit": "15044c4faca18093545240413c31b7d098c288b5",
       "lastBackendVerification": {
-        "commit": "82de3a6bb1de6f606bace11bd9092c1af9729462",
-        "total": 1173,
-        "passed": 1172,
+        "commit": "15044c4faca18093545240413c31b7d098c288b5",
+        "total": 1181,
+        "passed": 1180,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-initialization-recovery/verification.json",
-        "binding": "tested-source-sha256-equals-commit"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/verification.json",
+        "binding": "clean-whole-health-source-hashes-equal-commit"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48325,21 +48325,24 @@
         "Trace evidence has first-record monotonic clocks, non-postponed stage deadlines and actual failed-segment recovery counts.",
         "Uncertain trace publication stays held with unavailable CSV admission; transient publication retry is capped at 30 seconds, cannot be bypassed by arrivals/force, and preserves failure history.",
         "Observation header read failures preserve original files instead of schema rollover; deferred records recover under the same IDs.",
-        "Same-file initial history reads rebuild partial indexes under the existing owner with capped retry and shutdown cancellation; identity changes, decode errors and uncertain closes remain held, with original admissions and failure history retained."
+        "Same-file initial history reads rebuild partial indexes under the existing owner with capped retry and shutdown cancellation; identity changes, decode errors and uncertain closes remain held, with original admissions and failure history retained.",
+        "CSV owner independently probes current/admitted destinations and known CSV identity/access; payload reservations, actual data recovery and failure history remain distinct.",
+        "Windows equivalent path representations retain pending/ready and closeout contracts; different-directory hard links and unverifiable parent identity remain rejected.",
+        "CSV arrivals do not bypass failed probe backoff; disabling persistence preserves unresolved previous-generation destinations and manual recovery."
       ],
       "remainingScope": [
-        "Complete required CSV/fact/spool/trace destination probes/availability, spool and cross-stage oldest-age/generation joins, retry shutdown lifecycle and owner-replacement history.",
+        "Complete required fact/spool/trace and sidecar/current-file integrity states, cross-stage oldest-age/generation joins, retry/initialization/shutdown lifecycle and owner-replacement history; CSV provider remains partial.",
         "Complete temperature factory/header-write/spool initialization recovery and full required-file integrity; initial read recovery does not prove whole historical integrity.",
         "Wire required writer state providers and monitor lifecycle; implement PRESSURED cadence, NORMAL interval/temperature priority, full status/observation-reference contracts and runtime integration.",
         "Complete fact/JPEG reconciliation, recovery and aggregate workspace reservations; all 17 r4 scenarios.",
         "Final whole-state health/build/installer verification and master integration."
       ],
       "lastWholeHealth": {
-        "commit": "9f7e1dbf7628faa0d17ee9065e0c17f75e886cab",
+        "commit": "15044c4faca18093545240413c31b7d098c288b5",
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/health-result.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/health-result.json"
       },
-      "updatedAt": "2026-10-27T18:17:32.472126+00:00",
+      "updatedAt": "2026-10-27T19:27:45.088842+00:00",
       "lastRelatedBackendVerification": {
         "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
         "total": 190,
@@ -48432,6 +48435,11 @@
         "commit": "82de3a6bb1de6f606bace11bd9092c1af9729462",
         "focusedRuns": 10,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-initialization-recovery/verification.json"
+      },
+      "lastCSVAvailabilityVerification": {
+        "commit": "15044c4faca18093545240413c31b7d098c288b5",
+        "focusedRuns": 20,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/verification.json"
       }
     }
   },
