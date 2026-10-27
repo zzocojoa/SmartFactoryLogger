@@ -21,6 +21,7 @@ from unittest.mock import patch
 from starlette.requests import Request
 from starlette.responses import Response
 from backend.FacilityData.persistence_validation import validate_csv_persistence_trace
+from backend.FacilityData.persistence_pressure import StoragePressureController
 
 _TEST_ROOT = Path(__file__).resolve().parents[2]
 _TEST_APPDATA_ROOT = _TEST_ROOT / ".tmp_test_appdata"
@@ -2611,6 +2612,57 @@ class CSVLoggerServiceTests(unittest.TestCase):
             with next(log_dir.glob("Factory_Integrated_Log_*.csv")).open(encoding="utf-8-sig", newline="") as stream:
                 rows = list(csv.DictReader(stream))
             self.assertEqual(len(rows), 20)
+
+    def test_trace_pressure_binding_survives_csv_configuration_change(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir / "original", True)
+            service.start()
+            try:
+                deadline = time.perf_counter() + 4
+                while time.perf_counter() < deadline:
+                    state = service.get_runtime_state()["persistence_trace"]
+                    if state is not None and state["current_storage_availability"] == "available":
+                        break
+                    time.sleep(.01)
+                self.assertIsNotNone(state)
+                self.assertEqual(state["current_storage_availability"], "available")
+                trace = service._persistence_trace
+                self.assertIsNotNone(trace)
+                sample = trace.storage_pressure_sample(writer_alive=service.thread.is_alive())
+                decision = StoragePressureController().evaluate([sample], now_monotonic=time.monotonic())
+                self.assertEqual(decision.state, "NORMAL", "live CSV trace did not provide its bound storage state")
+                records = [json.loads(line) for path in trace.root.glob("*.trace.jsonl")
+                           for line in path.read_text(encoding="utf-8").splitlines()]
+                start, = [record for record in records if record.get("kind") == "producer_start"]
+                expected_key = hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(trace.root)))).hexdigest()
+                self.assertEqual(sample.config_generation, start["config_generation"])
+                self.assertEqual(sample.destination_key, expected_key)
+                self.assertEqual(sample.sink_id, "csv_trace")
+                self.assertTrue(sample.enabled)
+                original_binding = sample.config_generation, sample.destination_key
+                service.apply_config(log_path=tmp_dir / "new-setting")
+                current = service.get_runtime_state()["csv_storage_destinations"]
+                self.assertTrue(any(item["config_generation"] != sample.config_generation for item in current))
+                reader = threading.current_thread()
+                original_open, original_stat = Path.open, Path.stat
+
+                def read_guard(operation):
+                    def guarded(path, *args, **kwargs):
+                        if threading.current_thread() is reader:
+                            raise AssertionError("pressure sample performed filesystem I/O")
+                        return operation(path, *args, **kwargs)
+                    return guarded
+
+                with patch.object(Path, "open", read_guard(original_open)), \
+                        patch.object(Path, "stat", read_guard(original_stat)):
+                    changed = trace.storage_pressure_sample(writer_alive=True)
+                self.assertEqual((changed.config_generation, changed.destination_key), original_binding)
+                self.assertEqual(changed.count_limit, 2000)
+                self.assertEqual(changed.byte_limit, 2*1024**2)
+            finally:
+                closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            self.assertEqual(list((tmp_dir / "new-setting").rglob("*.trace.jsonl")), [])
 
     def test_trace_destination_recovers_without_data_or_ui_requests(self) -> None:
         original_replace = os.replace

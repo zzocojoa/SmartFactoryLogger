@@ -3651,7 +3651,7 @@ class CSVLoggerService:
         if not settings.auto_save:
             return
         trace = PersistenceTraceWriter(settings.log_dir / ".sfl_trace" / self.logger_service_instance_id,
-                                       self.logger_service_instance_id)
+                                       self.logger_service_instance_id, config_generation=settings.generation)
         token = trace.append({
             "kind": "producer_start", "after_producer_seq": self._trace_start_seq,
             "config_generation": settings.generation, "required_sinks": settings.required_sinks,

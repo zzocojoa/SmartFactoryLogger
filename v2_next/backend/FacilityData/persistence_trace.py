@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter, deque
 from dataclasses import dataclass, field
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -13,6 +14,7 @@ from uuid import uuid4
 from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
 from backend.FacilityData.freshness import clock_domain_id
 from backend.FacilityData.spot_image_fact import _probe_storage_directory
+from backend.FacilityData.persistence_pressure import StoragePressureSample
 
 TRACE_SEGMENT_RECORD_LIMIT = 1000
 TRACE_PENDING_SEGMENT_LIMIT = 2
@@ -161,9 +163,12 @@ class _TraceSegment:
 
 
 class PersistenceTraceWriter:
-    def __init__(self, root: Path, producer_id: str, *, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, root: Path, producer_id: str, *, clock: Callable[[], float] = time.monotonic,
+                 config_generation: int | None = None):
         self.root = root
         self.producer_id = producer_id
+        self._config_generation = config_generation
+        self._destination_key = hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(root)))).hexdigest()
         self.clock = clock
         self._instance_id = uuid4().hex
         self._next_sequence = 1
@@ -462,6 +467,24 @@ class PersistenceTraceWriter:
                 if self._blocked_workspace_bytes <= available:
                     self._blocked_workspace_bytes = 0
                 return True
+
+    def storage_pressure_sample(self, *, enabled: bool = True, writer_alive: bool = True) -> StoragePressureSample:
+        state = self.snapshot()
+        stages = []
+        if state["pending_segments"]:
+            stages.append((state["oldest_pending_monotonic"], state["stage_due_monotonic"]))
+        if state["processing_bytes"]:
+            stages.append((state["processing_oldest_monotonic"], state["processing_due_monotonic"]))
+        return StoragePressureSample(
+            "csv_trace", self._config_generation, self._destination_key, enabled,
+            state["current_storage_availability"], pending_count=state["pending_records"],
+            pending_bytes=state["pending_bytes"], count_limit=TRACE_SEGMENT_RECORD_LIMIT * TRACE_PENDING_SEGMENT_LIMIT,
+            byte_limit=TRACE_PENDING_BYTE_LIMIT, pending_recovery=state["pending_recovery"],
+            oldest_pending_monotonic=min((oldest for oldest, _ in stages), default=None),
+            stage_due_monotonic=min((due for _, due in stages), default=None),
+            clock_domain=state["clock_domain"], writer_alive=writer_alive,
+            manual_recovery_required=state["manual_recovery_required"],
+        )
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
