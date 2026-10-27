@@ -573,7 +573,8 @@ def _csv_file_extent_issues(database: sqlite3.Connection, roots: Sequence[tuple[
     return issues, checked
 
 
-def _read_csv_metadata(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> tuple[str | None, set[str]]:
+def _read_csv_metadata(record: dict[str, Any], roots: Sequence[tuple[Path, Path]],
+                       commit: dict[str, Any] | None) -> tuple[str | None, set[str]]:
     path = Path(record["file_path"]).with_suffix(".metadata.json")
     if not any(path.is_relative_to(raw) or path.is_relative_to(resolved) for raw, resolved in roots):
         return None, {"csv_metadata_outside_allowed_roots"}
@@ -594,7 +595,13 @@ def _read_csv_metadata(record: dict[str, Any], roots: Sequence[tuple[Path, Path]
         text = raw.decode("utf-8-sig")
         if not isinstance(json.loads(text, object_pairs_hook=_unique_object), dict):
             return None, {"invalid_csv_metadata"}
-        return text, set()
+        issues: set[str] = set()
+        if commit is None:
+            issues.add("missing_csv_metadata_commit")
+        elif (commit["metadata_bytes"] != len(raw) or commit["metadata_sha256"] != hashlib.sha256(raw).hexdigest()
+              or commit["file_path"] != record["file_path"] or commit["metadata_path"] != str(path)):
+            issues.add("csv_metadata_hash_mismatch")
+        return text, issues
     except FileNotFoundError:
         return None, {"csv_metadata_missing"}
     except (UnicodeError, ValueError, RecursionError):
@@ -613,11 +620,32 @@ def _index_csv_metadata_files(database: sqlite3.Connection, roots: Sequence[tupl
         if record["sink_id"] != "csv_v2":
             continue
         checked += 1
-        metadata, errors = _read_csv_metadata(record, roots)
+        committed = database.execute("SELECT body FROM csv_metadata_commits WHERE device=? AND file_id=? "
+                                     "ORDER BY length(segment) DESC, segment DESC, ordinal DESC LIMIT 1",
+                                     (device, file_id)).fetchone()
+        metadata, errors = _read_csv_metadata(record, roots, json.loads(committed[0]) if committed else None)
         issues.update(errors)
         if metadata is not None:
             database.execute("INSERT INTO csv_metadata VALUES (?, ?)", (record["file_extent_id"], metadata))
     return issues, checked
+
+
+def _index_csv_metadata_commit(database: sqlite3.Connection, record: dict[str, Any],
+                               segment: Any, ordinal: int) -> set[str]:
+    digest = record.get("metadata_sha256")
+    if (record.get("contract_version") != "CSV_METADATA_COMMIT_V1"
+            or type(segment) is not int or segment < 1
+            or any(type(record.get(key)) is not int or record[key] < 0
+                   for key in ("file_device", "file_id", "metadata_bytes"))
+            or record["metadata_bytes"] > CSV_METADATA_READ_LIMIT
+            or any(not isinstance(record.get(key), str) or not Path(record[key]).is_absolute()
+                   for key in ("file_path", "metadata_path"))
+            or not isinstance(digest, str) or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)):
+        return {"invalid_csv_metadata_commit"}
+    database.execute("INSERT INTO csv_metadata_commits VALUES (?, ?, ?, ?, ?)",
+                     (str(record["file_device"]), str(record["file_id"]), str(segment), ordinal, json.dumps(record)))
+    return set()
 
 
 def _csv_metadata_values_issues(metadata: dict[str, Any], contract: dict[str, Any], columns: list[str],
@@ -757,7 +785,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                 database.execute("INSERT INTO segments VALUES (?)", (str(segment_id),))
             except sqlite3.IntegrityError:
                 issues.add("duplicate_trace_segment_id")
-        for line in lines[1:]:
+        for ordinal, line in enumerate(lines[1:]):
             try:
                 record = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_object)
                 if not isinstance(record, dict):
@@ -781,6 +809,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                     configuration_issues.update(_index_csv_configuration(database, record, line.decode("utf-8")))
                 elif record.get("kind") in ("csv_file_start", "csv_file_end"):
                     file_issues.update(_index_csv_file_boundary(database, record, line.decode("utf-8")))
+                elif record.get("kind") == "csv_metadata_commit":
+                    file_issues.update(_index_csv_metadata_commit(database, record, segment_id, ordinal))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -854,6 +884,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     issues.update(file_issues)
     issues.update(metadata_issues)
     issues.update(metadata_contract_issues)
+    metadata_read_issues = metadata_issues - {"csv_metadata_hash_mismatch", "missing_csv_metadata_commit"}
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -867,7 +898,9 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "checked_csv_rows": checked_rows,
             "checked_csv_files": checked_files,
             "checked_csv_metadata": checked_metadata,
-            "metadata_read_status": ("INCOMPLETE" if byte_issues or file_issues or metadata_issues else "VERIFIED"
+            "metadata_bytes_status": ("INCOMPLETE" if byte_issues or file_issues or metadata_issues else "VERIFIED"
+                                      if checked_metadata else "NOT_EVALUATED"),
+            "metadata_read_status": ("INCOMPLETE" if byte_issues or file_issues or metadata_read_issues else "VERIFIED"
                                      if checked_metadata else "NOT_EVALUATED"),
             "metadata_contract_status": ("INCOMPLETE" if byte_issues or file_issues or content_issues
                                          or metadata_issues or metadata_contract_issues else "VERIFIED"
@@ -904,6 +937,9 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE TABLE csv_file_ranges (device TEXT, file_id TEXT, first_byte TEXT, end_byte TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_file_range_order ON csv_file_ranges(device, file_id, length(first_byte), first_byte)")
                 database.execute("CREATE TABLE csv_metadata (extent TEXT PRIMARY KEY, body TEXT)")
+                database.execute("CREATE TABLE csv_metadata_commits (device TEXT, file_id TEXT, segment TEXT, ordinal INTEGER, body TEXT)")
+                database.execute("CREATE INDEX csv_metadata_commit_order ON csv_metadata_commits"
+                                 "(device, file_id, length(segment), segment, ordinal)")
                 database.execute("CREATE TABLE csv_configurations (generation TEXT, effective TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_configuration_order ON csv_configurations(length(effective), effective)")
                 return _validate_csv_trace(paths, database, data_roots)
@@ -916,4 +952,5 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 "configuration_status": "NOT_EVALUATED", "checked_csv_files": 0,
                 "file_extent_status": "NOT_EVALUATED", "runtime_closeout_status": "NOT_EVALUATED",
                 "checked_csv_metadata": 0, "metadata_read_status": "NOT_EVALUATED",
+                "metadata_bytes_status": "NOT_EVALUATED",
                 "metadata_contract_status": "NOT_EVALUATED"}

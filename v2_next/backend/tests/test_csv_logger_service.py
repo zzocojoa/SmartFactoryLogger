@@ -67,6 +67,54 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_metadata_bytes_changed_after_close(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=False, csv_v2_enabled=True)
+            service.apply_config(csv_v2_sidecar_enabled=True)
+            service.start()
+            try:
+                service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            metadata_path, = tmp_dir.glob("Factory_Integrated_Log*.metadata.json")
+            original = metadata_path.read_bytes()
+            metadata = json.loads(original)
+            sensor = next(item for item in metadata["sensor_metadata"] if item["column_name"] == "MainPress")
+            sensor["unit"] = "changed after closeout"
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            amended = metadata_path.read_bytes()
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_metadata_hash_mismatch", result["issues"],
+                          "metadata bytes no longer match the runtime closeout proof")
+            self.assertEqual(result["metadata_bytes_status"], "INCOMPLETE")
+            self.assertEqual(metadata_path.read_bytes(), amended)
+            metadata_path.write_bytes(original)
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["metadata_bytes_status"], "VERIFIED")
+            traces = {path: path.read_bytes() for path in paths}
+            for field, value, issue in ((None, None, "missing_csv_metadata_commit"),
+                                        ("metadata_sha256", "0" * 64, "csv_metadata_hash_mismatch"),
+                                        ("metadata_bytes", True, "invalid_csv_metadata_commit"),
+                                        ("metadata_path", str(tmp_dir / "other.json"), "csv_metadata_hash_mismatch")):
+                with self.subTest(field=field):
+                    for path, content in traces.items():
+                        amended_records = []
+                        for line in content.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record.get("kind") == "csv_metadata_commit":
+                                if field is None:
+                                    continue
+                                record[field] = value
+                                line = (json.dumps(record) + "\n").encode()
+                            amended_records.append(line)
+                        path.write_bytes(b"".join(amended_records))
+                    result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["metadata_bytes_status"], "INCOMPLETE")
+                    self.assertEqual(metadata_path.read_bytes(), original)
+
     def test_validator_rejects_stale_metadata_closeout(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=False, csv_v2_enabled=True)

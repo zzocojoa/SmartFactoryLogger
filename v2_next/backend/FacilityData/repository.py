@@ -29,7 +29,9 @@ from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, csv_parser_field_limit, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
-from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter, TRACE_SEGMENT_RECORD_LIMIT
+from backend.FacilityData.persistence_trace import (
+    AdmissionRejectionLedger, PersistenceTraceWriter, TRACE_SEGMENT_BYTE_LIMIT, TRACE_SEGMENT_RECORD_LIMIT,
+)
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
     SPOT_INVALID_SENTINEL_VALUES,
@@ -1639,10 +1641,30 @@ class CSVLoggerService:
                 encoding="utf-8",
             )
             temp_path.replace(metadata_path)
-        except OSError as exc:
+            self._record_csv_metadata_commit(csv_path, metadata_path)
+        except (OSError, RuntimeError) as exc:
             self.logger.warning("Failed to write refreshed CSV v2 observation fact manifest: %s", exc)
             return None
         return metadata_path
+
+    def _record_csv_metadata_commit(self, csv_path: Path, metadata_path: Path) -> None:
+        if self._persistence_trace is None:
+            return  # Compatibility/offline refresh has no producer trace.
+        with metadata_path.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            raw = handle.read(TRACE_SEGMENT_BYTE_LIMIT + 1)
+            after = os.fstat(handle.fileno())
+        signature = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        if (len(raw) > TRACE_SEGMENT_BYTE_LIMIT or signature(before) != signature(after)
+                or signature(after) != signature(metadata_path.stat())):
+            raise OSError("CSV metadata changed or exceeded its evidence read limit")
+        csv_info = csv_path.stat()
+        self._append_csv_file_boundary({
+            "kind": "csv_metadata_commit", "contract_version": "CSV_METADATA_COMMIT_V1",
+            "file_path": str(csv_path.absolute()), "file_device": csv_info.st_dev, "file_id": csv_info.st_ino,
+            "metadata_path": str(metadata_path.absolute()), "metadata_bytes": len(raw),
+            "metadata_sha256": hashlib.sha256(raw).hexdigest(),
+        })
 
     def _suppress_spot_observation_fact_manifest_for_csv(
         self,
