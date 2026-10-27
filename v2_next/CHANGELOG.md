@@ -4,6 +4,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Reject over-limit image fact rows before creating a JPEG or appending
+  a fact, and align the recovery parser with admitted long fields.
+
 - Bound image fact recovery to 1 MiB per logical UTF-8 CSV row,
   including quoted newlines, and reserve at most 4 KiB for digest
   reads. A digest budget failure preserves the stored capture ID
