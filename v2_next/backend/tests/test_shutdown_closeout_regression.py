@@ -1681,6 +1681,35 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             ):
                 _ = runtime_writer.fact_sha256
 
+    def test_image_replaced_fact_is_rejected_before_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8file-identity\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="original-capture", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            fact = writer.write_capture(**args)
+            self.assertEqual(writer.write_capture(**args), fact)
+            before = writer.fact_path.stat()
+            original = writer.fact_path.read_bytes()
+            changed = original.replace(b"original-capture", b"external-capture", 1)
+            self.assertNotEqual(changed, original)
+            self.assertEqual(len(changed), len(original))
+            replacement = root / "external.csv"
+            replacement.write_bytes(changed)
+            os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
+            replacement.replace(writer.fact_path)
+            after = writer.fact_path.stat()
+            self.assertEqual((after.st_size, after.st_mtime_ns), (before.st_size, before.st_mtime_ns))
+            self.assertNotEqual(after.st_ino, before.st_ino)
+            originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                writer.write_capture(**args)
+            self.assertFalse(writer.try_manifest_stats()[2])
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                writer.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+            self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+
     def test_image_manifest_fails_closed_after_external_fact_append(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
@@ -1708,20 +1737,23 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     fieldnames=SPOT_IMAGE_FACT_COLUMNS,
                 ).writerow(external_fact)
 
-            runtime_writer.write_capture(
-                image_bytes=b"\xff\xd8second-capture\xff\xd9",
-                captured_at=1782910801.123456,
-                source_url="http://spot.invalid/image.jpg",
-                source="test",
-                image_age_ms=0.0,
-                link_checked_at=None,
-                observation_snapshot=None,
-            )
+            originals = {path: path.read_bytes() for path in log_path.rglob("*") if path.is_file()}
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                runtime_writer.write_capture(
+                    image_bytes=b"\xff\xd8second-capture\xff\xd9",
+                    captured_at=1782910801.123456,
+                    source_url="http://spot.invalid/image.jpg",
+                    source="test",
+                    image_age_ms=0.0,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                )
 
             with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 rows = list(csv.DictReader(handle))
-            self.assertEqual(len(rows), 3)
-            self.assertEqual(runtime_writer.fact_row_count, 2)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(runtime_writer.fact_row_count, 1)
+            self.assertEqual({path: path.read_bytes() for path in log_path.rglob("*") if path.is_file()}, originals)
             with self.assertRaisesRegex(
                 RuntimeError,
                 "runtime manifest state is unavailable",

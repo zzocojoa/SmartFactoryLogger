@@ -82,6 +82,8 @@ class SpotImageCaptureWriter:
     _fact_has_content: bool = field(default=False, init=False, repr=False)
     _manifest_state_ready: bool = field(default=True, init=False, repr=False)
     _manifest_tracked_size: int = field(default=0, init=False, repr=False)
+    _fact_identity: Optional[tuple[int, int, int, int]] = field(default=None, init=False, repr=False)
+    _fact_identity_known: bool = field(default=False, init=False, repr=False)
     _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
     _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
     _fact_append_uncertain: bool = field(default=False, init=False, repr=False)
@@ -153,8 +155,7 @@ class SpotImageCaptureWriter:
         observation_snapshot: Optional[Mapping[str, Any]],
         capture_id: Optional[str] = None,
     ) -> dict[str, str]:
-        if self._fact_append_is_uncertain():
-            raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
+        self._assert_fact_unchanged()
         sha256 = hashlib.sha256(image_bytes).hexdigest()
         captured_dt = datetime.fromtimestamp(captured_at, timezone.utc)
         captured_iso = captured_dt.isoformat().replace("+00:00", "Z")
@@ -285,8 +286,7 @@ class SpotImageCaptureWriter:
 
     def _append_fact(self, fact: Mapping[str, str]) -> None:
         with _SPOT_IMAGE_FACT_FILE_LOCK:
-            if self._fact_append_is_uncertain():
-                raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
+            self._assert_fact_unchanged()
             self.log_path.mkdir(parents=True, exist_ok=True)
             write_header = self._prepare_fact_file_for_append()
             previous_size = self._fact_file_size()
@@ -309,6 +309,13 @@ class SpotImageCaptureWriter:
                     # A partial row or failed close cannot be repaired by schema
                     # rollover or by appending the next capture after the tail.
                     self._mark_fact_append_uncertain()
+                raise
+            try:
+                self._fact_identity = self._fact_identity_snapshot()
+                self._fact_identity_known = True
+            except OSError:
+                self._fact_identity_known = False
+                self._manifest_state_ready = False
                 raise
             self._extend_manifest_digest(
                 previous_size,
@@ -401,12 +408,18 @@ class SpotImageCaptureWriter:
         self._known_facts_by_capture_id = {capture_id: dict(fact)}
 
     def _initialize_manifest_state(self) -> None:
-        if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
-            self._fact_row_count = 0
-            self._manifest_tracked_size = 0
-            return
+        self._fact_identity_known = False
         try:
-            expected_size = self.fact_path.stat().st_size
+            identity = self._fact_identity_snapshot()
+            if self._fact_append_is_uncertain():
+                return
+            if identity is None or identity[2] == 0:
+                self._fact_row_count = 0
+                self._manifest_tracked_size = 0
+                self._fact_identity = identity
+                self._fact_identity_known = True
+                return
+            expected_size = identity[2]
             digest = hashlib.sha256()
             last_byte = b""
             with self.fact_path.open("rb") as handle:
@@ -420,10 +433,13 @@ class SpotImageCaptureWriter:
             self._fact_digest = digest
             self._fact_has_content = True
             self._load_fact_row_count()
-            if self.fact_path.stat().st_size != expected_size:
-                self._manifest_state_ready = False
+            if self._fact_identity_snapshot() != identity:
+                with _SPOT_IMAGE_FACT_FILE_LOCK:
+                    self._mark_fact_append_uncertain()
                 return
             self._manifest_tracked_size = expected_size
+            self._fact_identity = identity
+            self._fact_identity_known = True
         except (OSError, UnicodeError, csv.Error):
             self._manifest_state_ready = False
 
@@ -470,6 +486,8 @@ class SpotImageCaptureWriter:
         self._manifest_tracked_size = current_size
 
     def _validate_manifest_tracked_size(self) -> None:
+        if self._fact_identity_known and self._fact_identity_snapshot() != self._fact_identity:
+            self._mark_fact_append_uncertain()
         if self._fact_append_is_uncertain():
             self._manifest_state_ready = False
         if (
@@ -477,6 +495,26 @@ class SpotImageCaptureWriter:
             and self._fact_file_size() != self._manifest_tracked_size
         ):
             self._manifest_state_ready = False
+
+    def _fact_identity_snapshot(self) -> Optional[tuple[int, int, int, int]]:
+        try:
+            info = self.fact_path.lstat()
+        except FileNotFoundError:
+            return None
+        if not stat.S_ISREG(info.st_mode):
+            with _SPOT_IMAGE_FACT_FILE_LOCK:
+                self._mark_fact_append_uncertain()
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+    def _assert_fact_unchanged(self) -> None:
+        with _SPOT_IMAGE_FACT_FILE_LOCK:
+            if not self._fact_identity_known and not self._fact_append_is_uncertain():
+                self._initialize_manifest_state()
+            self._validate_manifest_tracked_size()
+            if self._fact_append_is_uncertain():
+                raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
+            if not self._fact_identity_known:
+                raise OSError("SPOT image fact identity is unavailable")
 
     def _cleanup_retention(self, now: float, *, allow_start: bool = True) -> None:
         if self.retention_days <= 0:
