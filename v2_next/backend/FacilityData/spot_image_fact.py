@@ -591,6 +591,7 @@ class SpotImageCaptureWriter:
             except OSError:
                 row_count = 0
                 self._manifest_state_ready = False
+                raise
             except (UnicodeError, csv.Error):
                 row_count = 0
                 with _SPOT_IMAGE_FACT_FILE_LOCK:
@@ -617,6 +618,9 @@ class SpotImageCaptureWriter:
                 self._manifest_tracked_size = 0
                 self._fact_identity = identity
                 self._fact_identity_known = True
+                self._fact_digest = hashlib.sha256()
+                self._fact_has_content = False
+                self._manifest_state_ready = True
                 return
             expected_size = identity[2]
             digest = hashlib.sha256()
@@ -628,6 +632,8 @@ class SpotImageCaptureWriter:
             self._fact_digest = digest
             self._fact_has_content = True
             self._load_fact_row_count()
+            if self._fact_append_is_uncertain():
+                return
             if self._fact_identity_snapshot() != identity:
                 with _SPOT_IMAGE_FACT_FILE_LOCK:
                     self._mark_fact_append_uncertain()
@@ -635,6 +641,7 @@ class SpotImageCaptureWriter:
             self._manifest_tracked_size = expected_size
             self._fact_identity = identity
             self._fact_identity_known = True
+            self._manifest_state_ready = True
         except (OSError, UnicodeError, csv.Error):
             self._manifest_state_ready = False
 

@@ -1,6 +1,7 @@
 """CSV startup must not wait for historical image-manifest initialization."""
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import tempfile
@@ -138,6 +139,36 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
         self.assertEqual(writer.fact_path.read_bytes(), original)
         self.assertEqual(writer.written_count, 1)
+
+    def test_fact_probe_recovers_transient_initialization_reads(self):
+        file_open = Path.open
+        for failed_mode in ('rb', 'r'):
+            with self.subTest(failed_mode=failed_mode):
+                log_path = self.root / failed_mode / 'fact'
+                image_root = self.root / failed_mode / 'images'
+                original_writer = SpotImageCaptureWriter(log_path=log_path, capture_root=image_root)
+                original_writer.write_capture(image_bytes=b'preserved capture', captured_at=1793106000.0,
+                                              source_url='http://spot.invalid/image.jpg', source='test',
+                                              image_age_ms=None, link_checked_at=None, observation_snapshot=None)
+                original = original_writer.fact_path.read_bytes()
+                blocked = [True]
+
+                def open_file(path, mode='r', *args, **kwargs):
+                    if path == original_writer.fact_path and mode == failed_mode and blocked[0]:
+                        raise PermissionError('temporary initializer read failure')
+                    return file_open(path, mode, *args, **kwargs)
+
+                with patch.object(Path, 'open', open_file):
+                    writer = SpotImageCaptureWriter(log_path=log_path, capture_root=image_root)
+                    self.assertFalse(writer.try_manifest_stats()[2])
+                    result = writer.probe_storage_destinations(captured_at=1793106000.0)[0]
+                    self.assertEqual(result['current_storage_availability'], 'blocked')
+                    blocked[0] = False
+                    result = writer.probe_storage_destinations(captured_at=1793106000.0)[0]
+                    self.assertEqual(result['current_storage_availability'], 'available')
+                    self.assertEqual(writer.try_manifest_stats(), (1, hashlib.sha256(original).hexdigest(), True))
+                self.assertEqual(writer.fact_path.read_bytes(), original)
+                self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
 
     def test_destination_probe_does_not_reuse_fact_directory_success(self):
         log_path = self.root / 'fact'
