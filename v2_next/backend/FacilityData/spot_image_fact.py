@@ -57,6 +57,11 @@ SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
 
 _MANAGED_IMAGE_EXTENSIONS = {".jpg", ".png", ".gif", ".bmp", ".webp", ".bin"}
 _SPOT_IMAGE_FACT_FILE_LOCK = threading.RLock()
+# Process-local, bounded manual-recovery latches. Never store arbitrary path
+# payloads or forget a known close/tail failure when replacing a writer.
+_SPOT_IMAGE_UNCERTAIN_FACT_KEYS: set[bytes] = set()
+_SPOT_IMAGE_UNCERTAIN_FACT_KEY_LIMIT = 4096
+_SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW = False
 
 
 @dataclass
@@ -80,9 +85,16 @@ class SpotImageCaptureWriter:
     _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
     _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
     _fact_append_uncertain: bool = field(default=False, init=False, repr=False)
+    _fact_recovery_key: bytes = field(default=b"", init=False, repr=False)
     _retention_scan: Optional[Generator[None, None, None]] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self._fact_recovery_key = hashlib.sha256(
+            os.path.normcase(str(self.fact_path.resolve())).encode("utf-8", errors="surrogatepass")
+        ).digest()
+        if self._fact_append_is_uncertain():
+            self._manifest_state_ready = False
+            return
         try:
             self._historical_fact_mtime = self.fact_path.stat().st_mtime
         except FileNotFoundError:
@@ -141,7 +153,7 @@ class SpotImageCaptureWriter:
         observation_snapshot: Optional[Mapping[str, Any]],
         capture_id: Optional[str] = None,
     ) -> dict[str, str]:
-        if self._fact_append_uncertain:
+        if self._fact_append_is_uncertain():
             raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
         sha256 = hashlib.sha256(image_bytes).hexdigest()
         captured_dt = datetime.fromtimestamp(captured_at, timezone.utc)
@@ -251,8 +263,29 @@ class SpotImageCaptureWriter:
             / f"{capture_id}{extension}"
         )
 
+    def _fact_append_is_uncertain(self) -> bool:
+        with _SPOT_IMAGE_FACT_FILE_LOCK:
+            self._fact_append_uncertain = (
+                self._fact_append_uncertain or _SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW
+                or self._fact_recovery_key in _SPOT_IMAGE_UNCERTAIN_FACT_KEYS
+            )
+            return self._fact_append_uncertain
+
+    def _mark_fact_append_uncertain(self) -> None:
+        global _SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW
+        self._fact_append_uncertain = True
+        self._manifest_state_ready = False
+        # Called under the file lock. A full latch table blocks further image
+        # fact appends; it must not evict an unresolved destination to make room.
+        if len(_SPOT_IMAGE_UNCERTAIN_FACT_KEYS) < _SPOT_IMAGE_UNCERTAIN_FACT_KEY_LIMIT:
+            _SPOT_IMAGE_UNCERTAIN_FACT_KEYS.add(self._fact_recovery_key)
+        elif self._fact_recovery_key not in _SPOT_IMAGE_UNCERTAIN_FACT_KEYS:
+            _SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW = True
+
     def _append_fact(self, fact: Mapping[str, str]) -> None:
         with _SPOT_IMAGE_FACT_FILE_LOCK:
+            if self._fact_append_is_uncertain():
+                raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
             self.log_path.mkdir(parents=True, exist_ok=True)
             write_header = self._prepare_fact_file_for_append()
             previous_size = self._fact_file_size()
@@ -274,8 +307,7 @@ class SpotImageCaptureWriter:
                 if append_started:
                     # A partial row or failed close cannot be repaired by schema
                     # rollover or by appending the next capture after the tail.
-                    self._fact_append_uncertain = True
-                    self._manifest_state_ready = False
+                    self._mark_fact_append_uncertain()
                 raise
             self._extend_manifest_digest(
                 previous_size,
@@ -432,6 +464,8 @@ class SpotImageCaptureWriter:
         self._manifest_tracked_size = current_size
 
     def _validate_manifest_tracked_size(self) -> None:
+        if self._fact_append_is_uncertain():
+            self._manifest_state_ready = False
         if (
             self._manifest_state_ready
             and self._fact_file_size() != self._manifest_tracked_size

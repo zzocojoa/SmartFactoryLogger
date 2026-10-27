@@ -21,6 +21,7 @@ from PIL import Image
 
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
+from backend.FacilityData import spot_image_fact as image_fact
 from backend.FacilityData.spot_image_fact import (
     SPOT_IMAGE_FACT_COLUMNS,
     SpotImageCaptureWriter,
@@ -1349,6 +1350,93 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     self.assertEqual(writer.written_count, 0)
                     with self.assertRaisesRegex(RuntimeError, "manifest state is unavailable"):
                         _ = writer.fact_sha256
+
+    def test_image_uncertainty_survives_writer_recreation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8close-failed\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            opened = Path.open
+
+            class CloseFailure:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    return self.handle
+
+                def __exit__(self, *exc):
+                    self.handle.__exit__(*exc)
+                    raise OSError("injected complete append close failure")
+
+            def fail_close(path, mode="r", *open_args, **kwargs):
+                handle = opened(path, mode, *open_args, **kwargs)
+                return CloseFailure(handle) if path == writer.fact_path and mode == "ab" else handle
+
+            with patch.object(Path, "open", new=fail_close):
+                with self.assertRaisesRegex(OSError, "close failure"):
+                    writer.write_capture(**args)
+            originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            recreated = SpotImageCaptureWriter(log_path=root, capture_root=root / "new-images", retention_days=0)
+            with self.assertRaisesRegex(RuntimeError, "fact append is uncertain"):
+                recreated.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+            self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+            with self.assertRaisesRegex(RuntimeError, "manifest state is unavailable"):
+                _ = recreated.fact_sha256
+            independent = SpotImageCaptureWriter(log_path=root / "other", capture_root=root / "other/images")
+            independent.write_capture(**args)
+            self.assertEqual(independent.written_count, 1)
+
+    def test_uncertain_image_path_latches_are_bounded_without_eviction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch.object(image_fact, "_SPOT_IMAGE_UNCERTAIN_FACT_KEYS", set()), \
+             patch.object(image_fact, "_SPOT_IMAGE_UNCERTAIN_FACT_KEY_LIMIT", 2), \
+             patch.object(image_fact, "_SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW", False):
+            root = Path(temp_dir)
+            args = dict(image_bytes=b"\xff\xd8bounded\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            opened = Path.open
+
+            class PartialAppend:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return self.handle.__exit__(*exc)
+
+                def write(self, payload):
+                    self.handle.write(payload[:37])
+                    self.handle.flush()
+                    raise OSError("partial write")
+
+            def fail_append(path, mode="r", *open_args, **kwargs):
+                handle = opened(path, mode, *open_args, **kwargs)
+                return PartialAppend(handle) if path.name == "spot_image_fact.csv" and mode == "ab" else handle
+
+            first_keys = None
+            for index in range(3):
+                destination = root / str(index)
+                writer = SpotImageCaptureWriter(log_path=destination, capture_root=destination / "images")
+                with patch.object(Path, "open", new=fail_append):
+                    with self.assertRaisesRegex(OSError, "partial write"):
+                        writer.write_capture(**args)
+                self.assertEqual(writer.fact_path.stat().st_size, 37)
+                self.assertLessEqual(len(image_fact._SPOT_IMAGE_UNCERTAIN_FACT_KEYS), 2)
+                if index == 1:
+                    first_keys = set(image_fact._SPOT_IMAGE_UNCERTAIN_FACT_KEYS)
+            self.assertEqual(image_fact._SPOT_IMAGE_UNCERTAIN_FACT_KEYS, first_keys)
+            self.assertTrue(all(len(key) == 32 for key in image_fact._SPOT_IMAGE_UNCERTAIN_FACT_KEYS))
+            self.assertTrue(image_fact._SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW)
+            writer = SpotImageCaptureWriter(log_path=root / "new", capture_root=root / "new/images")
+            with self.assertRaisesRegex(RuntimeError, "fact append is uncertain"):
+                writer.write_capture(**args)
+            self.assertFalse((root / "new").exists())
 
     def test_image_digest_read_failure_does_not_duplicate_durable_capture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
