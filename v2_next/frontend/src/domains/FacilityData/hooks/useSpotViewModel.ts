@@ -373,6 +373,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       if (previousConfig && areSpotConfigsEqual(previousConfig, nextConfig)) {
         return;
       }
+      const pendingPressure = storagePressureTimerRef.current !== null ? imageStateRef.current.metadata : null;
       if (previousConfig?.image_url !== nextConfig.image_url) {
         imageRequestGenerationRef.current += 1;
         cancelNormalImageRefresh();
@@ -398,6 +399,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         previousConfig?.refresh_interval !== nextConfig.refresh_interval
       ) {
         cancelNormalImageRefresh();
+        cancelStoragePressureRecheck();
       }
       configRef.current = nextConfig;
       setConfig(nextConfig);
@@ -410,6 +412,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         ),
         next_fetch_scheduled_at: null,
       }));
+      if (previousConfig?.image_url === nextConfig.image_url && pendingPressure) {
+        scheduleStoragePressureRecheck(pendingPressure);
+      }
       if (
         previousConfig?.image_url === nextConfig.image_url &&
         (
@@ -428,6 +433,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       cancelStoragePressureRecheck,
       resetImageRecovery,
       scheduleNormalImageRefresh,
+      scheduleStoragePressureRecheck,
       setDashboardSpotConfig,
       syncDashboardSpotImageState,
     ]
