@@ -429,7 +429,7 @@ class SpotObservationQueue:
                     probe["retry_delay_sec"] = min(30.0, 2 * probe["retry_delay_sec"])
                 else:
                     probe.update(last_probe_success_monotonic=checked,
-                                 next_probe_monotonic=None, retry_delay_sec=1.0)
+                                 next_probe_monotonic=checked + 1.0, retry_delay_sec=1.0)
 
     def _recover_spool_if_due(self, writer: SpotObservationFactWriter) -> None:
         if (self._stop.is_set() or self._spool_recovery_at is None

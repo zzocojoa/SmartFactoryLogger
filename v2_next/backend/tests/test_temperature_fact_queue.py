@@ -1211,7 +1211,7 @@ class FactQueueTests(unittest.TestCase):
                                        if item['sink_id'] == 'temperature_spool')
                     self.assertEqual(spool_state['probe_failure_count'], 1)
                     self.assertEqual(spool_state['last_probe_success_monotonic'], 101.0)
-                    self.assertIsNone(spool_state['next_probe_monotonic'])
+                    self.assertEqual(spool_state['next_probe_monotonic'], 102.0)
                     self.assertTrue(all(thread is owner._thread for _, _, thread in attempts))
                     self.assertEqual(state['accepted_count'], 0)
                     self.assertEqual(state['pending_payload_bytes'], 0)
@@ -1220,6 +1220,63 @@ class FactQueueTests(unittest.TestCase):
                     blocked[0] = False
                     closed = owner.close(3)
             self.assertTrue(closed)
+
+    def test_fact_destinations_recheck_after_idle_storage_loss(self):
+        clock, blocked, attempts = [100.0], [False], []
+        original_mkstemp = tempfile.mkstemp
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'facts.csv'
+            writer = SpotObservationFactWriter(path)
+            spool_directory = writer.spool_write_directory
+
+            def probe_access(*args, **kwargs):
+                if Path(kwargs['dir']) == spool_directory:
+                    attempts.append(clock[0])
+                    if blocked[0]:
+                        raise PermissionError('storage lost after successful startup')
+                return original_mkstemp(*args, **kwargs)
+
+            def wait_probe(owner, checked):
+                deadline = time.perf_counter() + 2
+                while time.perf_counter() < deadline:
+                    probes = owner.snapshot()['storage_destinations']
+                    state = next((p for p in probes if p['sink_id'] == 'temperature_spool'), {})
+                    if state.get('last_probe_monotonic') == checked:
+                        return state
+                    threading.Event().wait(.01)
+                self.fail(f'Idle destination was not rechecked at {checked}: {state}')
+
+            with patch('tempfile.mkstemp', side_effect=probe_access), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    self.assertEqual(wait_probe(owner, 100.0)['probe_status'], 'available')
+                    blocked[0] = True
+                    for checked, due in ((101., 102.), (102., 104.), (104., 108.),
+                                         (108., 116.), (116., 132.), (132., 162.)):
+                        clock[0] = checked
+                        state = wait_probe(owner, checked)
+                        self.assertEqual(state['probe_status'], 'blocked')
+                        self.assertEqual(state['next_probe_monotonic'], due)
+                        before = len(attempts)
+                        clock[0] = due - .01
+                        threading.Event().wait(.06)
+                        self.assertEqual(len(attempts), before)
+                    blocked[0], clock[0] = False, 162.0
+                    state = wait_probe(owner, 162.0)
+                    self.assertEqual(state['probe_status'], 'available')
+                    self.assertEqual(state['probe_failure_count'], 6)
+                    self.assertEqual(state['next_probe_monotonic'], 163.0)
+                    self.assertEqual(state['retry_delay_sec'], 1.0)
+                    self.assertEqual(owner.snapshot()['accepted_count'], 0)
+                    self.assertEqual(owner.snapshot()['pending_payload_bytes'], 0)
+                finally:
+                    closed = owner.close(3)
+                self.assertTrue(closed)
+                before = len(attempts)
+                clock[0] = 1000.0
+                threading.Event().wait(.1)
+                self.assertEqual(len(attempts), before)
 
     def test_required_fact_access_retry_is_bounded_and_stops_on_close(self):
         original_open = Path.open
