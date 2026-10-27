@@ -519,6 +519,7 @@ class CSVLoggerService:
         self._trace_stop_recorded = False
         self._trace_config_generation: Optional[int] = None
         self._persistence_trace: Optional[PersistenceTraceWriter] = None
+        self._trace_requested_settings: Optional[CSVWriteConfig] = None
         self._trace_boundary_failed = False
         self.logger_service_instance_id = str(uuid4())
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -577,8 +578,11 @@ class CSVLoggerService:
             with self._runtime_lock:
                 if self._csv_manual_recovery_required or self._uncertain_csv_paths or self._unclosed_csv_handles:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
+                if self._admission_ledger.snapshot()["pending_rejection_count"]:
+                    raise RuntimeError("CSV rejection evidence remains unresolved for the previous generation.")
                 self._trace_start_seq = self._producer_seq
                 self._admission_ledger = AdmissionRejectionLedger(after_sequence=self._producer_seq)
+                self._trace_requested_settings = None
             self._trace_stop_seq = None
             self._trace_stop_recorded = False
             self._trace_config_generation = None
@@ -655,6 +659,9 @@ class CSVLoggerService:
             result = self._admit_csv_locked(data, now)
             if self.running:
                 with self._runtime_lock:
+                    if (result["status"] not in ("ACCEPTED", "DISABLED") and self._persistence_trace is None
+                            and self._trace_requested_settings is None):
+                        self._trace_requested_settings = self._capture_write_config_locked()
                     self._admission_ledger.record(result["producer_seq"], result["status"],
                                                   result["reason"], result["config_generation"])
             return result
@@ -3480,7 +3487,11 @@ class CSVLoggerService:
         return succeeded
 
     def _begin_persistence_trace(self, settings: CSVWriteConfig) -> None:
-        if self._persistence_trace is not None or not settings.auto_save:
+        if self._persistence_trace is not None:
+            return
+        with self._runtime_lock:
+            settings = self._trace_requested_settings or settings
+        if not settings.auto_save:
             return
         trace = PersistenceTraceWriter(settings.log_dir / ".sfl_trace" / self.logger_service_instance_id,
                                        self.logger_service_instance_id)
@@ -3522,6 +3533,8 @@ class CSVLoggerService:
         self._trace_stop_recorded = True
 
     def _drain_admission_rejections(self, *, force: bool = False) -> bool:
+        if self._persistence_trace is None:
+            self._begin_persistence_trace(self._write_settings())
         trace = self._persistence_trace
         if trace is None:
             return True
@@ -3553,6 +3566,8 @@ class CSVLoggerService:
         return flushed
 
     def _finish_persistence_trace(self) -> bool:
+        if self._persistence_trace is None:
+            self._begin_persistence_trace(self._write_settings())
         trace = self._persistence_trace
         if trace is None:
             return True

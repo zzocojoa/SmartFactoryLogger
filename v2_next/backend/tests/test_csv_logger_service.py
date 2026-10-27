@@ -510,6 +510,35 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
+    def test_rejection_only_activation_keeps_its_original_trace_destination(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            original_dir, later_dir = tmp_dir / "original", tmp_dir / "later"
+            service = self.create_service(original_dir, False)
+            invalid = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            invalid.Press = float("nan")
+            service.start()
+            try:
+                # Allow the initially disabled worker to enter its idle queue wait.
+                time.sleep(.3)
+                self.assertIsNone(service.get_runtime_state()["persistence_trace"])
+                service.apply_config(auto_save=True)
+                refused = service.enqueue_detailed(invalid)
+                service.apply_config(auto_save=False, log_path=later_dir)
+            finally:
+                closed = service.stop(timeout_sec=5)
+            records = [json.loads(line) for path in original_dir.rglob("*.trace.jsonl")
+                       for line in path.read_text(encoding="utf-8").splitlines()]
+            ranges = [record for record in records if record.get("kind") == "admission_rejection_range"]
+            self.assertEqual(len(ranges), 1, "rejection-only activation lost its original trace destination")
+            self.assertTrue(closed)
+            self.assertEqual(ranges[0]["first_producer_seq"], refused["producer_seq"])
+            self.assertEqual(ranges[0]["config_generation"], refused["config_generation"])
+            self.assertFalse(list(later_dir.rglob("*.trace.jsonl")))
+            self.assertFalse(self.list_v1_files(original_dir))
+            summary = next(record for record in records if record.get("kind") == "admission_summary")
+            self.assertEqual(summary["committed_rejection_count"], 1)
+            self.assertEqual(summary["pending_rejection_count"], 0)
+
     def test_csv_shutdown_preserves_incomplete_admission_summary(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)
