@@ -1383,6 +1383,34 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                              [first["spot_image_capture_id"], second["spot_image_capture_id"]])
             self.assertEqual(writer.fact_sha256, hashlib.sha256(writer.fact_path.read_bytes()).hexdigest())
 
+    def test_image_fact_lookup_read_failure_never_becomes_missing_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8lookup-read\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            expected = writer.write_capture(**args)
+            originals = {path: (path.read_bytes(), path.stat().st_mtime_ns)
+                         for path in root.rglob("*") if path.is_file()}
+            recreated = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            opened = Path.open
+            failures = []
+
+            def fail_lookup_once(path, mode="r", *open_args, **kwargs):
+                if path == writer.fact_path and mode == "r" and not failures:
+                    failures.append(path)
+                    raise PermissionError(13, "temporary fact lookup read failure")
+                return opened(path, mode, *open_args, **kwargs)
+
+            with patch.object(Path, "open", new=fail_lookup_once):
+                with self.assertRaisesRegex(PermissionError, "lookup read failure"):
+                    recreated.write_capture(**args)
+                self.assertEqual(recreated.write_capture(**args), expected)
+            self.assertEqual({path: (path.read_bytes(), path.stat().st_mtime_ns) for path in originals}, originals)
+            self.assertEqual(recreated.fact_row_count, 1)
+            self.assertEqual(recreated.fact_sha256, hashlib.sha256(writer.fact_path.read_bytes()).hexdigest())
+
     def test_image_uncertainty_survives_writer_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

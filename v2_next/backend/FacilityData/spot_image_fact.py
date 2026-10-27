@@ -365,7 +365,7 @@ class SpotImageCaptureWriter:
                             capture_id = str(row.get("spot_image_capture_id") or "").strip()
                             if capture_id:
                                 facts_by_id[capture_id] = dict(row)
-            except (OSError, UnicodeError, csv.Error):
+            except (UnicodeError, csv.Error):
                 facts_by_id = {}
                 row_count = 0
         self._known_facts_by_capture_id = facts_by_id
