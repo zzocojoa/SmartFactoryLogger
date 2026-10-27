@@ -75,7 +75,7 @@ from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FILENAME, SpotI
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
-from backend.FacilityData.persistence_pressure import StoragePressureMonitor
+from backend.FacilityData.persistence_pressure import StoragePressureMonitor, StoragePressureSample
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -1187,6 +1187,58 @@ def get_spot_image_capture_shutdown_status() -> Dict[str, Any]:
     """Return a fresh, memory-only snapshot; this does not request shutdown."""
     with _spot_image_capture_lock:
         return _image_shutdown_status_locked()
+
+
+def get_spot_image_storage_pressure_samples() -> tuple[StoragePressureSample, ...]:
+    """Memory-only actual destinations; unmatched or unfinished state stays unknown."""
+    with config.PERSISTENCE_CONFIG_LOCK:
+        mode = _spot_image_capture_mode()
+        signature = _spot_image_capture_config_signature()
+        with _spot_image_capture_lock:
+            state = _image_shutdown_status_locked()
+            generation = (_spot_image_storage_generation
+                          if (_spot_image_storage_activation == (mode, signature)
+                              or _spot_image_storage_generation == 0) else None)
+            writer = _spot_image_capture_writer
+    day = datetime.fromtimestamp(time.time(), timezone.utc)
+    current = {
+        (generation, "image_fact", _image_destination_key(signature[0] / SPOT_IMAGE_FACT_FILENAME)),
+        (generation, "image_jpeg", _image_destination_key(signature[1] / day.strftime('%Y/%m/%d'))),
+    } if mode != "off" else set()
+    probes = {}
+    if writer is not None:
+        for probe in writer.destination_probe_snapshot():
+            path = Path(probe["destination_path"])
+            if probe["sink_id"] == "image_fact":
+                path /= SPOT_IMAGE_FACT_FILENAME
+            probes[(probe["config_generation"], probe["sink_id"], _image_destination_key(path))] = probe
+    samples = []
+    for binding in current | probes.keys():
+        probe = probes.get(binding, {})
+        manual = (state["owner_release_failed"] or state["probe_manual_recovery_required"]
+                  or probe.get("manual_recovery_required", False)
+                  or (writer is not None and writer._fact_append_uncertain))
+        availability = ("blocked" if manual or state["manifest_initialization_failed"] else
+                        "unknown" if state["manifest_initialization_requested"] else
+                        probe.get("current_storage_availability", "unknown"))
+        samples.append(StoragePressureSample(
+            sink_id=binding[1], config_generation=binding[0], destination_key=binding[2],
+            enabled=binding in current, availability=availability,
+            count_limit=_SPOT_IMAGE_CAPTURE_QUEUE_MAX, byte_limit=_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
+            writer_alive=state["worker_alive"], manual_recovery_required=bool(manual),
+            budget_pending_count=state["unfinished_tasks"], budget_pending_bytes=state["pending_payload_bytes"],
+        ))
+    if state["unfinished_tasks"] or state["pending_payload_bytes"]:
+        # Until every pending workspace is bound, never infer NORMAL from an
+        # idle probe. The production monitor is not yet connected to this API.
+        samples.append(StoragePressureSample(
+            sink_id="image_pending_unbound", config_generation=None, destination_key="", enabled=True,
+            availability="unknown", pending_count=state["unfinished_tasks"],
+            pending_bytes=state["pending_payload_bytes"], count_limit=_SPOT_IMAGE_CAPTURE_QUEUE_MAX,
+            byte_limit=_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT, pending_recovery=state["pending_recovery"],
+            writer_alive=state["worker_alive"],
+        ))
+    return tuple(samples)
 
 
 def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:

@@ -20,6 +20,7 @@ from backend.FacilityData.drivers import spot_api
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData import spot_image_fact
 from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
+from backend.FacilityData.persistence_pressure import StoragePressureController
 
 
 class CsvImageStartupTests(unittest.TestCase):
@@ -411,6 +412,11 @@ class CsvImageStartupTests(unittest.TestCase):
                 _, failed = wait_for(lambda result: result['image_jpeg']['probe_status'] == 'blocked',
                                      'idle image destination was not rechecked')
                 self.assertEqual(failed['image_fact']['current_storage_availability'], 'available')
+                controller = StoragePressureController()
+                samples = spot_api.get_spot_image_storage_pressure_samples()
+                self.assertEqual(controller.evaluate(samples, now_monotonic=101.0).state, 'PERSISTENCE_BLOCKED')
+                self.assertEqual({sample.sink_id: sample.availability for sample in samples},
+                                 {'image_fact': 'available', 'image_jpeg': 'blocked'})
                 self.assertEqual(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'], 102.0)
                 self.assertEqual(len(attempts), 4)
                 blocked[0] = False
@@ -427,6 +433,9 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
                 with patch.object(Path, 'open', side_effect=AssertionError('snapshot performed file I/O')):
                     self.assertEqual({item['sink_id']: item for item in writer.destination_probe_snapshot()}, recovered)
+                    samples = spot_api.get_spot_image_storage_pressure_samples()
+                self.assertEqual([controller.evaluate(samples, now_monotonic=now).state for now in (102., 103., 104.)],
+                                 ['PRESSURED', 'PRESSURED', 'NORMAL'])
             finally:
                 self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
             count = len(attempts)
