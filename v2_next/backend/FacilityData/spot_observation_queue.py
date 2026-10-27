@@ -6,12 +6,14 @@ a promise of lossless operation through an unbounded storage outage.
 from __future__ import annotations
 
 import copy
+import hashlib
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import logging
 import os
+from pathlib import Path
 import queue
 import stat
 import threading
@@ -27,6 +29,7 @@ from backend.FacilityData.spot_observation_fact import (
     FACT_SPOOL_PENDING_BYTE_LIMIT, FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
 )
 from backend.FacilityData.freshness import clock_domain_id
+from backend.FacilityData.spot_image_fact import _probe_storage_directory
 
 
 FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
@@ -89,6 +92,8 @@ class SpotObservationQueue:
         self._required_file_probe_delay = 1.0
         self._spool_recovery_at: float | None = None
         self._spool_recovery_delay = 1.0
+        self._storage_directories: dict[str, Path] = {}
+        self._storage_probes: dict[str, dict[str, Any]] = {}
         self._state: dict[str, Any] = {
             "queue_capacity": capacity, "accepted_count": 0, "completed_count": 0,
             "rejected_count": 0, "write_failure_count": 0, "spool_failure_count": 0,
@@ -195,6 +200,7 @@ class SpotObservationQueue:
         # Never wait on a writer/file/spool lock, scan, or filesystem call.
         with self._lock:
             state = dict(self._state)
+            state["storage_destinations"] = [dict(probe) for probe in self._storage_probes.values()]
             oldest = self._pending_enqueued_at[0] if self._pending_enqueued_at else None
             if state['spool_pending_count'] or state['spool_pending_bytes']:
                 spool_oldest = state['spool_oldest_pending_monotonic']
@@ -374,6 +380,57 @@ class SpotObservationQueue:
                 self._required_file_probe_delay = 1.0
             self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
 
+    def _register_storage_directories(self, writer: SpotObservationFactWriter) -> None:
+        # These are the writer's actual fixed destinations, not a UI-selected
+        # fallback. Do not publish raw filesystem paths in status snapshots.
+        self._storage_directories = {
+            "temperature_fact": writer.output_path.parent,
+            "temperature_spool": writer.spool_write_directory,
+        }
+        with self._lock:
+            for sink_id, directory in self._storage_directories.items():
+                key = hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(directory)))).hexdigest()
+                self._storage_probes[sink_id] = {
+                    "sink_id": sink_id, "destination_key": key, "probe_scope": "directory_only",
+                    "probe_status": "unknown", "probe_error_type": None,
+                    "probe_failure_count": 0, "last_probe_monotonic": None,
+                    "last_probe_success_monotonic": None, "next_probe_monotonic": 0.0,
+                    "retry_delay_sec": 1.0, "manual_recovery_required": False,
+                }
+
+    def _probe_storage_destinations(self) -> None:
+        # The existing owner performs I/O even with no arrivals or UI requests.
+        # Each destination keeps its own failure history and retry schedule.
+        for sink_id, directory in self._storage_directories.items():
+            if self._stop.is_set():
+                return
+            with self._lock:
+                probe = self._storage_probes[sink_id]
+                due = probe["next_probe_monotonic"]
+            if due is None or time.monotonic() < due:
+                continue
+            error_type = None
+            manual = False
+            try:
+                with self._reserve_writer_payload(128, "storage_probe_byte_limit"):
+                    _probe_storage_directory(directory)
+            except (OSError, FactPayloadBudgetExceeded) as exc:
+                error_type = type(exc).__name__
+            except RuntimeError as exc:
+                error_type, manual = type(exc).__name__, True
+            checked = time.monotonic()
+            with self._lock:
+                probe.update(probe_status="blocked" if error_type else "available",
+                             probe_error_type=error_type, last_probe_monotonic=checked,
+                             manual_recovery_required=manual)
+                if error_type:
+                    probe["probe_failure_count"] += 1
+                    probe["next_probe_monotonic"] = None if manual else checked + probe["retry_delay_sec"]
+                    probe["retry_delay_sec"] = min(30.0, 2 * probe["retry_delay_sec"])
+                else:
+                    probe.update(last_probe_success_monotonic=checked,
+                                 next_probe_monotonic=None, retry_delay_sec=1.0)
+
     def _recover_spool_if_due(self, writer: SpotObservationFactWriter) -> None:
         if (self._stop.is_set() or self._spool_recovery_at is None
                 or time.monotonic() < self._spool_recovery_at
@@ -457,10 +514,12 @@ class SpotObservationQueue:
             writer = self._factory()
             self._writer = writer
             writer.payload_reservation = self._reserve_writer_payload
+            self._register_storage_directories(writer)
             if not self._initialize_writer(writer):
                 raise RuntimeError("fact_header_initialization_failed")
             writer._flush_spool()
             self._refresh_state(writer)
+            self._probe_storage_destinations()
             with self._lock:
                 self._state["initialization_state"] = "ready"
                 self._state["accepting"] = not self._stop.is_set()
@@ -480,6 +539,7 @@ class SpotObservationQueue:
                 self._state["last_error_code"] = "initialization_failed"
             return  # Accepted-but-unwritten items remain visible; never claim clean.
         while not self._stop.is_set() or not self._queue.empty():
+            self._probe_storage_destinations()
             self._recover_spool_if_due(writer)
             if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
                 break

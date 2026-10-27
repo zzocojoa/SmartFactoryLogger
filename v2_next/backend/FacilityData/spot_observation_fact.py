@@ -609,6 +609,11 @@ class SpotObservationFactWriter:
             return self.spool_path
         return self.output_path.with_name(f"{self.output_path.name}.failed.jsonl")
 
+    @property
+    def spool_write_directory(self) -> Path:
+        """Actual destination for new recovery segments; no filesystem access."""
+        return _spool_segment_directory(self._effective_spool_path())
+
     def _spool_append_target(self, payload_size: int) -> tuple[Path, str]:
         if payload_size > FACT_SPOOL_SEGMENT_BYTE_LIMIT:
             raise ValueError("spool row exceeds segment capacity")

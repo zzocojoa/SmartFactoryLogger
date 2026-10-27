@@ -1157,6 +1157,70 @@ class FactQueueTests(unittest.TestCase):
                 finally:
                     owner.close(2)
 
+    def test_fact_and_spool_destinations_probe_independently_without_arrivals(self):
+        clock, blocked, attempts = [100.0], [True], []
+        original_mkstemp = tempfile.mkstemp
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'log' / 'facts.csv'
+            spool = Path(tmp) / 'recovery' / 'legacy.jsonl'
+            spool_directory = spool.with_name(spool.name + '.segments-v1')
+            writer = SpotObservationFactWriter(path, spool_path=spool)
+            self.assertTrue(writer.ensure_initialized())
+
+            def failed_probe(*args, **kwargs):
+                target = Path(kwargs['dir'])
+                attempts.append((target, clock[0], threading.current_thread()))
+                if target == spool_directory and blocked[0]:
+                    raise PermissionError('spool destination unavailable')
+                return original_mkstemp(*args, **kwargs)
+
+            def wait_state(owner, predicate):
+                deadline = time.perf_counter() + 3
+                while time.perf_counter() < deadline:
+                    state = owner.snapshot()
+                    if predicate(state):
+                        return state
+                    threading.Event().wait(.01)
+                self.fail(f'Owner state did not reach expected boundary: {state}')
+
+            with patch('tempfile.mkstemp', side_effect=failed_probe), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    state = wait_state(owner, lambda state: state['required_file_availability'] == 'available')
+                    destinations = {item['sink_id']: item for item in state.get('storage_destinations', ())}
+                    self.assertEqual(set(destinations), {'temperature_fact', 'temperature_spool'},
+                                     'required fact/spool destinations were not independently checked')
+                    self.assertEqual(destinations['temperature_fact']['probe_status'], 'available')
+                    self.assertEqual(destinations['temperature_spool']['probe_status'], 'blocked')
+                    self.assertEqual(destinations['temperature_spool']['next_probe_monotonic'], 101.0)
+                    self.assertEqual(destinations['temperature_spool']['probe_failure_count'], 1)
+                    self.assertNotEqual(destinations['temperature_fact']['destination_key'],
+                                        destinations['temperature_spool']['destination_key'])
+                    self.assertEqual(state['accepted_count'], 0)
+                    self.assertEqual(state['pending_payload_bytes'], 0)
+                    with patch.object(Path, 'open', side_effect=AssertionError('snapshot opened file')):
+                        self.assertEqual(len(owner.snapshot()['storage_destinations']), 2)
+                    clock[0] = 100.99
+                    threading.Event().wait(.08)
+                    self.assertEqual([at for target, at, _ in attempts if target == spool_directory], [100.0])
+                    blocked[0], clock[0] = False, 101.0
+                    state = wait_state(owner, lambda state: all(item['probe_status'] == 'available'
+                                       for item in state['storage_destinations']))
+                    spool_state = next(item for item in state['storage_destinations']
+                                       if item['sink_id'] == 'temperature_spool')
+                    self.assertEqual(spool_state['probe_failure_count'], 1)
+                    self.assertEqual(spool_state['last_probe_success_monotonic'], 101.0)
+                    self.assertIsNone(spool_state['next_probe_monotonic'])
+                    self.assertTrue(all(thread is owner._thread for _, _, thread in attempts))
+                    self.assertEqual(state['accepted_count'], 0)
+                    self.assertEqual(state['pending_payload_bytes'], 0)
+                    self.assertEqual(list(Path(tmp).rglob('.sfl-storage-probe-*')), [])
+                finally:
+                    blocked[0] = False
+                    closed = owner.close(3)
+            self.assertTrue(closed)
+
     def test_required_fact_access_retry_is_bounded_and_stops_on_close(self):
         original_open = Path.open
         clock, attempts = [100.0], []
