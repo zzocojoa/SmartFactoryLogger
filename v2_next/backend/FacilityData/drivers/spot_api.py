@@ -1069,16 +1069,18 @@ def _image_destination_key(path: Path) -> str:
 
 def _image_pending_destinations_locked() -> list[Dict[str, Any]]:
     destinations: Dict[tuple[int, str, str], Dict[str, Any]] = {}
-    for stage in _spot_image_capture_pending_stages.values():
+    for token, stage in _spot_image_capture_pending_stages.items():
         for sink, key in stage.destinations:
             item = destinations.setdefault((stage.config_generation, sink, key), {
                 "sink_id": sink, "config_generation": stage.config_generation, "destination_key": key,
-                "pending_count": 0, "pending_bytes": 0, "clock_domain": stage.clock_domain,
+                "pending_count": 0, "pending_bytes": 0, "pending_recovery": 0,
+                "clock_domain": stage.clock_domain,
                 "oldest_pending_monotonic": stage.admitted_monotonic,
                 "stage_due_monotonic": stage.admitted_monotonic,
             })
             item["pending_count"] += 1
             item["pending_bytes"] += stage.payload_bytes
+            item["pending_recovery"] += int(token == id(_spot_image_capture_recovery))
             item["oldest_pending_monotonic"] = min(item["oldest_pending_monotonic"], stage.admitted_monotonic)
             item["stage_due_monotonic"] = item["oldest_pending_monotonic"]
     return list(destinations.values())
@@ -1148,6 +1150,8 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "clock_domain": clock_domain_id() if timing_known else None,
         "pending_clock_unknown": not timing_known,
         "pending_destinations": _image_pending_destinations_locked(),
+        "pending_stage_count": len(stages),
+        "pending_capture_payload_bytes": sum(stage.payload_bytes for stage in stages),
         "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
@@ -1213,8 +1217,11 @@ def get_spot_image_storage_pressure_samples() -> tuple[StoragePressureSample, ..
                 path /= SPOT_IMAGE_FACT_FILENAME
             probes[(probe["config_generation"], probe["sink_id"], _image_destination_key(path))] = probe
     samples = []
-    for binding in current | probes.keys():
+    pending = {(stage["config_generation"], stage["sink_id"], stage["destination_key"]): stage
+               for stage in state["pending_destinations"]}
+    for binding in current | probes.keys() | pending.keys():
         probe = probes.get(binding, {})
+        stage = pending.get(binding, {})
         manual = (state["owner_release_failed"] or state["probe_manual_recovery_required"]
                   or probe.get("manual_recovery_required", False)
                   or (writer is not None and writer._fact_append_uncertain))
@@ -1224,17 +1231,24 @@ def get_spot_image_storage_pressure_samples() -> tuple[StoragePressureSample, ..
         samples.append(StoragePressureSample(
             sink_id=binding[1], config_generation=binding[0], destination_key=binding[2],
             enabled=binding in current, availability=availability,
+            pending_count=stage.get("pending_count", 0), pending_bytes=stage.get("pending_bytes", 0),
+            pending_recovery=stage.get("pending_recovery", 0),
+            oldest_pending_monotonic=stage.get("oldest_pending_monotonic"),
+            stage_due_monotonic=stage.get("stage_due_monotonic"),
+            clock_domain=stage.get("clock_domain", clock_domain_id()),
             count_limit=_SPOT_IMAGE_CAPTURE_QUEUE_MAX, byte_limit=_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
             writer_alive=state["worker_alive"], manual_recovery_required=bool(manual),
             budget_pending_count=state["unfinished_tasks"], budget_pending_bytes=state["pending_payload_bytes"],
         ))
-    if state["unfinished_tasks"] or state["pending_payload_bytes"]:
-        # Until every pending workspace is bound, never infer NORMAL from an
-        # idle probe. The production monitor is not yet connected to this API.
+    unbound_count = state["unfinished_tasks"] - state["pending_stage_count"]
+    unbound_bytes = state["pending_payload_bytes"] - state["pending_capture_payload_bytes"]
+    if unbound_count or unbound_bytes or state["pending_clock_unknown"]:
+        # Legacy direct events and unbound processing reservations must not
+        # borrow the latest capture's clock or a different destination's probe.
         samples.append(StoragePressureSample(
             sink_id="image_pending_unbound", config_generation=None, destination_key="", enabled=True,
-            availability="unknown", pending_count=state["unfinished_tasks"],
-            pending_bytes=state["pending_payload_bytes"], count_limit=_SPOT_IMAGE_CAPTURE_QUEUE_MAX,
+            availability="unknown", pending_count=max(0, unbound_count),
+            pending_bytes=max(0, unbound_bytes), count_limit=_SPOT_IMAGE_CAPTURE_QUEUE_MAX,
             byte_limit=_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT, pending_recovery=state["pending_recovery"],
             writer_alive=state["worker_alive"],
         ))

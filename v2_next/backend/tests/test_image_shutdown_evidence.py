@@ -27,6 +27,7 @@ from backend.FacilityData.drivers import spot_api as spot
 from backend.FacilityData import shutdown_evidence as evidence
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.schemas import FactoryData
+from backend.FacilityData.persistence_pressure import StoragePressureController
 
 
 class ImageShutdownEvidenceTests(unittest.TestCase):
@@ -448,6 +449,49 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 with (log_path / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
                     self.assertEqual(len(list(csv.DictReader(handle))), count)
             self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
+
+    def test_image_pressure_uses_original_pending_stage(self):
+        clock = [100.0]
+        with patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(spot.time, 'time', return_value=1790640000.):
+            spot._activate_spot_image_storage()
+            deadline = time.perf_counter() + 3
+            while time.perf_counter() < deadline:
+                samples = spot.get_spot_image_storage_pressure_samples()
+                if len(samples) == 2 and all(sample.availability == 'available' for sample in samples):
+                    break
+                time.sleep(.01)
+            else:
+                self.fail('image destinations were not initialized')
+            entered, release = self.block_write()
+            self.assertTrue(self.enqueue().accepted)
+            self.assertTrue(entered.wait(3))
+            clock[0] = 103.25
+            with patch.object(Path, 'open', side_effect=AssertionError('pressure reader opened a file')), \
+                 patch.object(Path, 'stat', side_effect=AssertionError('pressure reader statted a file')):
+                samples = spot.get_spot_image_storage_pressure_samples()
+            decision = StoragePressureController().evaluate(samples, now_monotonic=clock[0])
+            self.assertEqual(decision.state, 'PRESSURED')
+            self.assertEqual(decision.oldest_pending_age_seconds, 3.25)
+            self.assertEqual(decision.max_stage_overdue_seconds, 3.25)
+            self.assertEqual({sample.sink_id for sample in samples}, {'image_fact', 'image_jpeg'})
+            pending = spot.get_spot_image_capture_shutdown_status()
+            self.assertEqual(decision.max_occupancy_ratio,
+                             max(1 / 128, pending['pending_payload_bytes'] / (128 * 1024**2)))
+            original_bindings = {(s.config_generation, s.destination_key) for s in samples}
+            with patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MODE', 'off'):
+                spot._activate_spot_image_storage()
+                retained = spot.get_spot_image_storage_pressure_samples()
+                self.assertEqual({(s.config_generation, s.destination_key) for s in retained}, original_bindings)
+                self.assertTrue(all(not s.enabled and s.pending_count == 1 for s in retained))
+                self.assertEqual(StoragePressureController().evaluate(retained, now_monotonic=clock[0]).state,
+                                 'PRESSURED')
+                release.set()
+                self.assertTrue(spot.flush_spot_image_capture_queue(3))
+                complete = spot.get_spot_image_storage_pressure_samples()
+                self.assertTrue(all(s.pending_count == 0 and s.pending_bytes == 0 for s in complete))
+                self.assertEqual(StoragePressureController().evaluate(complete, now_monotonic=clock[0]).state,
+                                 'NORMAL')
 
     def test_pending_images_keep_admitted_destinations_after_config_change(self):
         clock = [1000.0]
