@@ -1474,6 +1474,46 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
             self.assertEqual(list(root.glob("*.schema-mismatch.csv")), [])
 
+    def test_image_history_lookup_has_bounded_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = dict(image_bytes=b"\xff\xd8bounded-history\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+            fact = writer.write_capture(**args)
+            with writer.fact_path.open("a", encoding="utf-8", newline="") as handle:
+                output = csv.DictWriter(handle, fieldnames=SPOT_IMAGE_FACT_COLUMNS)
+                for index in range(12_000):
+                    capture_id = f"spotimg_20260701T120000000000Z_{index:032x}"
+                    row = dict(fact, spot_image_capture_id=capture_id,
+                               spot_image_path=fact["spot_image_path"].replace(fact["spot_image_capture_id"], capture_id))
+                    output.writerow(row)
+            before = hashlib.sha256(writer.fact_path.read_bytes()).hexdigest()
+            restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+            tracemalloc.start()
+            try:
+                actual = restarted.write_capture(**args)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertEqual(actual, fact)
+            self.assertLess(peak, 4 * 1024 * 1024, "history lookup retained the complete fact file in memory")
+            self.assertEqual(hashlib.sha256(writer.fact_path.read_bytes()).hexdigest(), before)
+            self.assertEqual(restarted.fact_row_count, 12_001)
+
+            # Evict any recent-row cache, then retry a current capture whose
+            # JPEG disappeared. The historical lookup must prevent a new row.
+            current = dict(args, captured_at=time.time() + 1)
+            first_current = restarted.write_capture(**current)
+            for offset in range(1, 4):
+                restarted.write_capture(**dict(current, captured_at=current["captured_at"] + offset))
+            (root / first_current["spot_image_path"]).unlink()
+            self.assertEqual(restarted.write_capture(**current), first_current)
+            self.assertEqual(restarted.fact_row_count, 12_005)
+            with writer.fact_path.open(encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(sum(1 for _ in csv.DictReader(handle)), 12_005)
+
     def test_image_uncertainty_survives_writer_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

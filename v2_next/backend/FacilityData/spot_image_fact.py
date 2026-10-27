@@ -76,7 +76,7 @@ class SpotImageCaptureWriter:
     last_cleanup_at: float = field(default_factory=time.time)
     payload_reservation: Callable[[int, str], ContextManager[None]] | None = field(default=None, repr=False)
     _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
-    _known_facts_complete: bool = field(default=False, init=False, repr=False)
+    _latest_recorded_capture_at: Optional[float] = field(default=None, init=False, repr=False)
     _fact_row_count: Optional[int] = field(default=None, init=False, repr=False)
     _fact_digest: Any = field(default_factory=hashlib.sha256, init=False, repr=False)
     _fact_has_content: bool = field(default=False, init=False, repr=False)
@@ -205,6 +205,7 @@ class SpotImageCaptureWriter:
 
         self._append_fact(fact)
         self._remember_fact(fact)
+        self._latest_recorded_capture_at = max(captured_at, self._latest_recorded_capture_at or captured_at)
         self.written_count += 1
         self._cleanup_retention(time.time())
         return fact
@@ -246,8 +247,8 @@ class SpotImageCaptureWriter:
         if not self._historical_fact_metadata_readable:
             return True
         return (
-            self._historical_fact_mtime is not None
-            and self._historical_fact_mtime >= captured_at
+            (self._historical_fact_mtime is not None and self._historical_fact_mtime >= captured_at)
+            or (self._latest_recorded_capture_at is not None and self._latest_recorded_capture_at >= captured_at)
         )
 
     def _relative_image_path(self, captured_dt: datetime, capture_id: str, extension: str) -> Path:
@@ -329,7 +330,7 @@ class SpotImageCaptureWriter:
         raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
 
     def _existing_fact_for_capture_id(self, capture_id: str) -> Optional[dict[str, str]]:
-        facts_by_id = self._load_known_facts_by_capture_id()
+        facts_by_id = self._load_known_facts_by_capture_id(capture_id)
         fact = facts_by_id.get(capture_id)
         return dict(fact) if fact is not None else None
 
@@ -339,27 +340,30 @@ class SpotImageCaptureWriter:
         fact = self._known_facts_by_capture_id.get(capture_id)
         return dict(fact) if fact is not None else None
 
-    def _load_known_facts_by_capture_id(self) -> dict[str, dict[str, str]]:
-        if self._known_facts_complete and self._known_facts_by_capture_id is not None:
-            return self._known_facts_by_capture_id
+    def _load_known_facts_by_capture_id(self, requested_id: str) -> dict[str, dict[str, str]]:
+        # Scan sequentially, retaining only the requested record. File length
+        # must not determine the resident identity-index size.
         facts_by_id: dict[str, dict[str, str]] = {}
         row_count = 0
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
                 with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = csv.DictReader(handle)
-                    if reader.fieldnames == SPOT_IMAGE_FACT_COLUMNS:
-                        for row in reader:
-                            if row:
-                                row_count += 1
-                            capture_id = str(row.get("spot_image_capture_id") or "").strip()
-                            if capture_id:
-                                facts_by_id[capture_id] = dict(row)
-            except (UnicodeError, csv.Error):
-                facts_by_id = {}
-                row_count = 0
+                    reader = csv.DictReader(handle, strict=True)
+                    if reader.fieldnames != SPOT_IMAGE_FACT_COLUMNS:
+                        raise csv.Error("SPOT image fact history has an unsupported header")
+                    for row in reader:
+                        if None in row or any(value is None for value in row.values()):
+                            raise csv.Error("SPOT image fact history contains an incomplete row")
+                        row_count += 1
+                        if row["spot_image_capture_id"] == requested_id:
+                            if requested_id in facts_by_id:
+                                raise csv.Error("SPOT image fact history duplicates the requested capture")
+                            facts_by_id[requested_id] = row
+            except (UnicodeError, csv.Error) as exc:
+                with _SPOT_IMAGE_FACT_FILE_LOCK:
+                    self._mark_fact_append_uncertain()
+                raise RuntimeError("SPOT image fact append is uncertain; manual recovery required") from exc
         self._known_facts_by_capture_id = facts_by_id
-        self._known_facts_complete = True
         if self._fact_row_count is None:
             self._fact_row_count = row_count
         return facts_by_id
@@ -392,10 +396,9 @@ class SpotImageCaptureWriter:
         capture_id = str(fact.get("spot_image_capture_id") or "").strip()
         if not capture_id:
             return
-        if self._known_facts_by_capture_id is None:
-            self._known_facts_by_capture_id = {}
-        facts_by_id = self._known_facts_by_capture_id
-        facts_by_id[capture_id] = dict(fact)
+        # Only the most recent row is a fast-path cache. Older retries use the
+        # bounded lookup above, including when retention removed their JPEG.
+        self._known_facts_by_capture_id = {capture_id: dict(fact)}
 
     def _initialize_manifest_state(self) -> None:
         if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
