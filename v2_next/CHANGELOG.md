@@ -4,6 +4,14 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Reconcile pending CSV row locations and byte hashes before retrying partial
+  batches in the same process. Preserve complete v1/v2 rows and v2 sequence
+  numbers without appending the already written prefix a second time.
+- Keep unexpectedly removed or changed CSV records uncertain. Preserve close
+  failures and unclosed handle ownership, reject restart with unresolved file
+  state, and close v2 files before publishing their final observation manifest.
+  Recovery does not erase earlier write failures; per-row evidence commit and
+  the remaining destination/recovery/pressure contracts are still in development.
 - Add bounded persistence trace segments with retained publish retries and a
   first-record monotonic flush deadline. Preserve short writes as uncertain
   pending files instead of publishing an incomplete final segment.
