@@ -7431,6 +7431,8 @@ class SpotDiagnosticRequestJournalTests(unittest.TestCase):
                     ("api_route", {}),
                     ("outcome", []),
                     ("timeout_phase", {}),
+                    ("schema_version", []),
+                    ("schema_version", {}),
                 ),
                 start=1,
             ):
@@ -7448,7 +7450,7 @@ class SpotDiagnosticRequestJournalTests(unittest.TestCase):
             recovered = SpotDiagnosticRequestJournal(log_path)
             snapshot = recovered.snapshot()
             self.assertEqual(snapshot["recovered_event_count"], 3)
-            self.assertEqual(snapshot["recovery_invalid_line_count"], 4)
+            self.assertEqual(snapshot["recovery_invalid_line_count"], 6)
             self.assertEqual(snapshot["failure_count_retained"], 1)
             self.assertTrue(recovered.close())
 

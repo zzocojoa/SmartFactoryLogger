@@ -937,8 +937,10 @@ class SpotDiagnosticRequestJournal:
             return None
         sequence = value.get("event_sequence")
         state = value.get("state")
+        schema_version = value.get("schema_version")
         if (
-            value.get("schema_version") not in {SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION, _LEGACY_JOURNAL_SCHEMA_VERSION}
+            not isinstance(schema_version, str)
+            or schema_version not in {SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION, _LEGACY_JOURNAL_SCHEMA_VERSION}
             or isinstance(sequence, bool)
             or not isinstance(sequence, int)
             or sequence <= 0
@@ -946,7 +948,7 @@ class SpotDiagnosticRequestJournal:
             or state not in _ALLOWED_STATES
         ):
             return None
-        if value.get("schema_version") == _LEGACY_JOURNAL_SCHEMA_VERSION and (
+        if schema_version == _LEGACY_JOURNAL_SCHEMA_VERSION and (
             state == "suppressed" or value.get("outcome") == "storage_pressure"
         ):
             return None
