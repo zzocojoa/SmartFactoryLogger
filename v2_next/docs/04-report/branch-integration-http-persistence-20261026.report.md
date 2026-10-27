@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부. CSV 목적지/복구, 온도 spool 용량·접근 오류·삭제/변경·읽기 handle 보호 구현. 전체 required 상태/monitor 연결·7단계/17명세 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `44c1d7a4` backend 1188중1187통과·1skip, exit0. 마지막 전체 health15044c4f. 최종 전체 검사·빌드·새 설치본 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부. 온도 목적지별 독립 probe·idle 회복·수동 복구, 최초 spool 시각 보완. 전체 required 상태/monitor 연결·7단계/17명세 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `a1d78c47` backend 1195중1194통과·1skip 및 QA exit0. 이전 health의 데이터/확인 메모리 시험 실패 수정. 남은 구현 후 최종 전체 검사·빌드·새 설치본 미완료 |
 
 ## 보존과 통합
 
@@ -1204,3 +1204,19 @@ clean `44c1d7a4`에서 `npm.cmd run health:backend:test` **exit0**, **1188중118
 남은 범위: 스풀 append/close/unlink 동시 변경과 추적 metadata 예산, 모든 required fact/spool/trace·sidecar 가용성, 단계별 최초 시각/설정 세대·초기화/종료·owner 교체, monitor 실제 서비스 연결, PRESSURED 감속/NORMAL 온도 우선, fact/JPEG 전체 대조·작업 공간·상태/관측 참조 계약,7단계/17명세 전체 및 최종 배포 준비. 직전 감사는 접근 오류 재현으로 다음 행동을 바꾼 PROGRESS였고 이번에는 구현·회귀 검증을 진행했다. 전체 목표는 미완료다.
 
 후속 제어 경계도 실제 순수 controller로 확인했다. enabled=False·대기 계수0이지만 manual_recovery_required=True인 이전 목적지를 입력하면 현재 NORMAL/available을 반환한다. `disabled-manual-controller-reproduction.json`에 입력/결과를 보존했다. 저장 비활성화가 이전 미해결 상태를 제외하지 않도록 고친 뒤 전체 상태 제공·monitor 연결로 이어가야 한다. 이 재현은 코드·설정 변경이나 서버 실행이 아니다.
+
+## 2026-10-28 온도 저장 목적지의 독립 확인·회복·수동 복구
+
+- `fc071951`: 저장 OFF·대기0인 이전 목적지라도 manual_recovery_required를 압력 평가에서 제외하지 않는다. 원래 실패 재현은 보존했다.
+- `b4d905c1`: 새 spool에 최초 접수 단조 시각·clock domain을 보존하고 복구 진행에 맞춰 oldest/stage due를 갱신한다. 기존 파일의 시각은 근거 없이 known으로 바꾸지 않으며 CSV 열은 유지한다.
+- `a2d2e11c`: 기존 온도 owner가 원장 폴더와 실제 spool segment 폴더를 각각 확인한다. 128byte도 합산 예산에 포함하며 조회 함수는 메모리 상태만 복사한다.
+- `9e0ce51d`: 초기 성공 이후에도 1초 단위로 확인한다. 실패는 1→2→4→8→16→30초 간격, 회복은 과거 실패 보존, 종료 후 추가 검사 없음으로 검증했다.
+- `3cfa28e5`: 확인 파일 교체·내용 불확실은 새 접수와 정상 마감을 차단한다. 다른 소유자 파일을 삭제하지 않는다.
+- `7a03a789`: 확인 파일 정리 실패를 일반 접근 실패와 구분한다. 온도 owner는 수동 복구를 유지해 반복 생성하지 않는다. CSV/이미지 owner의 같은 수명 연결은 후속 항목이다.
+- `a1d78c47`: 전체 health에서 데이터 큐 drain 직후 확인 작업128byte를 읽어 0byte 주장에 실패한 시험을 실제 파일 읽기 대기로 재현했다. 데이터 대기0·확인 작업128byte의 합산 예산·owner 종료 후 전체0을 구분하도록 시험을 수정했다.16MiB 한도나 제품 동작은 완화하지 않았다.
+
+실패 재현·회귀 22실행과 전체 로그 44개를 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-destination-recovery/verification.json`에 결합했다. 최초 신규 시험의 try 블록 삽입 오류와 회귀 명령의 잘못된 이미지 시험 모듈명은 각각 fixture/명령 오류로 구분했다. 전자는 배치를 수정한 뒤 실제 기능 실패를 재현했고, 후자는 실행된108시험의 결과와 실제 이미지/시작39시험을 대조했다. 최종 관련150시험은149통과·기존 F01자료1skip, exit0이다.
+
+clean `7a03a789`의 최초 `npm.cmd run health`는 backend1195중1실패·1skip으로 exit1이며 QA에 도달하지 않았다. 의존성15·Electron103·frontend Node9/Vitest460과 타입/lint·기본 mypy12파일은 해당 실행에서 통과했다. 시험 한 파일만 수정한 clean `a1d78c47`에서 **`npm.cmd run health:backend:test`와 `npm.cmd run health:qa:selftest` exit0**을 확인했다. backend **1195중1194통과·기존 F01자료1skip**, 503.805초. 변경 없는 선행 검사를 반복하지 않았으며 새 단일 health 명령 exit0을 주장하지 않는다. 시작·종료 HEAD/소스 해시와 원본4문서·109경로·stash·운영 설치본을 재검산했다. 앞선 감사의108시험 중1실패도 이번 구현으로 해결했으며 원래 감사와 모든 실패 기록을 보존한다.
+
+현재 상태는 전체 완료가 아니다. 전체 required 상태/설정 세대·trace/sidecar, 초기화·종료 수명, CSV/이미지 probe 정리 불확실성, monitor 실제 서비스 연결, PRESSURED/NORMAL 제어, 전체 fact/JPEG 대조·7단계/17명세와 최종 빌드/설치본·master 통합이 남는다. 운영 태그·서버·백업은 변경하지 않았다.

@@ -202,6 +202,8 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 2026-10-28 온도 spool 상태 보완: 실제 owner가 대기/보존 bytes를 게시하며 디렉터리 접근 실패는 unknown과 기존 bytes를 유지한다. 관찰한 파일의 삭제·잘림·교체·mtime 변경 및 실제 읽기 handle/종료 뒤 경로 불일치는 수동 복구로 남기고 새 유입 없이 제한된 기존 복구를 수행한다. 실제 append/close/unlink 경쟁·추적 metadata 예산·단계 시각/세대 및 전체 required 상태는 남아 있다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/spool-integrity/verification.json`.
 
+2026-10-28 온도 목적지 보완: 원장/실제 spool 폴더를 같은 owner가 독립 확인하고 정상1초·실패최대30초 재시도를 수행한다. 확인 파일 교체·정리 실패는 온도 접수/정상 마감을 차단하며 원본을 보존한다. spool 최초 접수 시각과 이전 비활성 목적지의 수동 복구 상태도 유지한다. 전체 required 상태·다른 owner 정리 수명·monitor/17명세는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-destination-recovery/verification.json`.
+
 **R06 — 실제 HTTP 취득 억제**
 
 - `_img_fetch_lock` 안에서 새 upstream refresh task를 생성하기 직전에 압력 상태와 양수 요청 간격을 검사한다. 이 검사는 FR02의 발송 직전 검사를 대체하지 않는다. 기존 최소 요청률 계산의 입력을 0으로 바꾸는 방식은 사용하지 않는다. single-flight waiter와 이미 dispatch한 공유 요청은 압력 변화만으로 강제 취소하지 않는다.

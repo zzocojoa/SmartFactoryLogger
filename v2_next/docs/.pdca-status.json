@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T20:02:58.685783+00:00",
+  "lastUpdated": "2026-10-27T21:01:57.651143+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,15 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "44c1d7a48ca586482fc317c9638897dc2c8c6f0e",
+      "currentDevelopmentCommit": "a1d78c471883d488a0dc2998bec908e51099b91a",
       "lastBackendVerification": {
-        "commit": "44c1d7a48ca586482fc317c9638897dc2c8c6f0e",
-        "total": 1188,
-        "passed": 1187,
+        "commit": "a1d78c471883d488a0dc2998bec908e51099b91a",
+        "total": 1195,
+        "passed": 1194,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/spool-integrity/verification.json",
-        "binding": "clean-source-hashes-equal-commit"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-destination-recovery/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48330,21 +48329,23 @@
         "Windows equivalent path representations retain pending/ready and closeout contracts; different-directory hard links and unverifiable parent identity remain rejected.",
         "CSV arrivals do not bypass failed probe backoff; disabling persistence preserves unresolved previous-generation destinations and manual recovery.",
         "Temperature spool owner publishes pending/retained bytes without reader I/O; enumeration errors retain last-known usage and unknown state, with independent bounded retry and historical failures preserved.",
-        "Observed spool deletion, truncation, replacement and metadata change latch manual recovery; verified read handles and post-read paths prevent importing/deleting replacements. Append/close/unlink races and metadata budget remain incomplete."
+        "Observed spool deletion, truncation, replacement and metadata change latch manual recovery; verified read handles and post-read paths prevent importing/deleting replacements. Append/close/unlink races and metadata budget remain incomplete.",
+        "Disabled historical destinations retain manual recovery in pressure evaluation; new fact spool rows preserve original admission deadlines while untrusted historical clocks remain unknown.",
+        "Temperature owner independently probes fact/spool directories with bounded workspace and retry; idle loss/recovery, stop, changed probe identity and unresolved cleanup retain truthful current/manual state. CSV/image cleanup lifecycle remains incomplete."
       ],
       "remainingScope": [
-        "Complete required fact/spool/trace and sidecar/current-file integrity states, cross-stage oldest-age/generation joins, retry/initialization/shutdown lifecycle and owner-replacement history; CSV provider remains partial.",
-        "Complete temperature factory/header-write/spool initialization recovery and full required-file integrity; initial read recovery does not prove whole historical integrity.",
-        "Wire required writer state providers and monitor lifecycle; implement PRESSURED cadence, NORMAL interval/temperature priority, full status/observation-reference contracts and runtime integration.",
-        "Complete fact/JPEG reconciliation, recovery and aggregate workspace reservations; all 17 r4 scenarios.",
-        "Final whole-state health/build/installer verification and master integration."
+        "Complete required fact/spool/trace/sidecar file integrity, destination/generation and stage-clock joins, initialization/close and owner-replacement history.",
+        "Propagate uncertain probe cleanup to CSV and image owners; prevent repeated temp-file creation there, with focused behavior tests.",
+        "Complete generic factory/header-write/spool initialization recovery, spool append/close/unlink races and aggregate metadata/workspace budgets.",
+        "Wire all required providers and monitor lifecycle; PRESSURED cadence, NORMAL interval/temperature priority and status/observation-reference contracts.",
+        "Complete full fact/JPEG reconciliation and all 7 stages / 17 r4 scenarios; final build/installer verification and master integration."
       ],
       "lastWholeHealth": {
         "commit": "15044c4faca18093545240413c31b7d098c288b5",
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/health-result.json"
       },
-      "updatedAt": "2026-10-27T20:02:58.685783+00:00",
+      "updatedAt": "2026-10-27T21:01:57.651143+00:00",
       "lastRelatedBackendVerification": {
         "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
         "total": 190,
@@ -48447,6 +48448,19 @@
         "commit": "44c1d7a48ca586482fc317c9638897dc2c8c6f0e",
         "focusedRuns": 17,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/spool-integrity/verification.json"
+      },
+      "lastHealthComponentVerification": {
+        "commit": "a1d78c471883d488a0dc2998bec908e51099b91a",
+        "backendAndQAExitCode": 0,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-destination-recovery/recheck-result.json",
+        "priorWholeHealthExitCode": 1,
+        "priorFailureEvidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-destination-recovery/health-result.json",
+        "unchangedPassingComponentsCommit": "7a03a789bf9cacf32403be79ca88ecf3e1bad069"
+      },
+      "lastFactDestinationVerification": {
+        "commit": "a1d78c471883d488a0dc2998bec908e51099b91a",
+        "focusedRuns": 22,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-destination-recovery/verification.json"
       }
     }
   },
