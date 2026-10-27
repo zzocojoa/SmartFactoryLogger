@@ -8,10 +8,11 @@ import os
 import stat
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generator, Mapping, Optional
+from typing import Any, Callable, ContextManager, Generator, Mapping, Optional
 
 from backend.FacilityData.spot_observation_fact import build_spot_observation_key
 
@@ -68,6 +69,7 @@ class SpotImageCaptureWriter:
     failure_count: int = 0
     written_count: int = 0
     last_cleanup_at: float = field(default_factory=time.time)
+    payload_reservation: Callable[[int, str], ContextManager[None]] | None = field(default=None, repr=False)
     _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
     _known_facts_complete: bool = field(default=False, init=False, repr=False)
     _fact_row_count: Optional[int] = field(default=None, init=False, repr=False)
@@ -192,8 +194,7 @@ class SpotImageCaptureWriter:
         self._cleanup_retention(time.time())
         return fact
 
-    @staticmethod
-    def _reuse_capture_file(path: Path, expected: bytes) -> bool:
+    def _reuse_capture_file(self, path: Path, expected: bytes) -> bool:
         try:
             before = path.lstat()
         except FileNotFoundError:
@@ -210,7 +211,10 @@ class SpotImageCaptureWriter:
             if identity(os.fstat(handle.fileno())) != identity(before):
                 raise RuntimeError("SPOT image capture file is uncertain: identity changed")
             # Verify the existing whole capture without allocating another JPEG.
-            with memoryview(bytearray(min(4096, max(1, len(expected))))) as window, memoryview(expected) as source:
+            size = min(4096, max(1, len(expected)))
+            reservation = (self.payload_reservation(size, "capture_verification_byte_limit")
+                           if self.payload_reservation is not None else nullcontext())
+            with reservation, memoryview(bytearray(size)) as window, memoryview(expected) as source:
                 offset = 0
                 while offset < len(expected):
                     count = handle.readinto(window[:min(len(window), len(expected) - offset)])

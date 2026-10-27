@@ -447,6 +447,60 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                     self.assertEqual(len(list(csv.DictReader(handle))), count)
             self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
 
+    def test_existing_capture_verification_reserves_worker_payload(self):
+        data = io.BytesIO()
+        Image.new('RGB', (2, 2), (3, 4, 5)).save(data, format='JPEG')
+        base = data.getvalue()
+        jpeg = base[:2] + b'\xff\xfe\x20\x02' + b'x' * 8192 + base[2:]
+        args = dict(image_bytes=jpeg, captured_at=1790640001.,
+                    image_url='http://synthetic.invalid/image.jpg', source='test', image_age_ms=0,
+                    capture_id='spotimg_20260929T000001000000Z_' + 'a' * 32)
+        self.assertTrue(spot._maybe_enqueue_spot_image_capture(**args).accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        image_path, = self.root.rglob('*.jpg')
+        original = {path: path.read_bytes() for path in (image_path, self.root / 'spot_image_fact.csv')}
+        opened = Path.open
+        reads = []
+
+        class Reader:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self.handle.__exit__(*exc)
+
+            def readinto(self, buffer):
+                reads.append((len(buffer), spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes']))
+                return self.handle.readinto(buffer)
+
+        def observe_reads(path, mode='r', *open_args, **kwargs):
+            handle = opened(path, mode, *open_args, **kwargs)
+            return Reader(handle) if path == image_path and mode == 'rb' else handle
+
+        with patch.object(Path, 'open', new=observe_reads):
+            with patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', len(jpeg) + 4095):
+                self.assertTrue(spot._maybe_enqueue_spot_image_capture(**args).accepted)
+                self.assertTrue(spot.flush_spot_image_capture_queue(3))
+                state = spot.get_spot_image_capture_shutdown_status()
+                self.assertEqual(state['failure_count'], 1,
+                                 'existing JPEG verification must reserve its read buffer before reading')
+                self.assertEqual(state['pending_payload_bytes'], 0)
+                self.assertEqual(reads, [])
+            with patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', len(jpeg) + 4096):
+                self.assertTrue(spot._maybe_enqueue_spot_image_capture(**args).accepted)
+                self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        self.assertTrue(reads)
+        self.assertTrue(all(0 < size <= 4096 and pending == len(jpeg) + 4096 for size, pending in reads))
+        self.assertEqual(spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes'], 0)
+        self.assertEqual(spot.get_spot_image_capture_shutdown_status()['failure_count'], 1)
+        self.assertEqual({path: path.read_bytes() for path in original}, original)
+
     def test_capture_payload_budget_includes_inflight_and_linked_snapshot(self):
         # Two retained captures (~4.5 MiB), the writer's decoded snapshot and
         # admission workspace fit; a third capture must still be refused.

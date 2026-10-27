@@ -10,11 +10,12 @@ import re
 import threading
 import time
 from collections.abc import Iterable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Literal, Optional, TypeAlias, TypeVar, TypedDict
+from typing import Any, Callable, Dict, Iterator, Literal, Optional, TypeAlias, TypeVar, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -608,6 +609,20 @@ def _spot_image_capture_config_signature() -> tuple[Path, Path, int, float]:
         )
 
 
+@contextmanager
+def _reserve_image_writer_payload(size: int, reason: str) -> Iterator[None]:
+    global _spot_image_capture_pending_payload_bytes
+    with _spot_image_capture_lock:
+        if _spot_image_capture_pending_payload_bytes + size > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
+            raise PayloadBudgetExceeded(reason)
+        _spot_image_capture_pending_payload_bytes += size
+    try:
+        yield
+    finally:
+        with _spot_image_capture_lock:
+            _spot_image_capture_pending_payload_bytes -= size
+
+
 def _get_spot_image_capture_writer(
     signature: Optional[tuple[Path, Path, int, float]] = None,
 ) -> SpotImageCaptureWriter:
@@ -621,6 +636,7 @@ def _get_spot_image_capture_writer(
                 capture_root=signature[1],
                 retention_days=signature[2],
                 link_stale_threshold_ms=signature[3],
+                payload_reservation=_reserve_image_writer_payload,
             )
             _spot_image_capture_writer_signature = signature
         return _spot_image_capture_writer
