@@ -4,6 +4,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Validate CSV producer boundaries, producer/writer identity, contiguous trace
+  segments, admission ID coverage and each required output receipt. Use a
+  temporary disk index for outcome ranges; detect missing/overlapping IDs,
+  mismatched output contracts and processing failures without rewriting evidence.
+  Actual data-byte validation, full terminal outcome totals and QA integration
+  remain incomplete; no full data-integrity PASS is emitted.
+
 - Persist policy-excluded CSV ID ranges within the shared 4,096 outcome-range
   budget. Add bounded read-only evidence parsing and admission-total checks;
   full per-ID/output-byte validation and QA integration remain incomplete.
