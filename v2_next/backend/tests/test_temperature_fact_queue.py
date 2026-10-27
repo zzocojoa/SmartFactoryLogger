@@ -875,6 +875,17 @@ class FactQueueTests(unittest.TestCase):
             self.assertEqual([row['spot_poll_seq'] for row in self.read_rows(path)], ['1'])
 
     def test_missing_spool_segment_requires_manual_recovery(self):
+        self._assert_changed_spool_requires_manual_recovery('missing')
+
+    def test_truncated_spool_segment_requires_manual_recovery(self):
+        self._assert_changed_spool_requires_manual_recovery('truncated')
+
+    def test_replaced_or_rewritten_spool_requires_manual_recovery(self):
+        for mutation in ('replaced', 'rewritten', 'directory_missing'):
+            with self.subTest(mutation=mutation):
+                self._assert_changed_spool_requires_manual_recovery(mutation)
+
+    def _assert_changed_spool_requires_manual_recovery(self, mutation):
         clock, blocked = [100.0], [True]
         original_open = Path.open
         with tempfile.TemporaryDirectory() as tmp:
@@ -900,19 +911,38 @@ class FactQueueTests(unittest.TestCase):
                     spool = writer._active_spool_segment
                     original = spool.read_bytes()
                     self.assertEqual(owner.snapshot()['spool_pending_bytes'], len(original))
-                    spool.unlink()
+                    if mutation == 'missing':
+                        spool.unlink()
+                    elif mutation == 'truncated':
+                        spool.write_bytes(b'')
+                    elif mutation == 'replaced':
+                        original_inode = spool.stat().st_ino
+                        replacement = Path(tmp) / 'replacement.jsonl'
+                        replacement.write_bytes(original)
+                        replacement.replace(spool)
+                        self.assertNotEqual(spool.stat().st_ino, original_inode)
+                    elif mutation == 'rewritten':
+                        original_stat = spool.stat()
+                        spool.write_bytes(original)
+                        os.utime(spool, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns + 100_000_000))
+                    elif mutation == 'directory_missing':
+                        spool.unlink()
+                        spool.parent.rmdir()
+                    else:
+                        self.fail(f'Unknown fixture mutation: {mutation}')
                     blocked[0], clock[0] = False, 101.0
                     deadline = time.perf_counter() + 3
                     while owner.snapshot()['spool_next_recovery_monotonic'] == 101.0 and time.perf_counter() < deadline:
                         threading.Event().wait(.01)
                     state = owner.snapshot()
-                    self.assertTrue(state['spool_manual_recovery'], 'missing accepted spool was silently forgotten')
+                    self.assertTrue(state['spool_manual_recovery'], 'changed accepted spool was silently accepted')
                     self.assertEqual(state['spool_pending_count'], 1)
                     self.assertEqual(state['spool_pending_bytes'], len(original))
                     self.assertEqual(state['spool_usage_status'], 'unknown')
                     self.assertFalse(state['accepting'])
                     self.assertFalse(state['writes_drained'])
                     self.assertEqual(state['spool_recovered_count'], 0)
+                    spool.parent.mkdir(exist_ok=True)
                     spool.write_bytes(original)
                     clock[0] = 200.0
                     threading.Event().wait(.08)
