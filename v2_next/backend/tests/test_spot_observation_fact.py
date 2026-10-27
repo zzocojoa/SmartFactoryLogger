@@ -761,6 +761,39 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertFalse(spool_path.exists())
             self.assertEqual(list(segments.glob("*.jsonl")), [])
 
+    def test_header_read_failure_preserves_original_and_recovers_pending_fact(self) -> None:
+        snapshot = {"spot_service_instance_id": "header-read", "spot_poll_seq": 1,
+                    "spot_observation_seq": 1, "spot_poll_status": "success",
+                    "spot_raw_validity": "valid_temperature", "spot_raw_value_text": "455.0",
+                    "spot_last_poll_completed_at": "2026-06-26T00:00:00Z"}
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertIsNotNone(writer.write_fact(snapshot))
+            before = path.read_bytes()
+            identity = path.stat().st_ino
+
+            def locked_header(target, mode="r", *args, **kwargs):
+                if target == path and mode == "r":
+                    raise PermissionError("synthetic header read failure")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", locked_header):
+                result = writer.write_fact({**snapshot, "spot_poll_seq": 2, "spot_observation_seq": 2})
+            self.assertEqual(path.read_bytes(), before, "unreadable header must not replace the original fact")
+            self.assertEqual(path.stat().st_ino, identity)
+            self.assertEqual(list(Path(tmp).glob("*.schema-mismatch.*")), [])
+            self.assertIsNone(result)
+            self.assertEqual(writer.failure_count, 1)
+            self.assertEqual(writer.spool_pending_count(), 1)
+            writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 0)
+            self.assertEqual(writer.failure_count, 1)
+            with path.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_observation_key"] for row in rows], ["header-read:1", "header-read:2"])
+
     def test_writer_archives_existing_fact_when_header_mismatches_current_schema(self) -> None:
         snapshot = {
             "spot_service_instance_id": "svc-current",

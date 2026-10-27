@@ -337,11 +337,10 @@ class SpotObservationFactWriter:
         return True
 
     def _existing_header_matches_current_schema(self) -> bool:
-        try:
-            with self.output_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                existing_header = next(csv.reader(handle), [])
-        except (OSError, UnicodeError, csv.Error):
-            return False
+        # A failed read is not evidence of a different schema. Let the owner
+        # retain the original and report/spool the failed write for recovery.
+        with self.output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            existing_header = next(csv.reader(handle), [])
         return existing_header == SPOT_OBSERVATION_FACT_COLUMNS
 
     def _archive_mismatched_output_file(self) -> None:
