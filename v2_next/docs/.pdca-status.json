@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T19:27:45.088842+00:00",
+  "lastUpdated": "2026-10-27T20:02:58.685783+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,15 +48293,15 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "15044c4faca18093545240413c31b7d098c288b5",
+      "currentDevelopmentCommit": "44c1d7a48ca586482fc317c9638897dc2c8c6f0e",
       "lastBackendVerification": {
-        "commit": "15044c4faca18093545240413c31b7d098c288b5",
-        "total": 1181,
-        "passed": 1180,
+        "commit": "44c1d7a48ca586482fc317c9638897dc2c8c6f0e",
+        "total": 1188,
+        "passed": 1187,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/verification.json",
-        "binding": "clean-whole-health-source-hashes-equal-commit"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/spool-integrity/verification.json",
+        "binding": "clean-source-hashes-equal-commit"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48328,7 +48328,9 @@
         "Same-file initial history reads rebuild partial indexes under the existing owner with capped retry and shutdown cancellation; identity changes, decode errors and uncertain closes remain held, with original admissions and failure history retained.",
         "CSV owner independently probes current/admitted destinations and known CSV identity/access; payload reservations, actual data recovery and failure history remain distinct.",
         "Windows equivalent path representations retain pending/ready and closeout contracts; different-directory hard links and unverifiable parent identity remain rejected.",
-        "CSV arrivals do not bypass failed probe backoff; disabling persistence preserves unresolved previous-generation destinations and manual recovery."
+        "CSV arrivals do not bypass failed probe backoff; disabling persistence preserves unresolved previous-generation destinations and manual recovery.",
+        "Temperature spool owner publishes pending/retained bytes without reader I/O; enumeration errors retain last-known usage and unknown state, with independent bounded retry and historical failures preserved.",
+        "Observed spool deletion, truncation, replacement and metadata change latch manual recovery; verified read handles and post-read paths prevent importing/deleting replacements. Append/close/unlink races and metadata budget remain incomplete."
       ],
       "remainingScope": [
         "Complete required fact/spool/trace and sidecar/current-file integrity states, cross-stage oldest-age/generation joins, retry/initialization/shutdown lifecycle and owner-replacement history; CSV provider remains partial.",
@@ -48342,7 +48344,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/health-result.json"
       },
-      "updatedAt": "2026-10-27T19:27:45.088842+00:00",
+      "updatedAt": "2026-10-27T20:02:58.685783+00:00",
       "lastRelatedBackendVerification": {
         "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
         "total": 190,
@@ -48440,6 +48442,11 @@
         "commit": "15044c4faca18093545240413c31b7d098c288b5",
         "focusedRuns": 20,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-probe-completion/verification.json"
+      },
+      "lastSpoolIntegrityVerification": {
+        "commit": "44c1d7a48ca586482fc317c9638897dc2c8c6f0e",
+        "focusedRuns": 17,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/spool-integrity/verification.json"
       }
     }
   },

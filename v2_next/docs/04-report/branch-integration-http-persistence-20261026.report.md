@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV 목적지/본 파일 확인·실제 쓰기 복구·재시도/비활성 경계 및 Windows 종료 수정. 전체 required sink·monitor 실제 연결·감속/온도 우선·전체 대조/작업 공간·7단계/17명세 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `15044c4f` 전체 health exit0; backend 1181중1180통과·F01미제공1skip. 남은 구현 후 최종 검사·빌드·새 설치본은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부. CSV 목적지/복구, 온도 spool 용량·접근 오류·삭제/변경·읽기 handle 보호 구현. 전체 required 상태/monitor 연결·7단계/17명세 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `44c1d7a4` backend 1188중1187통과·1skip, exit0. 마지막 전체 health15044c4f. 최종 전체 검사·빌드·새 설치본 미완료 |
 
 ## 보존과 통합
 
@@ -1189,3 +1189,18 @@ clean 소스 `15044c4faca18093545240413c31b7d098c288b5`에서 **`npm.cmd run hea
 별도 보안 검토 도구가 없어 원본 비절단/비교체·임시 파일 소유권·실제 경로 식별·타 디렉터리 hard link 거부·권한 오류 차단·예약 예산·메모리 상태 조회를 직접 검토했다. 인증정보/접속 권한을 추가하지 않았다. 직전 목표 턴은 상태 재점검으로 구현 진전이 없었으며, 이번은 실패 수정과 검증의 PROGRESS다.
 
 남은 범위: 모든 required fact/spool/trace 및 sidecar 상태·단계 시각/설정 세대 결합·초기화/종료 수명과 owner 교체 이력, monitor 실제 서비스 연결, PRESSURED 감속/NORMAL 간격·온도 우선, 전체 fact/JPEG 대조·작업 공간·상태/관측 참조 계약,7단계/17명세 전체, 최종 변경 후 health/build/installer와 master 통합. monitor 기본 None은 그대로다. 서버·운영 설치본·설정·백업 변경은 없다.
+
+## 2026-10-28 온도 임시 저장 용량·접근 실패·파일 변경 보호
+
+- `25e6ec1a`: owner가 임시 저장 대기/보존 bytes를 게시한다. 메모리 큐에서 빠진 자료도 실제 스풀 복구 전까지 용량에 남고, 상태 조회에는 파일 I/O가 없다.
+- `e6b582ae`: Path.glob이 디렉터리 접근 오류를 빈 목록으로 숨기는 경계를 수정했다. 마지막으로 확인한 bytes는 유지하고 unknown/PermissionError를 게시한다. 실제 기존 owner가 새 유입 없이 backoff 후 원래 ID를 한 번만 저장하고 과거 실패를 보존한다.
+- `3519b32d`, `dc136702`: 관찰한 임시 파일의 삭제·폴더 소실·잘림·교체·mtime 변경은 수동 복구 상태로 남긴다. 원래 대기 건수와 bytes, 실패 이력을 보존하고 임의로 파일을 복원해도 같은 owner가 자동 해제하지 않는다. 정상 복구 후 owner가 삭제한 segment만 추적에서 제거한다.
+- `44c1d7a4`: 복구 읽기의 실제 handle과 읽기 완료 뒤 경로를 관찰한 파일 식별/크기/mtime에 대조한다. 읽기 직전·종료 직후 교체는 원장 append 전에 차단하고 교체된 원문을 자동 삭제하지 않는다. metadata stamp는 전체 내용 hash나 전원 장애 내구성 증명이 아니다.
+
+실제 writer·owner와 파일 I/O 경계로 RED→GREEN을 확인했다. 기존 용량 시험의 helper 누락, 읽기 교체 시험의 초기 fixture 캡처 전에 mutation이 발생한 오류는 제품 RED와 구분해 보존했다. 마지막 관련95시험 중94통과·기존 F01자료1skip. 총17실행/34로그와 변경 소스·원문4개·109경로·stash·운영 설치본을 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/spool-integrity/verification.json`에 결합했다.
+
+clean `44c1d7a4`에서 `npm.cmd run health:backend:test` **exit0**, **1188중1187통과·F01자료1skip**, 500.185초. 최종3파일 Ruff·기본 mypy12파일·diff 검사 exit0. 마지막 전체 health는15044c4f이며 현재 소스 전체 health·새 빌드·설치본·master 통합은 미완료다. 이번에 서버·설정·백업은 변경하지 않았다.
+
+남은 범위: 스풀 append/close/unlink 동시 변경과 추적 metadata 예산, 모든 required fact/spool/trace·sidecar 가용성, 단계별 최초 시각/설정 세대·초기화/종료·owner 교체, monitor 실제 서비스 연결, PRESSURED 감속/NORMAL 온도 우선, fact/JPEG 전체 대조·작업 공간·상태/관측 참조 계약,7단계/17명세 전체 및 최종 배포 준비. 직전 감사는 접근 오류 재현으로 다음 행동을 바꾼 PROGRESS였고 이번에는 구현·회귀 검증을 진행했다. 전체 목표는 미완료다.
+
+후속 제어 경계도 실제 순수 controller로 확인했다. enabled=False·대기 계수0이지만 manual_recovery_required=True인 이전 목적지를 입력하면 현재 NORMAL/available을 반환한다. `disabled-manual-controller-reproduction.json`에 입력/결과를 보존했다. 저장 비활성화가 이전 미해결 상태를 제외하지 않도록 고친 뒤 전체 상태 제공·monitor 연결로 이어가야 한다. 이 재현은 코드·설정 변경이나 서버 실행이 아니다.
