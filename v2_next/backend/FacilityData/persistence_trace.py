@@ -30,7 +30,7 @@ class AdmissionRejectionRange:
 
 
 class AdmissionRejectionLedger:
-    """Admission accounting owned by one serialized producer generation."""
+    """Admission accounting and bounded non-accepted ranges for one producer."""
 
     def __init__(self, *, after_sequence: int = 0) -> None:
         self._after_sequence = after_sequence
@@ -38,55 +38,70 @@ class AdmissionRejectionLedger:
         self._ranges: deque[AdmissionRejectionRange] = deque()
         self._claimed: AdmissionRejectionRange | None = None
         self._staged: deque[tuple[AdmissionRejectionRange, int]] = deque()
-        self._pending_rejections = 0
-        self._committed_rejections = 0
-        self._committed_ranges = 0
-        self._omitted = 0
-        self._first_omitted: int | None = None
-        self._last_omitted: int | None = None
+        self._pending: Counter[str] = Counter()
+        self._committed: Counter[str] = Counter()
+        self._range_counts: Counter[str] = Counter()
+        self._committed_ranges: Counter[str] = Counter()
+        self._omitted: Counter[str] = Counter()
+        self._first_omitted: dict[str, int] = {}
+        self._last_omitted: dict[str, int] = {}
         self._last_sequence = after_sequence
 
     def record(self, sequence: int, status: str, reason: str | None, generation: int) -> None:
         self._last_sequence = sequence
         self._counts[status] += 1
-        if status in ("ACCEPTED", "DISABLED"):
+        if status == "ACCEPTED":
             return
+        kind = "exclusion" if status == "DISABLED" else "rejection"
         if self._ranges:
             previous = self._ranges[-1]
             if (previous.last_sequence + 1 == sequence and previous.status == status
                     and previous.reason == reason and previous.config_generation == generation):
                 self._ranges[-1] = AdmissionRejectionRange(previous.first_sequence, sequence, status, reason, generation)
-                self._pending_rejections += 1
+                self._pending[kind] += 1
                 return
         if len(self._ranges) + len(self._staged) + int(self._claimed is not None) < ADMISSION_REJECTION_RANGE_LIMIT:
             self._ranges.append(AdmissionRejectionRange(sequence, sequence, status, reason, generation))
-            self._pending_rejections += 1
+            self._pending[kind] += 1
+            self._range_counts[kind] += 1
             return
-        self._omitted += 1
-        if self._first_omitted is None:
-            self._first_omitted = sequence
-        self._last_omitted = sequence
+        self._omitted[kind] += 1
+        self._first_omitted.setdefault(kind, sequence)
+        self._last_omitted[kind] = sequence
 
     def snapshot(self) -> dict[str, Any]:
         accounted = sum(self._counts.values())
         produced = self._last_sequence - self._after_sequence
         unaccounted = produced - accounted
         accepted, excluded = self._counts["ACCEPTED"], self._counts["DISABLED"]
-        return {"produced_count": produced, "last_producer_seq": self._last_sequence,
-                "accounted_count": accounted, "unaccounted_count": unaccounted,
-                "accepted_count": accepted, "excluded_count": excluded,
-                "rejected_count": accounted - accepted - excluded, "outcome_counts": dict(self._counts),
-                "rejection_range_count": len(self._ranges) + len(self._staged) + int(self._claimed is not None),
-                "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
-                "pending_rejection_count": self._pending_rejections,
-                "committed_rejection_count": self._committed_rejections,
-                "committed_rejection_range_count": self._committed_ranges,
-                "details_incomplete": self._omitted > 0 or unaccounted != 0, "omitted_rejection_count": self._omitted,
-                "first_omitted_producer_seq": self._first_omitted, "last_omitted_producer_seq": self._last_omitted}
+        result = {"produced_count": produced, "last_producer_seq": self._last_sequence,
+                  "accounted_count": accounted, "unaccounted_count": unaccounted,
+                  "accepted_count": accepted, "excluded_count": excluded,
+                  "rejected_count": accounted - accepted - excluded, "outcome_counts": dict(self._counts),
+                  "outcome_range_count": sum(self._range_counts.values()),
+                  "outcome_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
+                  "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
+                  "range_budget_scope": "REJECTIONS_AND_POLICY_EXCLUSIONS",
+                  "pending_outcome_count": sum(self._pending.values()),
+                  "committed_outcome_count": sum(self._committed.values()),
+                  "omitted_outcome_count": sum(self._omitted.values()),
+                  "details_incomplete": bool(self._omitted) or unaccounted != 0,
+                  "first_omitted_producer_seq": self._first_omitted.get("rejection"),
+                  "last_omitted_producer_seq": self._last_omitted.get("rejection"),
+                  "first_omitted_exclusion_seq": self._first_omitted.get("exclusion"),
+                  "last_omitted_exclusion_seq": self._last_omitted.get("exclusion")}
+        for kind in ("rejection", "exclusion"):
+            result.update({f"{kind}_range_count": self._range_counts[kind],
+                           f"pending_{kind}_count": self._pending[kind],
+                           f"committed_{kind}_count": self._committed[kind],
+                           f"committed_{kind}_range_count": self._committed_ranges[kind],
+                           f"omitted_{kind}_count": self._omitted[kind]})
+        return result
 
     def rejection_ranges(self) -> tuple[AdmissionRejectionRange, ...]:
-        return (tuple(item for item, _ in self._staged)
-                + (() if self._claimed is None else (self._claimed,)) + tuple(self._ranges))
+        ranges = (tuple(item for item, _ in self._staged)
+                  + (() if self._claimed is None else (self._claimed,)) + tuple(self._ranges))
+        return tuple(item for item in ranges if item.status != "DISABLED")
 
     def close(self, final_sequence: int) -> None:
         self._last_sequence = final_sequence
@@ -99,11 +114,16 @@ class AdmissionRejectionLedger:
     def acknowledge_range(self, claimed: AdmissionRejectionRange) -> None:
         if claimed is None or claimed is not self._claimed:
             raise ValueError("Only the currently claimed rejection range may be acknowledged")
-        count = claimed.last_sequence - claimed.first_sequence + 1
-        self._pending_rejections -= count
-        self._committed_rejections += count
-        self._committed_ranges += 1
+        self._acknowledge(claimed)
         self._claimed = None
+
+    def _acknowledge(self, claimed: AdmissionRejectionRange) -> None:
+        kind = "exclusion" if claimed.status == "DISABLED" else "rejection"
+        count = claimed.last_sequence - claimed.first_sequence + 1
+        self._pending[kind] -= count
+        self._committed[kind] += count
+        self._range_counts[kind] -= 1
+        self._committed_ranges[kind] += 1
 
     def stage_range(self, claimed: AdmissionRejectionRange, segment_sequence: int) -> None:
         if claimed is None or claimed is not self._claimed:
@@ -114,10 +134,7 @@ class AdmissionRejectionLedger:
     def acknowledge_committed(self, segment_sequence: int) -> None:
         while self._staged and self._staged[0][1] <= segment_sequence:
             claimed, _ = self._staged.popleft()
-            count = claimed.last_sequence - claimed.first_sequence + 1
-            self._pending_rejections -= count
-            self._committed_rejections += count
-            self._committed_ranges += 1
+            self._acknowledge(claimed)
 
 
 class _TraceContentUncertain(OSError):

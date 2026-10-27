@@ -766,6 +766,70 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(saved[receipt["producer_seq"]]["reason"], receipt["reason"])
                 self.assertEqual(saved[receipt["producer_seq"]]["config_generation"], receipt["config_generation"])
 
+    def test_policy_exclusion_evidence_waits_for_publish_and_preserves_failures(self) -> None:
+        for recover in (False, True):
+            with self.subTest(recover=recover), self.create_temp_dir() as tmp_dir:
+                service = self.create_service(tmp_dir, True)
+                release, failed = threading.Event(), threading.Event()
+                original_replace = Path.replace
+
+                def blocked_publish(path, target):
+                    if str(target).endswith(".trace.jsonl") and not release.is_set():
+                        failed.set()
+                        raise OSError("policy exclusion evidence unavailable")
+                    return original_replace(path, target)
+
+                with patch.object(Path, "replace", blocked_publish):
+                    service.start()
+                    try:
+                        deadline = time.monotonic() + 5
+                        while service.get_runtime_state()["persistence_trace"] is None and time.monotonic() < deadline:
+                            time.sleep(.01)
+                        self.assertIsNotNone(service.get_runtime_state()["persistence_trace"])
+                        service.apply_config(auto_save=False)
+                        receipts = [service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", value))
+                                    for value in (30.0, 31.0)]
+                        self.assertEqual([receipt["status"] for receipt in receipts], ["DISABLED", "DISABLED"])
+                        self.assertTrue(failed.wait(5))
+                        waiting = service.get_runtime_state()["admission_summary"]
+                        self.assertEqual(waiting["pending_exclusion_count"], 2)
+                        self.assertEqual(waiting["committed_exclusion_count"], 0)
+                        self.assertEqual(waiting["rejected_count"], 0)
+                        if recover:
+                            release.set()
+                            deadline = time.monotonic() + 5
+                            while time.monotonic() < deadline:
+                                if service.get_runtime_state()["admission_summary"]["pending_exclusion_count"] == 0:
+                                    break
+                                time.sleep(.01)
+                            self.assertEqual(service.get_runtime_state()["admission_summary"]["committed_exclusion_count"], 2)
+                        self.assertFalse(service.stop(timeout_sec=5))
+                        if not recover:
+                            with self.assertRaises(RuntimeError):
+                                service.start()
+                    finally:
+                        release.set()
+                        service.stop(timeout_sec=5)
+                records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                           for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+                exclusions = [record for record in records if record.get("kind") == "admission_exclusion_range"]
+                self.assertFalse(any(record.get("kind") == "admission_rejection_range" for record in records))
+                self.assertFalse(list(tmp_dir.rglob("*.csv")))
+                if recover:
+                    self.assertEqual(sum(record["last_producer_seq"] - record["first_producer_seq"] + 1
+                                         for record in exclusions), 2)
+                    ids = {seq for record in exclusions for seq in range(record["first_producer_seq"], record["last_producer_seq"] + 1)}
+                    self.assertEqual(ids, {receipt["producer_seq"] for receipt in receipts})
+                    summary = next(record for record in records if record.get("kind") == "admission_summary")
+                    self.assertEqual(summary["committed_exclusion_count"], 2)
+                    self.assertEqual(summary["committed_rejection_count"], 0)
+                    self.assertGreater(summary["trace_failure_count"], 0)
+                    self.assertEqual(summary["data_integrity_status"], "NOT_EVALUATED")
+                else:
+                    self.assertEqual(exclusions, [])
+                    self.assertFalse(any(record.get("kind") == "admission_summary" for record in records))
+                    self.assertEqual(service.get_runtime_state()["admission_summary"]["pending_exclusion_count"], 2)
+
     def test_admission_summary_tracks_only_active_producer_generation(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, False)
@@ -785,6 +849,15 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 service.stop(timeout_sec=5)
             after = service.enqueue_detailed(valid)
             self.assertEqual(after["status"], "REJECTED_CLOSED")
+            records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            exclusions = [record for record in records if record.get("kind") == "admission_exclusion_range"]
+            self.assertEqual(len(exclusions), 1, "policy exclusions have no durable producer-ID range")
+            self.assertEqual(exclusions[0]["first_producer_seq"], receipts[0]["producer_seq"])
+            self.assertEqual(exclusions[0]["last_producer_seq"], receipts[1]["producer_seq"])
+            self.assertEqual(exclusions[0]["status"], "DISABLED")
+            self.assertEqual(exclusions[0]["reason"], "auto_save_disabled")
+            self.assertEqual(exclusions[0]["config_generation"], receipts[0]["config_generation"])
             summary = service.get_runtime_state().get("admission_summary", {})
             self.assertEqual(summary.get("produced_count"), 7,
                              "active admission outcomes were not accounted by producer generation")
@@ -797,6 +870,8 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(summary["rejection_range_count"], 0)
             self.assertEqual(summary["pending_rejection_count"], 0)
             self.assertEqual(summary["committed_rejection_count"], 3)
+            self.assertEqual(summary["committed_exclusion_count"], 2)
+            self.assertEqual(summary["pending_exclusion_count"], 0)
             self.assertFalse(summary["details_incomplete"])
             outcomes = service.get_runtime_state()["csv_persistence_outcomes"]
             self.assertEqual(outcomes["accepted_event_count"], 2)

@@ -588,8 +588,10 @@ class CSVLoggerService:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
                 if self._pending_events:
                     raise RuntimeError("CSV output evidence remains unresolved for the previous generation.")
-                if self._admission_ledger.snapshot()["pending_rejection_count"]:
-                    raise RuntimeError("CSV rejection evidence remains unresolved for the previous generation.")
+                admission = self._admission_ledger.snapshot()
+                if (admission["pending_rejection_count"]
+                        or (self._persistence_trace is not None and admission["pending_exclusion_count"])):
+                    raise RuntimeError("CSV admission evidence remains unresolved for the previous generation.")
                 self._trace_start_seq = self._producer_seq
                 self._admission_ledger = AdmissionRejectionLedger(after_sequence=self._producer_seq)
                 self._sink_accepted_counts.clear()
@@ -3594,15 +3596,16 @@ class CSVLoggerService:
         committed = trace.snapshot()["committed_segment_seq"]
         with self._runtime_lock:
             self._admission_ledger.acknowledge_committed(committed)
-            count = self._admission_ledger.snapshot()["rejection_range_count"]
+            count = self._admission_ledger.snapshot()["outcome_range_count"]
         # Limit one worker turn even while the producer keeps rejecting inputs.
         for _ in range(min(count, TRACE_SEGMENT_RECORD_LIMIT)):
             with self._runtime_lock:
                 claimed = self._admission_ledger.claim_range()
             if claimed is None:
                 break
-            token = trace.append({"kind": "admission_rejection_range",
-                                  "contract_version": "CSV_ADMISSION_REJECTIONS_V1",
+            excluded = claimed.status == "DISABLED"
+            token = trace.append({"kind": "admission_exclusion_range" if excluded else "admission_rejection_range",
+                                  "contract_version": "CSV_ADMISSION_EXCLUSIONS_V1" if excluded else "CSV_ADMISSION_REJECTIONS_V1",
                                   "first_producer_seq": claimed.first_sequence,
                                   "last_producer_seq": claimed.last_sequence,
                                   "status": claimed.status, "reason": claimed.reason,
@@ -3687,7 +3690,7 @@ class CSVLoggerService:
                 break
             state = trace.snapshot()
             with self._runtime_lock:
-                pending = self._admission_ledger.snapshot()["pending_rejection_count"]
+                pending = self._admission_ledger.snapshot()["pending_outcome_count"]
                 pending += len(self._pending_csv_failure_evidence)
             if not state["pending_records"] and not pending:
                 break
@@ -3699,7 +3702,7 @@ class CSVLoggerService:
             sink_outcomes = self._csv_persistence_outcomes_locked()
             sink_outcomes["coverage"] = "TERMINAL_REQUIRED_SINK_COUNTS"
             failure_evidence_pending = bool(self._pending_csv_failure_evidence)
-        if state["pending_records"] or admission["pending_rejection_count"] or failure_evidence_pending:
+        if state["pending_records"] or admission["pending_outcome_count"] or failure_evidence_pending:
             return False  # A terminal summary must not precede its retained ranges.
         summary = dict(admission, kind="admission_summary", contract_version="CSV_ADMISSION_SUMMARY_V1",
                        after_producer_seq=self._trace_start_seq, coverage="PRODUCER_ADMISSION_COUNTS_ONLY",
@@ -3719,7 +3722,7 @@ class CSVLoggerService:
                     or state["failure_count"] or state["incomplete"]
                     or state["committed_segment_seq"] < summary_token
                     or not sink_outcomes["counts_reconciled"]
-                    or admission["pending_rejection_count"] or admission["details_incomplete"])
+                    or admission["pending_outcome_count"] or admission["details_incomplete"])
 
     def _csv_persistence_outcomes_locked(self) -> dict[str, Any]:
         accepted = self._admission_ledger.snapshot()["accepted_count"]
