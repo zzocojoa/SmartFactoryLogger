@@ -720,11 +720,12 @@ def _spot_image_capture_failure_evidence(
 
 
 def _probe_spot_image_storage_if_due(writer: SpotImageCaptureWriter) -> None:
+    captured_at = time.time()
     if (_spot_image_capture_mode() != "off" and _SPOT_IMAGE_CAPTURE_QUEUE.empty()
             and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
             and not _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()
-            and writer.destination_probe_due(now_monotonic=time.monotonic())):
-        writer.probe_storage_destinations(captured_at=time.time())
+            and writer.destination_probe_due(captured_at=captured_at, now_monotonic=time.monotonic())):
+        writer.probe_storage_destinations(captured_at=captured_at)
 
 
 def _spot_image_capture_worker() -> None:

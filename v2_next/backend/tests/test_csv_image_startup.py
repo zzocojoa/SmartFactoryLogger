@@ -6,6 +6,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -258,6 +259,41 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertEqual(len({call[1] for call in calls}), 1)
                 self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
                 self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
+        finally:
+            self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
+    def test_image_owner_probes_new_utc_day_without_capture(self):
+        wall = [datetime(2026, 10, 27, 23, 59, 30, tzinfo=timezone.utc).timestamp()]
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        calls = []
+        condition = threading.Condition()
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            with condition:
+                calls.append((writer, threading.current_thread(), result))
+                condition.notify_all()
+            return result
+
+        def wait_for_count(count):
+            with condition:
+                return condition.wait_for(lambda: len(calls) >= count, timeout=.8)
+
+        try:
+            with patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                    patch.object(spot_api.time, 'time', side_effect=lambda: wall[0]):
+                self.request_initializer()
+                self.assertTrue(wait_for_count(1))
+                wall[0] += 60
+                self.assertTrue(wait_for_count(2), 'new UTC day reused the previous directory probe')
+                wall[0] -= 60
+                self.assertTrue(wait_for_count(3), 'backward calendar change reused a different directory probe')
+                self.assertEqual([Path(next(item['destination_path'] for item in call[2]
+                                           if item['sink_id'] == 'image_jpeg')).name for call in calls],
+                                 ['27', '28', '27'])
+                self.assertTrue(all(item['probe_status'] == 'available' for call in calls for item in call[2]))
+                self.assertTrue(all(call[0] is calls[0][0] and call[1] is calls[0][1] for call in calls))
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
         finally:
             self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
 

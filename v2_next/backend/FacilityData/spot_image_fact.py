@@ -241,9 +241,13 @@ class SpotImageCaptureWriter:
                     "retry_delay_sec": self._destination_probe_retry_delay,
                     "failure_count": self._destination_probe_failure_count}
 
-    def destination_probe_due(self, *, now_monotonic: float) -> bool:
+    def destination_probe_due(self, *, captured_at: float, now_monotonic: float) -> bool:
+        day = datetime.fromtimestamp(captured_at, timezone.utc)
+        image_directory = self.capture_root / day.strftime("%Y") / day.strftime("%m") / day.strftime("%d")
+        expected = {("image_fact", str(self.log_path.absolute())), ("image_jpeg", str(image_directory.absolute()))}
         with self._destination_probe_lock:
-            return (not self._destination_probe_results or (
+            observed = {(item["sink_id"], item["destination_path"]) for item in self._destination_probe_results}
+            return (observed != expected or (
                 self._destination_probe_retry_at is not None and now_monotonic >= self._destination_probe_retry_at))
 
     @property
