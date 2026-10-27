@@ -758,6 +758,150 @@ class CsvImageStartupTests(unittest.TestCase):
         finally:
             spot_api.stop_spot_image_capture_writer(timeout_sec=2)
 
+    def test_initializer_retry_caps_delay_and_stops_on_shutdown(self):
+        failed = threading.Event()
+        resolve = Path.resolve
+        fact_path = self.root / spot_image_fact.SPOT_IMAGE_FACT_FILENAME
+        clock, attempts = [100.0], []
+
+        def resolve_path(path, *args, **kwargs):
+            if path == fact_path:
+                attempts.append((clock[0], threading.current_thread()))
+                failed.set()
+                raise PermissionError('constructor still unavailable')
+            return resolve(path, *args, **kwargs)
+
+        try:
+            with patch.object(Path, 'resolve', resolve_path), \
+                    patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                    patch.object(spot_api.time, 'monotonic', side_effect=lambda: clock[0]):
+                for deadline in (100, 101, 103, 107, 115, 131, 161, 191):
+                    if attempts:
+                        previous = spot_api._spot_image_capture_thread
+                        clock[0] = deadline - .01
+                        spot_api._activate_spot_image_storage()
+                        self.request_initializer()
+                        self.assertIs(spot_api._spot_image_capture_thread, previous)
+                    clock[0] = deadline
+                    failed.clear()
+                    spot_api._activate_spot_image_storage()
+                    self.assertTrue(failed.wait(.8))
+                    owner = spot_api._spot_image_capture_thread
+                    owner.join(.5)
+                    self.assertFalse(owner.is_alive())
+                self.assertEqual([when for when, _ in attempts], [100, 101, 103, 107, 115, 131, 161, 191])
+                self.assertEqual(len({owner for _, owner in attempts}), 8)
+                self.assertFalse(spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=.1))
+                clock[0] = 1000
+                spot_api._activate_spot_image_storage()
+                self.request_initializer()
+                spot_api._start_spot_image_capture_worker(force=True)
+                self.assertIs(spot_api._spot_image_capture_thread, owner)
+                self.assertEqual(len(attempts), 8)
+                self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
+        finally:
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
+
+    def test_initializer_restart_waits_for_previous_owner_cleanup(self):
+        cleaning, release, recovered = threading.Event(), threading.Event(), threading.Event()
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        close = SpotImageCaptureWriter.close_retention_scan
+        clock, calls = [100.0], []
+        changed_path = self.root / 'next-generation'
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            calls.append((writer.log_path, threading.current_thread()))
+            if len(calls) == 1:
+                raise OSError('initializer failed after obtaining an owner resource')
+            recovered.set()
+            return result
+
+        def close_owner(writer):
+            if writer.log_path == self.root:
+                cleaning.set()
+                if not release.wait(5):
+                    raise TimeoutError('owner cleanup was not released')
+            close(writer)
+
+        try:
+            with patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                    patch.object(SpotImageCaptureWriter, 'close_retention_scan', close_owner), \
+                    patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                    patch.object(spot_api.time, 'monotonic', side_effect=lambda: clock[0]):
+                spot_api._activate_spot_image_storage()
+                self.assertTrue(cleaning.wait(.8))
+                owner = spot_api._spot_image_capture_thread
+                clock[0] = 101
+                with patch.object(spot_api.config, 'LOG_PATH', changed_path):
+                    for _ in range(3):
+                        spot_api._activate_spot_image_storage()
+                    self.assertIs(spot_api._spot_image_capture_thread, owner)
+                    self.assertTrue(owner.is_alive())
+                    self.assertEqual(len(calls), 1)
+                    release.set()
+                    owner.join(.5)
+                    self.assertFalse(owner.is_alive())
+                    spot_api._activate_spot_image_storage()
+                    self.assertTrue(recovered.wait(.8))
+                    self.assertIsNot(spot_api._spot_image_capture_thread, owner)
+                    self.assertEqual([path for path, _ in calls], [self.root, changed_path])
+                    self.assertEqual(spot_api._spot_image_capture_writer.log_path, changed_path)
+        finally:
+            release.set()
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
+
+    def test_poll_restarts_failed_image_initializer_without_capture(self):
+        recovered = threading.Event()
+        resolve = Path.resolve
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        fact_path = self.root / spot_image_fact.SPOT_IMAGE_FACT_FILENAME
+        owners = []
+
+        def resolve_path(path, *args, **kwargs):
+            if path == fact_path:
+                owners.append(threading.current_thread())
+                if len(owners) == 1:
+                    raise PermissionError('first constructor access fails')
+            return resolve(path, *args, **kwargs)
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            recovered.set()
+            return result
+
+        async def exercise():
+            try:
+                await asyncio.wait_for(spot_api.start_spot_poll_loop(), timeout=.5)
+                self.assertTrue(await asyncio.to_thread(recovered.wait, 3),
+                                'service tick did not restart failed initializer')
+                self.assertEqual(len(owners), 2)
+                self.assertFalse(owners[0].is_alive())
+                self.assertIs(spot_api._spot_image_capture_thread, owners[1])
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
+            finally:
+                task = spot_api._spot_poll_task
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                spot_api.stop_spot_image_capture_writer(timeout_sec=2)
+
+        with patch.object(Path, 'resolve', resolve_path), \
+                patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                patch.object(spot_api.config, 'SPOT_OBSERVATION_FACT_ENABLED', False), \
+                patch.object(spot_api.config, 'SPOT_URL', ''), \
+                patch.object(spot_api.config, 'SPOT_INTERNAL_TEMPERATURE_URL', ''), \
+                patch.object(spot_api, '_get_http_client', return_value=None), \
+                patch.object(spot_api, '_spot_poll_interval_sec', return_value=.01), \
+                patch.object(spot_api, '_start_spot_http_transport'), \
+                patch.object(spot_api, '_spot_poll_task', None), \
+                patch.object(spot_api, '_spot_poll_running', False), \
+                patch.object(spot_api, '_img_accepting_requests', False), \
+                patch.object(spot_api, '_spot_diagnostic_journal_shutdown_started', False):
+            asyncio.run(exercise())
+
     def test_initialization_failure_is_not_counted_as_a_lost_capture(self):
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
                 patch.object(SpotImageCaptureWriter, '_initialize_manifest_state',
