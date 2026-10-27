@@ -225,17 +225,20 @@ def _file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
-def _admitted_destination_issues(database: sqlite3.Connection, record: dict[str, Any]) -> set[str]:
+def _admitted_csv_contract(database: sqlite3.Connection, record: dict[str, Any]) -> tuple[dict[str, Any] | None, set[str]]:
     sequence = record.get("producer_seq")
     if type(sequence) is not int or sequence < 1:
-        return {"missing_csv_admission_contract"}
+        return None, {"missing_csv_admission_contract"}
     admissions = database.execute("SELECT body FROM csv_contracts WHERE sequence=? LIMIT 2",
                                   (str(sequence),)).fetchall()
     if not admissions:
-        return {"missing_csv_admission_contract"}
+        return None, {"missing_csv_admission_contract"}
     if len(admissions) != 1:
-        return {"ambiguous_csv_admission_contract"}
-    contract = json.loads(admissions[0][0])
+        return None, {"ambiguous_csv_admission_contract"}
+    return json.loads(admissions[0][0]), set()
+
+
+def _admitted_destination_issues(contract: dict[str, Any], record: dict[str, Any]) -> set[str]:
     destination, filename = contract.get("admitted_log_dir"), record.get("file_path")
     if (not isinstance(destination, str) or not Path(destination).is_absolute()
             or not isinstance(filename, str) or not Path(filename).is_absolute()):
@@ -278,7 +281,34 @@ def _read_csv_record(handle: BinaryIO, length: int, *, header: bool = False) -> 
         return row
 
 
-def _csv_output_content_issues(handle: BinaryIO, record: dict[str, Any]) -> set[str]:
+def _csv_format_issues(record: dict[str, Any], contract: dict[str, Any] | None,
+                       columns: list[str], values: list[str]) -> set[str]:
+    if contract is None:
+        return {"missing_csv_admission_contract"}
+    if record.get("sink_id") == "csv_v1":
+        expected_columns = contract.get("csv_v1_columns")
+        if (not isinstance(expected_columns, list) or not expected_columns
+                or any(not isinstance(column, str) for column in expected_columns)):
+            return {"invalid_csv_format_contract"}
+        return set() if expected_columns == columns else {"csv_header_contract_mismatch"}
+    if record.get("sink_id") != "csv_v2":
+        return {"invalid_csv_format_contract"}
+    expected_hash, schema = contract.get("csv_v2_column_hash"), contract.get("csv_v2_schema_version")
+    if (not isinstance(expected_hash, str) or len(expected_hash) != 64
+            or any(char not in "0123456789abcdef" for char in expected_hash) or not isinstance(schema, str)):
+        return {"invalid_csv_format_contract"}
+    if schema not in {"2.3.1", "2.4.2", "2.5.2"}:
+        return {"unsupported_csv_schema"}
+    # The header contract uses ASCII-escaped JSON, unlike the UTF-8 canonical
+    # row-content contract. Recompute it from actual columns, not a row receipt.
+    actual_hash = hashlib.sha256(json.dumps(columns, ensure_ascii=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    issues = set() if actual_hash == expected_hash else {"csv_header_contract_mismatch"}
+    if columns.count("schema_version") != 1 or values[columns.index("schema_version")] != schema:
+        issues.add("csv_schema_version_mismatch")
+    return issues
+
+
+def _csv_output_content_issues(handle: BinaryIO, record: dict[str, Any], contract: dict[str, Any] | None) -> set[str]:
     if record.get("output_contract_version") != "CSV_ROW_CONTENT_V1":
         return {"unsupported_csv_output_contract"}
     expected = record.get("output_payload_hash")
@@ -298,12 +328,16 @@ def _csv_output_content_issues(handle: BinaryIO, record: dict[str, Any]) -> set[
         for piece in encoder.iterencode(content):
             for start in range(0, len(piece), CSV_READ_CHUNK_BYTES):
                 digest.update(piece[start:start + CSV_READ_CHUNK_BYTES].encode("utf-8"))
-        return set() if digest.hexdigest() == expected else {"csv_output_content_hash_mismatch"}
+        issues = _csv_format_issues(record, contract, columns, values)
+        if digest.hexdigest() != expected:
+            issues.add("csv_output_content_hash_mismatch")
+        return issues
     except (UnicodeError, ValueError, csv.Error):
         return {"invalid_csv_output_record"}
 
 
-def _csv_row_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> tuple[set[str], set[str]]:
+def _csv_row_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]],
+                    contract: dict[str, Any] | None) -> tuple[set[str], set[str]]:
     content_issues: set[str] = set()
     integer_fields = ("row_byte_offset", "row_byte_length", "file_device", "file_id")
     if any(type(record.get(field)) is not int or record[field] < 0 for field in integer_fields):
@@ -339,7 +373,7 @@ def _csv_row_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) 
                 actual.update(chunk)
                 remaining -= len(chunk)
             if actual.hexdigest() == digest:
-                content_issues.update(_csv_output_content_issues(handle, record))
+                content_issues.update(_csv_output_content_issues(handle, record, contract))
             after = os.fstat(handle.fileno())
             current = resolved_path.stat()
             if _file_signature(before) != _file_signature(after) or _file_signature(after) != _file_signature(current):
@@ -454,8 +488,11 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     for (body,) in database.execute("SELECT body FROM csv_rows"):
         row = json.loads(body)
         checked_rows += 1
-        destination_issues.update(_admitted_destination_issues(database, row))
-        row_byte_issues, row_content_issues = _csv_row_issues(row, roots)
+        contract, contract_issues = _admitted_csv_contract(database, row)
+        destination_issues.update(contract_issues)
+        if contract is not None:
+            destination_issues.update(_admitted_destination_issues(contract, row))
+        row_byte_issues, row_content_issues = _csv_row_issues(row, roots, contract)
         byte_issues.update(row_byte_issues)
         content_issues.update(row_content_issues)
     if not paths:

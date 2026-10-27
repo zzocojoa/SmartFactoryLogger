@@ -67,6 +67,82 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_unadmitted_csv_header(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                self.assertEqual(service.enqueue_detailed(
+                    self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"], [])
+            originals = {path: path.read_bytes() for path in paths}
+            data_files = {path: path.read_bytes() for path in tmp_dir.rglob("*.csv")}
+            for path, contents in originals.items():
+                amended = []
+                for line in contents.splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record.get("kind") == "csv_admission":
+                        line = (json.dumps(dict(record, csv_v2_column_hash="0" * 64)) + "\n").encode()
+                    amended.append(line)
+                path.write_bytes(b"".join(amended))
+            altered = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_header_contract_mismatch", result["issues"],
+                          "actual CSV header was not compared with the admitted contract")
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["output_content_status"], "INCOMPLETE")
+            self.assertEqual({path: path.read_bytes() for path in paths}, altered)
+            self.assertEqual({path: path.read_bytes() for path in data_files}, data_files)
+            records = [json.loads(line) for contents in originals.values() for line in contents.splitlines()]
+            admission = next(record for record in records if record.get("kind") == "csv_admission")
+            changed_columns = list(admission["csv_v1_columns"])
+            changed_columns[0] = "unadmitted_header"
+            for changes, issue in [({"csv_v1_columns": changed_columns}, "csv_header_contract_mismatch"),
+                                   ({"csv_v1_columns": "not-a-list"}, "invalid_csv_format_contract"),
+                                   ({"csv_v2_column_hash": True}, "invalid_csv_format_contract"),
+                                   ({"csv_v2_schema_version": None}, "invalid_csv_format_contract"),
+                                   ({"csv_v2_schema_version": "future"}, "unsupported_csv_schema"),
+                                   ({"csv_v2_schema_version": "2.4.2"}, "csv_schema_version_mismatch")]:
+                with self.subTest(changes=changes):
+                    for path, contents in originals.items():
+                        amended = []
+                        for line in contents.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record == admission:
+                                line = (json.dumps(dict(record, **changes)) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            for path, contents in originals.items():
+                path.write_bytes(contents)
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["output_content_status"], "VERIFIED")
+        for operational, hardening, schema in [(True, False, "2.4.2"), (True, True, "2.5.2")]:
+            with self.subTest(schema=schema), self.create_temp_dir() as tmp_dir:
+                service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+                service.apply_config(csv_v2_operational_fields_enabled=operational,
+                                     csv_v2_temperature_hardening_enabled=hardening)
+                service.start()
+                try:
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+                finally:
+                    self.assertTrue(service.stop(timeout_sec=5))
+                paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+                records = [json.loads(line) for path in paths for line in path.read_bytes().splitlines()]
+                self.assertEqual(next(record["csv_v2_schema_version"] for record in records
+                                      if record.get("kind") == "csv_admission"), schema)
+                result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                self.assertEqual(result["issues"], [])
+                self.assertEqual(result["output_content_status"], "VERIFIED")
+
     def test_validator_rejects_wrong_admitted_destination(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             before, after = tmp_dir / "before", tmp_dir / "after"
