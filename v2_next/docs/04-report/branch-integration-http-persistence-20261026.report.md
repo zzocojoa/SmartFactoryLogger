@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV 접수·종료·독립 검산, 이미지 재시도·원본 보존·행/읽기 상한, 독립 저장 압력 제어기를 구현했다. 제어기는 실제 수집/API/화면에 미연결이며, 전체 fact/JPEG 대조·남은 복구/작업 공간 예산·7단계/17명세 전체는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend는 `3e89f937`의 1,108중1,107통과·F01미제공1skip·exit0. 최신 관련260시험(`b608eed7`, 86.373초) 및 Ruff/mypy는 exit0. 최신 HEAD 전체 health·새 설치본은 미검증 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV/이미지 저장·복구/독립 검산과 압력 구성요소, 이미지 gate·API/CORS·화면 헤더 parser 구현. 필수 writer 입력·monitor 서비스 시작, 주기 진단·PRESSURED·화면 timer, 전체 fact/JPEG/작업 공간·7단계/17명세는 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend는 `3e89f937`의 1,108중1,107통과·F01미제공1skip·exit0. 최신 관련265시험(`dc66f6d0`,91.049초), frontend Node9/Vitest443, Ruff/mypy·화면 타입/린트 exit0. 최신 전체 health·새 설치본은 미검증 |
 
 ## 보존과 통합
 
@@ -1046,3 +1046,19 @@ off→on·목적지/날짜 변경·probe backoff와 설정 세대별 결합, CSV
 남은 범위: 초기화 실패 후 종료 확인·backoff 재기동, writer 교체를 넘는 목적지별 이력, 실제 본 파일/CSV/fact 필수 출력 가용성·예정 시각, 압력 제어기의 실제 수집/API/화면 연결, 전체 fact/JPEG 대조·작업 공간 상한, r4 7단계/17시나리오, 최종 전체 health·새 설치본·master 병합. FR01/RR02 전체 통과나 목표 완료로 집계하지 않는다. 목표1~4 완료,5~7 부분 완료를 유지한다.
 
 별도 보안 검토 도구는 없어 기존 소유 파일 정리 범위, poll/API 파일 I/O 없음, 단일 worker·대기 자료 원래 경로 보존, 상태 수집 지연의 보수적 처리와 원문 해시를 직접 검토했다. 서버·설치본·설정·백업·운영/롤백 기준은 변경하지 않았다. 원격 동기화 결과는 같은 증거 폴더의 별도 기록으로 남긴다.
+
+
+## 2026-10-27 이미지 발송 압력 gate·캐시와 응답 계약
+
+- `6ec753eb`: 이미지 task가 장치 잠금을 기다린 뒤 transport 호출 직전에 BLOCKED 상태를 재확인한다. shared task와 waiter는 무캐시일 때 `storage_pressure` 503을 받고 센서 실패 계수는 늘리지 않는다.
+- `ccdf78db`: 같은 센서의 검증된 캐시 JPEG는 TTL 만료 후에도 원래 취득 시각·age로 200 반환한다. 다른 센서의 캐시로 대체하지 않는다. 정상 응답은 suppression 0, 억제 응답은1·storage_pressure·profile별 양의 정수 Retry-After 초를 전달한다. 원래 JPEG를 다시 취득·저장한 것으로 집계하지 않는다.
+- `e1979b12`: 기존 image_upstream_request_count(task 의미)는 유지하고 image_http_dispatch_count와 image_storage_suppressed_task_count를 별도로 게시한다. 하나의 shared task를 두 waiter가 기다려도 미발송 억제는1회다. 복구 후 실제 발송이 재개되는 것을 확인했다.
+- `4fbc767c`, `067d6bad`: 실제503 HTTP 응답의 CORS 공개 헤더를 확인했고, 캐시200 헤더는 route 호출로 별도 검사했다. 프런트엔드 타입/parser에서 누락·잘못된 flag는 unknown, 비억제/알 수 없는 사유의 retry는 null이며 양의 안전 정수 초만 받는다. 일반 오류 재시도와 분리된 압력 timer는 아직 연결하지 않았다.
+- `d88ad315`: BLOCKED 전 이미 dispatch한 요청은 취소·미발송으로 재분류하지 않고 실제 JPEG와 비억제 메타데이터로 완료하는 후속 회귀다. 새로운 행동 RED로 세지 않는다.
+- `dc66f6d0`: 조회 잠금 대기 중 A→B로 센서가 바뀌면 이전 A 캐시를 반환하던 경계를 실제200≠503으로 재현했다. 억제 캐시를 선택하는 순간 현재 URL을 다시 확인하도록 수정했다.
+
+6개 행동 RED→GREEN과 이미 발송된 요청의 후속 회귀를 포함한13실행, 프런트엔드 전체 타입·린트·시험3명령의 전체32로그와 종료 코드·SHA256을 보존했다. 최신 관련 backend265시험(91.049초) exit0, frontend Node9/Vitest443(42파일)·타입·lint exit0, backend Ruff·기본 mypy12파일·diff 검사 exit0이다. 소스6개/고정 원문4문서 검산과 명령은 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-image-api/verification.json`에 연결한다.
+
+범위 제한: 시험은 실제 pressure monitor·driver·API에 제어된 메모리 저장 상태와 외부 transport fixture를 공급했다. 운영 lifecycle은 아직 monitor를 생성·시작하지 않으며 `_storage_pressure_monitor`는 기본 None이다. 따라서 실제 운영의 저장 장애 억제 전체 완료를 주장하지 않는다. 필수 writer 상태 제공/예정 시각, 초기화 실패 재기동, PRESSURED 감속과 주기 진단/journal, 화면 압력 timer·visibility·callback 소유권, 전체 fact/JPEG/작업 공간, r4 17시나리오와 최종 전체 health·설치본·master가 남는다. 기존 임계값·전체 목표를 줄이지 않았다.
+
+직전 턴은 코드/검증/원격 반영을 마친 PROGRESS다. 이번에도 위 구성요소를 구현·검증했으며 원래 목표1~4 완료·5~7 부분 완료를 유지한다. 서버·설치본·설정·백업은 변경하지 않았다. 별도 보안 검토 도구는 없어 새 응답에 경로/인증정보를 넣지 않는지, 캐시 센서 일치·양수 retry·발송 전 잠금 경계·기존 오류 분류 보존을 직접 검토했다. 원격 동기화 결과는 같은 증거 폴더에 별도로 기록한다.
