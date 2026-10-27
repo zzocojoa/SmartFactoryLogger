@@ -26,11 +26,27 @@ const parseFiniteNumber = (rawValue: string | null): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const resolveStorageMetadata = (headers: Headers): Pick<SpotImageResponseMetadata,
+  'image_upstream_suppressed' | 'suppression_reason' | 'retry_after_sec'> => {
+  const flag = headers.get('X-Spot-Image-Upstream-Suppressed');
+  const suppressed = flag === '1' ? true : flag === '0' ? false : null;
+  const reason = suppressed === true && headers.get('X-Spot-Image-Suppression-Reason') === 'storage_pressure'
+    ? 'storage_pressure' : null;
+  const rawRetry = reason ? headers.get('Retry-After') : null;
+  const retry = rawRetry !== null && /^\d+$/.test(rawRetry) ? Number(rawRetry) : null;
+  return {
+    image_upstream_suppressed: suppressed,
+    suppression_reason: reason,
+    retry_after_sec: retry !== null && Number.isSafeInteger(retry) && retry > 0 ? retry : null,
+  };
+};
+
 export const resolveSpotImageResponseMetadata = (
   headers: Headers,
   receivedAt: number,
   latencyMs: number
 ): SpotImageResponseMetadata => ({
+  ...resolveStorageMetadata(headers),
   source: headers.get('X-Spot-Image-Source'),
   captured_at: normalizeSpotImageCapturedAt(headers.get('X-Spot-Image-At')),
   age_ms: parseFiniteNumber(headers.get('X-Spot-Image-Age-Ms')),
