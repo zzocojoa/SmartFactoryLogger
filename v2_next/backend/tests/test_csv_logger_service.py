@@ -2612,6 +2612,67 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 rows = list(csv.DictReader(stream))
             self.assertEqual(len(rows), 20)
 
+    def test_trace_destination_recovers_without_data_or_ui_requests(self) -> None:
+        original_replace = os.replace
+        blocked, attempts = [False], []
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+
+            def replace(source, target, *args, **kwargs):
+                path = Path(source)
+                if path.parent.parent.name == ".sfl_trace" and path.name.startswith(".sfl-storage-probe-"):
+                    attempts.append(threading.current_thread().name)
+                    if blocked[0]:
+                        raise PermissionError("injected trace directory replacement denial")
+                return original_replace(source, target, *args, **kwargs)
+
+            def wait_for(predicate):
+                state = None
+                deadline = time.perf_counter() + 4
+                while time.perf_counter() < deadline:
+                    state = service.get_runtime_state()["persistence_trace"]
+                    if state is not None and predicate(state):
+                        break
+                    time.sleep(.01)
+                return state
+
+            with patch.object(os, "replace", replace):
+                service.start()
+                try:
+                    initial = wait_for(lambda state: state["committed_segment_seq"] >= 1
+                                       and state["pending_records"] == 0)
+                    self.assertIsNotNone(initial)
+                    self.assertEqual(initial["current_storage_availability"], "available")
+                    originals = {path: path.read_bytes() for path in tmp_dir.rglob("*.trace.jsonl")}
+                    self.assertTrue(originals)
+                    blocked[0] = True
+                    failed = wait_for(lambda state: state["current_storage_availability"] == "blocked")
+                    self.assertEqual(failed["current_storage_availability"], "blocked",
+                                     "idle trace destination loss was not detected")
+                    self.assertEqual(failed["pending_records"], 0)
+                    self.assertEqual(failed["availability_scope"], "directory_probe")
+                    self.assertGreaterEqual(failed["probe_failure_count"], 1)
+                    blocked[0] = False
+                    recovered = wait_for(lambda state: state["current_storage_availability"] == "available")
+                    self.assertEqual(recovered["current_storage_availability"], "available")
+                    self.assertEqual(recovered["probe_failure_count"], failed["probe_failure_count"])
+                    self.assertEqual(recovered["last_success_monotonic"], initial["last_success_monotonic"],
+                                     "directory probe was reported as trace publication")
+                    self.assertEqual(recovered["committed_segment_seq"], initial["committed_segment_seq"])
+                    self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+                    self.assertEqual(set(attempts), {"CSVLogger"})
+                    self.assertEqual(service.get_runtime_state()["pending_event_count"], 0)
+                finally:
+                    blocked[0] = False
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            completed_attempts = len(attempts)
+            with patch.object(Path, "open", side_effect=AssertionError("snapshot opened a file")):
+                self.assertEqual(service.get_runtime_state()["persistence_trace"]["pending_records"], 0)
+            time.sleep(.25)
+            self.assertEqual(len(attempts), completed_attempts)
+            self.assertEqual(list(tmp_dir.rglob(".sfl-storage-probe-*")), [])
+
     def test_csv_probe_cleanup_failure_requires_manual_recovery(self) -> None:
         original_unlink = Path.unlink
         clock, retained = [100.0], []

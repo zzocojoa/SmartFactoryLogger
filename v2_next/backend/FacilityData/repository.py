@@ -4206,6 +4206,8 @@ class CSVLoggerService:
                 self._refresh_csv_storage_probe()
                 self._drain_csv_processing_failures()
                 self._drain_admission_rejections()
+                if self.running and self._persistence_trace is not None:
+                    self._persistence_trace.probe_storage()
                 item: Optional[FactoryData] = None
                 envelope: Optional[CSVEventEnvelope] = None
                 if deferred_item is not None:

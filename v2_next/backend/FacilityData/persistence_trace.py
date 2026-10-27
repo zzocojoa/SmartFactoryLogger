@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 from uuid import uuid4
 from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
 from backend.FacilityData.freshness import clock_domain_id
+from backend.FacilityData.spot_image_fact import _probe_storage_directory
 
 TRACE_SEGMENT_RECORD_LIMIT = 1000
 TRACE_PENDING_SEGMENT_LIMIT = 2
@@ -18,6 +19,7 @@ TRACE_SEGMENT_BYTE_LIMIT = 1024**2
 TRACE_PENDING_BYTE_LIMIT = 2 * TRACE_SEGMENT_BYTE_LIMIT
 TRACE_READBACK_BYTES = 4096
 TRACE_FLUSH_INTERVAL_SEC = 1.0
+TRACE_PROBE_WORKSPACE_BYTES = 128
 ADMISSION_REJECTION_RANGE_LIMIT = 4096
 
 
@@ -175,8 +177,15 @@ class PersistenceTraceWriter:
         self._next_retry_monotonic: float | None = None
         self._retry_delay_seconds = 1.0
         self._current_storage_availability = "unknown"
+        self._availability_scope = "last_trace_publication"
         self._availability_checked_monotonic: float | None = None
         self._last_success_monotonic: float | None = None
+        self._next_probe_monotonic = 0.0
+        self._probe_failure_count = 0
+        self._probe_failed = False
+        self._probe_retry_delay_seconds = 1.0
+        self._last_probe_success_monotonic: float | None = None
+        self._last_probe_error: str | None = None
         self._processing_bytes = 0
         self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
@@ -297,6 +306,44 @@ class PersistenceTraceWriter:
         if not self._matches(final, segment):
             raise _TraceContentUncertain("trace_published_content_mismatch")
 
+    def probe_storage(self) -> None:
+        """Owner-only idle destination check; pending publications take priority."""
+        with self._writer_lock:
+            with self._lock:
+                if (self._manual_recovery_required or self._segments
+                        or self.clock() < self._next_probe_monotonic):
+                    return
+                self._processing_bytes = TRACE_PROBE_WORKSPACE_BYTES
+            error: OSError | RuntimeError | None = None
+            try:
+                _probe_storage_directory(self.root)
+            except (OSError, RuntimeError) as exc:
+                error = exc
+            finally:
+                with self._lock:
+                    self._processing_bytes = 0
+            with self._lock:
+                checked = self.clock()
+                self._availability_scope = "directory_probe"
+                self._availability_checked_monotonic = checked
+                self._current_storage_availability = "blocked" if error else "available"
+                if error is not None:
+                    self._probe_failure_count += 1
+                    self._last_probe_error = type(error).__name__
+                    self._probe_retry_delay_seconds = (min(30.0, self._probe_retry_delay_seconds * 2)
+                                                       if self._probe_failed else 1.0)
+                    self._probe_failed = True
+                    # Uncertain cleanup must not accumulate more probe files.
+                    if isinstance(error, RuntimeError):
+                        self._manual_recovery_required = True
+                        self._incomplete = True
+                        self._last_error = "trace_probe_manual_recovery"
+                else:
+                    self._probe_failed = False
+                    self._probe_retry_delay_seconds = 1.0
+                    self._last_probe_success_monotonic = checked
+                self._next_probe_monotonic = checked + self._probe_retry_delay_seconds
+
     def flush(self, *, force: bool = False) -> bool:
         with self._writer_lock:
             with self._lock:
@@ -327,6 +374,7 @@ class PersistenceTraceWriter:
                     self._manual_recovery_required |= uncertain
                     self._last_error = str(exc) if uncertain else "trace_io_failed"
                     self._current_storage_availability = "blocked"
+                    self._availability_scope = "last_trace_publication"
                     self._availability_checked_monotonic = self.clock()
                     if uncertain:
                         self._next_retry_monotonic = None
@@ -340,10 +388,15 @@ class PersistenceTraceWriter:
                     self._processing_bytes = 0
             with self._lock:
                 self._current_storage_availability = "available"
+                self._availability_scope = "last_trace_publication"
                 self._availability_checked_monotonic = self.clock()
                 self._last_success_monotonic = self._availability_checked_monotonic
                 self._next_retry_monotonic = None
                 self._retry_delay_seconds = 1.0
+                # Actual publication also proves current destination access.
+                self._probe_failed = False
+                self._probe_retry_delay_seconds = 1.0
+                self._next_probe_monotonic = self._availability_checked_monotonic + 1.0
                 self._committed_sequence = segment.sequence
                 self._segments.popleft()
                 del segment  # Drop encoded bytes before another producer reuses their budget.
@@ -378,8 +431,13 @@ class PersistenceTraceWriter:
                     "admission_blocked_reason": admission_blocked_reason,
                     "manual_recovery_required": self._manual_recovery_required,
                     "current_storage_availability": self._current_storage_availability,
-                    "availability_scope": "last_trace_publication",
+                    "availability_scope": self._availability_scope,
                     "availability_checked_monotonic": self._availability_checked_monotonic,
+                    "next_probe_monotonic": (None if self._manual_recovery_required else self._next_probe_monotonic),
+                    "probe_failure_count": self._probe_failure_count,
+                    "probe_retry_delay_seconds": self._probe_retry_delay_seconds,
+                    "last_probe_success_monotonic": self._last_probe_success_monotonic,
+                    "last_probe_error": self._last_probe_error,
                     "last_success_monotonic": self._last_success_monotonic,
                     "next_retry_monotonic": self._next_retry_monotonic,
                     "retry_delay_seconds": self._retry_delay_seconds,
