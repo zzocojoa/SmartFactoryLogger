@@ -170,6 +170,39 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertEqual(writer.fact_path.read_bytes(), original)
                 self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
 
+    def test_failed_initializer_does_not_adopt_replaced_or_missing_fact(self):
+        file_open = Path.open
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                log_path = self.root / str(replacement) / 'fact'
+                image_root = self.root / str(replacement) / 'images'
+                original_writer = SpotImageCaptureWriter(log_path=log_path, capture_root=image_root)
+                original_writer.write_capture(image_bytes=b'preserved capture', captured_at=1793106000.0,
+                                              source_url='http://spot.invalid/image.jpg', source='test',
+                                              image_age_ms=None, link_checked_at=None, observation_snapshot=None)
+                original = original_writer.fact_path.read_bytes()
+
+                def open_file(path, mode='r', *args, **kwargs):
+                    if path == original_writer.fact_path and mode == 'rb':
+                        raise PermissionError('temporary initializer read failure')
+                    return file_open(path, mode, *args, **kwargs)
+
+                with patch.object(Path, 'open', open_file):
+                    writer = SpotImageCaptureWriter(log_path=log_path, capture_root=image_root)
+                retained = writer.fact_path.with_suffix('.retained')
+                writer.fact_path.replace(retained)
+                if replacement:
+                    writer.fact_path.write_bytes(original)
+                result = writer.probe_storage_destinations(captured_at=1793106000.0)[0]
+                self.assertEqual(result['probe_status'], 'available')
+                self.assertEqual(result['current_storage_availability'], 'blocked')
+                self.assertTrue(result['manual_recovery_required'])
+                self.assertFalse(writer.try_manifest_stats()[2])
+                self.assertEqual(retained.read_bytes(), original)
+                self.assertEqual(writer.fact_path.exists(), replacement)
+                if replacement:
+                    self.assertEqual(writer.fact_path.read_bytes(), original)
+
     def test_destination_probe_does_not_reuse_fact_directory_success(self):
         log_path = self.root / 'fact'
         log_path.mkdir()
@@ -184,6 +217,9 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertEqual(result['image_fact']['probe_status'], 'available')
         self.assertEqual(result['image_fact']['probe_scope'], 'directory_only')
         self.assertEqual(result['image_jpeg']['probe_scope'], 'directory_only')
+        self.assertEqual(result['image_fact']['current_storage_availability'], 'available')
+        self.assertEqual(result['image_fact']['file_check_scope'], 'new_fact_path')
+        self.assertFalse(writer.fact_path.exists())
         self.assertEqual(result['image_fact']['destination_path'], str(log_path.absolute()))
         self.assertEqual(result['image_jpeg']['destination_path'], str(image_root / '2026' / '10' / '27'))
         after = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
@@ -422,6 +458,9 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertFalse(writer._manifest_state_ready)
         results = writer.probe_storage_destinations(captured_at=1793106000.0)
         self.assertTrue(all(item['probe_status'] == 'available' for item in results))
+        self.assertEqual(results[0]['current_storage_availability'], 'blocked')
+        self.assertTrue(results[0]['manual_recovery_required'])
+        self.assertEqual(results[1]['current_storage_availability'], 'available')
         self.assertFalse(writer._manifest_state_ready)
         self.assertEqual(history.read_bytes(), before)
         self.assertEqual([path for path in self.root.rglob('*') if path.is_file()], [history])

@@ -162,6 +162,8 @@ class SpotImageCaptureWriter:
     _manifest_tracked_size: int = field(default=0, init=False, repr=False)
     _fact_identity: Optional[tuple[int, int, int, int]] = field(default=None, init=False, repr=False)
     _fact_identity_known: bool = field(default=False, init=False, repr=False)
+    _initialization_identity: Optional[tuple[int, int, int, int]] = field(default=None, init=False, repr=False)
+    _initialization_identity_observed: bool = field(default=False, init=False, repr=False)
     _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
     _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
     _fact_append_uncertain: bool = field(default=False, init=False, repr=False)
@@ -613,6 +615,12 @@ class SpotImageCaptureWriter:
             identity = self._fact_identity_snapshot()
             if self._fact_append_is_uncertain():
                 return
+            if self._initialization_identity_observed and identity != self._initialization_identity:
+                with _SPOT_IMAGE_FACT_FILE_LOCK:
+                    self._mark_fact_append_uncertain()
+                return
+            self._initialization_identity = identity
+            self._initialization_identity_observed = True
             if identity is None or identity[2] == 0:
                 self._fact_row_count = 0
                 self._manifest_tracked_size = 0
@@ -621,6 +629,8 @@ class SpotImageCaptureWriter:
                 self._fact_digest = hashlib.sha256()
                 self._fact_has_content = False
                 self._manifest_state_ready = True
+                self._initialization_identity_observed = False
+                self._initialization_identity = None
                 return
             expected_size = identity[2]
             digest = hashlib.sha256()
@@ -642,6 +652,8 @@ class SpotImageCaptureWriter:
             self._fact_identity = identity
             self._fact_identity_known = True
             self._manifest_state_ready = True
+            self._initialization_identity_observed = False
+            self._initialization_identity = None
         except (OSError, UnicodeError, csv.Error):
             self._manifest_state_ready = False
 
