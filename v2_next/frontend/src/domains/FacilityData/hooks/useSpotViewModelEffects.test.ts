@@ -175,6 +175,11 @@ describe('useSpotViewModelEffects image lifecycle', () => {
         await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
         expect(alive.has(pendingUrl)).toBe(false);
         expect(alive).toEqual(new Set([displayedUrl, result.current.imageUrl]));
+        const currentUrl = result.current.imageUrl;
+        act(() => { result.current.handleImageLoad(pendingUrl); result.current.handleImageError(pendingUrl); });
+        expect(result.current.diagnostics.error_count).toBe(0);
+        expect(result.current.imageUrl).toBe(currentUrl);
+        expect(result.current.diagnostics.automatic_retry_pending).toBe(false);
       }
       act(() => { result.current.handleImageError(result.current.imageUrl); });
       expect(result.current.imageUrl).toBe(displayedUrl);

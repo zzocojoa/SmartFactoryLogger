@@ -770,11 +770,12 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   });
 
   const handleImageLoad = useCallback((displayedImageUrl?: string) => {
+    const currentImageState = imageStateRef.current;
+    const loadedImageUrl = displayedImageUrl ?? currentImageState.imageUrl;
+    if (shutdownRef.current || loadedImageUrl !== currentImageState.imageUrl) return;
     hasImageRef.current = true;
     setImageLoading(false);
-    const currentImageState = imageStateRef.current;
     const pendingPreviousUrl = pendingPreviousImageStateRef.current?.imageUrl ?? null;
-    const loadedImageUrl = displayedImageUrl ?? currentImageState.imageUrl;
     const shouldRequestNext =
       pendingImageUrlRef.current === currentImageState.imageUrl &&
       loadedImageUrl === currentImageState.imageUrl;
@@ -801,8 +802,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   }, [resetImageRecovery, scheduleNormalImageRefresh, syncDashboardSpotImageState]);
 
   const handleImageError = useCallback((displayedImageUrl?: string) => {
-    setImageLoading(false);
     const currentImageState = imageStateRef.current;
+    if (shutdownRef.current ||
+      (displayedImageUrl ?? currentImageState.imageUrl) !== currentImageState.imageUrl) return;
+    setImageLoading(false);
     const isPendingCurrentImage =
       pendingImageUrlRef.current === currentImageState.imageUrl &&
       (displayedImageUrl ?? currentImageState.imageUrl) === currentImageState.imageUrl;
