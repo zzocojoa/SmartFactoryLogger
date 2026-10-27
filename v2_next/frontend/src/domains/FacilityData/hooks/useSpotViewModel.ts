@@ -197,6 +197,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const automaticRetryAttemptRef = useRef(0);
   const automaticRetryTimerRef = useRef<number | null>(null);
   const normalRefreshTimerRef = useRef<number | null>(null);
+  const storagePressureTimerRef = useRef<number | null>(null);
   const runSpotFetchRef = useRef<(reason: string) => Promise<void>>(async () => undefined);
   const configRef = useRef<SpotConfig | null>(null);
   const imageStateRef = useRef<SpotImageState>({
@@ -252,6 +253,32 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         : { ...prev, next_fetch_scheduled_at: null }
     ));
   }, []);
+
+  const cancelStoragePressureRecheck = useCallback((): void => {
+    if (storagePressureTimerRef.current !== null) {
+      window.clearTimeout(storagePressureTimerRef.current);
+      storagePressureTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleStoragePressureRecheck = useCallback((responseMetadata: SpotImageResponseMetadata): void => {
+    cancelStoragePressureRecheck();
+    cancelNormalImageRefresh();
+    cancelPendingImageRetry();
+    const currentConfig = configRef.current;
+    if (
+      shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() ||
+      !currentConfig?.image_url || document.visibilityState === 'hidden'
+    ) return;
+    const fallbackSec = Math.ceil(Math.max(1, resolveSpotOperatorImageRefreshIntervalMs(
+      currentConfig.image_refresh_interval, currentConfig.refresh_interval
+    ) / 1000));
+    const delayMs = (responseMetadata.retry_after_sec ?? fallbackSec) * 1000;
+    storagePressureTimerRef.current = window.setTimeout(() => {
+      storagePressureTimerRef.current = null;
+      void runSpotFetchRef.current('storage-pressure-recheck');
+    }, delayMs);
+  }, [cancelNormalImageRefresh, cancelPendingImageRetry, cancelStoragePressureRecheck]);
 
   const scheduleNormalImageRefresh = useCallback((): void => {
     cancelNormalImageRefresh();
@@ -408,6 +435,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       nextMetadata: SpotImageResponseMetadata | null,
       retryable: boolean
     ): void => {
+      cancelStoragePressureRecheck();
       const nextImageState = {
         ...imageStateRef.current,
         imageError: nextImageError,
@@ -443,7 +471,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       cancelPendingImageRetry();
       automaticRetryAttemptRef.current = 0;
     },
-    [cancelPendingImageRetry, scheduleAutomaticImageRetry, syncDashboardSpotImageState]
+    [cancelPendingImageRetry, cancelStoragePressureRecheck, scheduleAutomaticImageRetry, syncDashboardSpotImageState]
   );
 
   const runSpotFetch = useCallback(
@@ -459,10 +487,12 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         return;
       }
       cancelNormalImageRefresh();
+      cancelStoragePressureRecheck();
 
       const startedAt = Date.now();
       const currentImageState = imageStateRef.current;
       let latestResponseMetadata: SpotImageResponseMetadata | null = null;
+      let pressureRecheck: SpotImageResponseMetadata | null = null;
 
       inFlightRef.current = true;
       setDiagnostics((prev) => ({
@@ -498,6 +528,18 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           responseReceivedAt - startedAt
         );
         latestResponseMetadata = responseMetadata;
+        if (response.status === 503 && responseMetadata.image_upstream_suppressed === true &&
+          responseMetadata.suppression_reason === 'storage_pressure') {
+          pressureRecheck = responseMetadata;
+          cancelPendingImageRetry();
+          const nextMetadata = { ...imageStateRef.current.metadata, ...responseMetadata };
+          imageStateRef.current = { ...imageStateRef.current, metadata: nextMetadata };
+          setMetadata(nextMetadata);
+          syncDashboardSpotImageState(currentImageState.imageUrl, false, currentImageState.imageError,
+            currentImageState.lastSuccessAt, nextMetadata);
+          setDiagnostics((prev) => ({ ...prev, last_image_status: 'storage_pressure' }));
+          return;
+        }
         if (!response.ok) {
           const detail = await resolveSpotImageErrorDetail(response);
           if (isSpotImagePayloadRejectionCode(detail?.code)) {
@@ -587,9 +629,11 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           last_fetch_latency_ms: completedAt - startedAt,
         }));
         for (const resolve of imageDrainWaitersRef.current.splice(0)) resolve();
+        if (pressureRecheck) scheduleStoragePressureRecheck(pressureRecheck);
       }
     },
-    [cancelNormalImageRefresh, publishImageFailure, syncDashboardSpotImageState]
+    [cancelNormalImageRefresh, cancelPendingImageRetry, cancelStoragePressureRecheck,
+      publishImageFailure, scheduleStoragePressureRecheck, syncDashboardSpotImageState]
   );
 
   runSpotFetchRef.current = runSpotFetch;
@@ -682,6 +726,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       if (stopping) {
         cancelPendingImageRetry();
         cancelNormalImageRefresh();
+        cancelStoragePressureRecheck();
         await waitForImageDrain();
       } else {
         resumeImageRefreshWhenVisible();
@@ -692,6 +737,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       shutdownRef.current = true;
       cancelPendingImageRetry();
       cancelNormalImageRefresh();
+      cancelStoragePressureRecheck();
       // An unmounted widget may still own a response; keep it in the drain handshake.
       void waitForImageDrain().then(() => unsubscribe?.());
       const pendingPreviousUrl = pendingPreviousImageStateRef.current?.imageUrl ?? null;
@@ -699,7 +745,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         URL.revokeObjectURL(pendingPreviousUrl);
       }
     };
-  }, [cancelNormalImageRefresh, cancelPendingImageRetry, resumeImageRefreshWhenVisible]);
+  }, [cancelNormalImageRefresh, cancelPendingImageRetry, cancelStoragePressureRecheck, resumeImageRefreshWhenVisible]);
 
   useSpotViewModelEffects({
     config,
