@@ -320,6 +320,7 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
 
 
 CSV_PENDING_EVENT_LIMIT = 5000
+CSV_FLUSH_INTERVAL_SECONDS = 1.0
 CSV_PENDING_PAYLOAD_BYTE_LIMIT = 64 * 1024**2
 
 
@@ -452,6 +453,9 @@ class CSVEventEnvelope:
     source_payload_hash: str
     write_config: CSVWriteConfig
     text_storage_bytes: int
+    enqueued_monotonic: float
+    data_due_monotonic: float
+    clock_domain: str
 
 
 class CSVLoggerService:
@@ -519,6 +523,7 @@ class CSVLoggerService:
         self._last_write_at: Optional[float] = None
         self._payload_bytes_ema: Optional[float] = None
         self._runtime_lock = threading.Lock()
+        self._csv_next_flush_monotonic: Optional[float] = None
         self._lifecycle_lock = threading.Lock()
         self._sample_seq = 0
         self._producer_seq = 0
@@ -617,6 +622,8 @@ class CSVLoggerService:
             self._finalize_spot_image_manifest_on_stop = True
             self._finalize_spot_observation_manifest_on_stop = True
             self._allow_spot_observation_late_drain_on_stop = False
+            with self._runtime_lock:
+                self._csv_next_flush_monotonic = time.monotonic() + CSV_FLUSH_INTERVAL_SECONDS
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
@@ -757,8 +764,6 @@ class CSVLoggerService:
             except (TypeError, ValueError, OverflowError):
                 return {**result, "status": "INVALID", "reason": "snapshot_serialization_failed"}
             result["source_payload_hash"] = hashlib.sha256(payload).hexdigest()
-            envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
-                                        payload, result["source_payload_hash"], write_config, characters * width)
             snapshot = None
             with self._runtime_lock:
                 queue_limit = self.queue.maxsize
@@ -775,6 +780,13 @@ class CSVLoggerService:
                 # publishing so the worker can reserve decoding space.
                 self._pending_processing_payload_bytes -= reserved_bytes - len(payload)
                 reserved_bytes = len(payload)
+                enqueued_at = time.monotonic()
+                next_flush = self._csv_next_flush_monotonic
+                due_at = max(enqueued_at, next_flush if next_flush is not None
+                             else enqueued_at + CSV_FLUSH_INTERVAL_SECONDS)
+                envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
+                                            payload, result["source_payload_hash"], write_config, characters * width,
+                                            enqueued_at, due_at, clock_domain_id())
                 try:
                     self.queue.put_nowait(envelope)
                 except queue.Full:
@@ -3822,6 +3834,39 @@ class CSVLoggerService:
                 "outstanding_event_count": len(self._pending_events), "sinks": sinks,
                 "counts_reconciled": reconciled, "data_integrity_status": "NOT_EVALUATED"}
 
+    def _csv_pending_data_stages_locked(self) -> list[dict[str, Any]]:
+        """In-memory data-stage clocks, independent of later evidence confirmation.
+
+        The destination key identifies the admitted directory choices, not a
+        successful open or the ultimately selected fallback file.
+        """
+        data_written = {
+            (self._pending_row_events[row_id][1], location.sink_id)
+            for row_id, location in self._pending_csv_locations.items()
+            if (location.data_reported and location.path not in self._uncertain_csv_paths
+                and row_id in self._pending_row_events)
+        }
+        stages: dict[tuple[int, str], dict[str, Any]] = {}
+        for envelope, pending_sinks in self._pending_events.values():
+            settings = envelope.write_config
+            for sink in sorted(pending_sinks):
+                if (envelope.producer_seq, sink) in data_written:
+                    continue
+                key = settings.generation, sink
+                if key not in stages:
+                    directories = str(settings.log_dir) + "\0" + str(settings.fallback_log_dir)
+                    stages[key] = {
+                        "sink_id": sink, "config_generation": settings.generation,
+                        "configured_destination_key": hashlib.sha256(directories.encode("utf-8")).hexdigest(),
+                        "pending_count": 0, "oldest_pending_monotonic": envelope.enqueued_monotonic,
+                        "stage_due_monotonic": envelope.data_due_monotonic, "clock_domain": envelope.clock_domain,
+                    }
+                stage = stages[key]
+                stage["pending_count"] += 1
+                stage["oldest_pending_monotonic"] = min(stage["oldest_pending_monotonic"], envelope.enqueued_monotonic)
+                stage["stage_due_monotonic"] = min(stage["stage_due_monotonic"], envelope.data_due_monotonic)
+        return list(stages.values())
+
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
             auto_save = self.auto_save
@@ -3839,6 +3884,7 @@ class CSVLoggerService:
             last_write_at = self._last_write_at
             payload_bytes_ema = self._payload_bytes_ema
             pending_event_count = len(self._pending_events)
+            csv_pending_data_stages = self._csv_pending_data_stages_locked()
             pending_source_payload_bytes = self._pending_source_payload_bytes
             pending_processing_payload_bytes = self._pending_processing_payload_bytes
             processing_failure_count = self._processing_failure_count
@@ -3878,6 +3924,7 @@ class CSVLoggerService:
             "payload_bytes_ema": payload_bytes_ema,
             "estimated_queue_bytes": estimated_queue_bytes,
             "pending_event_count": pending_event_count,
+            "csv_pending_data_stages": csv_pending_data_stages,
             "admission_summary": admission_summary,
             "csv_persistence_outcomes": persistence_outcomes,
             "csv_processing_failure_evidence_pending_count": processing_failure_evidence_pending_count,
@@ -3914,8 +3961,9 @@ class CSVLoggerService:
         buffer: list[Tuple[list, datetime]] = []
         v2_buffer: list[Tuple[list, datetime]] = []
         batch_size = 20
-        flush_interval = 1.0
-        last_flush_time = time.time()
+        with self._runtime_lock:
+            if self._csv_next_flush_monotonic is None:
+                self._csv_next_flush_monotonic = time.monotonic() + CSV_FLUSH_INTERVAL_SECONDS
         file_prefix = "Factory_Integrated_Log"
         v2_file_prefix = "Factory_Integrated_Log_v2"
 
@@ -4130,9 +4178,11 @@ class CSVLoggerService:
                         v2_buffer.append((v2_row, timestamp))
                     self._buffer_size = len(buffer)
 
-                now = time.time()
+                now = time.monotonic()
+                with self._runtime_lock:
+                    next_flush = self._csv_next_flush_monotonic
                 pending_rows = len(buffer) + len(v2_buffer)
-                if pending_rows and (pending_rows >= batch_size or (now - last_flush_time) > flush_interval):
+                if pending_rows and (pending_rows >= batch_size or (next_flush is not None and now >= next_flush)):
                     if buffer and auto_save and (not f_handle or not writer):
                         ts = self._filename_timestamp(buffer[0][1])
                         f_handle, writer = self._open_v1_log_file_for_drain(ts, prefix=file_prefix)
@@ -4159,7 +4209,8 @@ class CSVLoggerService:
                                 "CSV v2 buffer dropped after persistence was disabled; clean shutdown will be rejected."
                             )
                             v2_buffer.clear()
-                    last_flush_time = now
+                    with self._runtime_lock:
+                        self._csv_next_flush_monotonic = now + CSV_FLUSH_INTERVAL_SECONDS
             except CSVOutputBudgetExceeded:
                 if envelope is not None:
                     self._record_csv_processing_failure(envelope, "csv_row_byte_limit")

@@ -1654,6 +1654,9 @@ class CSVLoggerServiceTests(unittest.TestCase):
                             time.sleep(.01)
                         self.assertEqual(before["pending_event_count"], 2)
                         self.assertEqual(before["csv_data_written_evidence_pending_count"], expected_rows)
+                        self.assertEqual(before["csv_pending_data_stages"], [],
+                                         "written data was still counted in the data stage")
+                        self.assertGreater(before["persistence_trace"]["pending_records"], 0)
                         outcomes = before["csv_persistence_outcomes"]
                         self.assertEqual(outcomes["accepted_event_count"], 2)
                         self.assertEqual(outcomes["fully_committed_event_count"], 0)
@@ -2228,6 +2231,101 @@ class CSVLoggerServiceTests(unittest.TestCase):
 
     def wait_for_processing(self) -> None:
         time.sleep(0.6)
+
+    def test_csv_flush_deadline_ignores_wall_clock_rollback(self) -> None:
+        entered, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        clock, wall = [100.0], [2000.0]
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == tmp_dir and path.suffix == ".csv" and mode == "a":
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("CSV clock test did not release file open")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open), \
+                    patch("backend.FacilityData.repository.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("backend.FacilityData.repository.time.time", side_effect=lambda: wall[0]):
+                service.start()
+                try:
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+                    self.assertTrue(entered.wait(2))
+                    wall[0] = 1000.0
+                    clock[0] = 101.0
+                    release.set()
+                    for _ in range(200):
+                        state = service.get_runtime_state()
+                        if state["last_write_at"] is not None:
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(state["last_write_at"], 1000.0,
+                                     "wall-clock rollback delayed a due CSV write")
+                    self.assertEqual(sum(len(self.read_rows(path)) - 1 for path in self.list_v1_files(tmp_dir)), 1)
+                finally:
+                    release.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+
+    def test_csv_pending_deadline_survives_queue_and_config_change(self) -> None:
+        entered, release = threading.Event(), threading.Event()
+        original_open = Path.open
+        clock = [100.0]
+        with self.create_temp_dir() as tmp_dir:
+            old_dir, new_dir = tmp_dir / "before", tmp_dir / "after"
+            old_dir.mkdir()
+            new_dir.mkdir()
+            service = self.create_service(old_dir, True)
+
+            def blocked_open(path, mode="r", *args, **kwargs):
+                if path.parent == old_dir and path.suffix == ".csv" and mode == "a":
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("CSV deadline test did not release file open")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", blocked_open), \
+                    patch("backend.FacilityData.repository.time.monotonic", side_effect=lambda: clock[0]):
+                service.start()
+                try:
+                    first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                    self.assertTrue(entered.wait(2))
+                    clock[0] = 100.5
+                    second = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.100", 31.0))
+                    service.apply_config(log_path=new_dir)
+                    clock[0] = 100.75
+                    third = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.200", 32.0))
+                    self.assertTrue(all(item["status"] == "ACCEPTED" for item in (first, second, third)))
+                    # A health read must not open/stat files or wait for the held writer.
+                    with patch.object(Path, "open", side_effect=AssertionError("snapshot performed file I/O")):
+                        stages = service.get_runtime_state().get("csv_pending_data_stages", [])
+                    self.assertEqual(len(stages), 2, "CSV data-stage clocks are missing")
+                    old, new = sorted(stages, key=lambda item: item["config_generation"])
+                    self.assertEqual(old["config_generation"], first["config_generation"])
+                    self.assertEqual((old["pending_count"], old["oldest_pending_monotonic"],
+                                      old["stage_due_monotonic"]), (2, 100.0, 101.0))
+                    self.assertEqual(new["config_generation"], third["config_generation"])
+                    self.assertEqual((new["pending_count"], new["oldest_pending_monotonic"],
+                                      new["stage_due_monotonic"]), (1, 100.75, 101.0))
+                    self.assertNotEqual(old["configured_destination_key"], new["configured_destination_key"])
+                    self.assertEqual(old["sink_id"], "csv_v1")
+                    self.assertTrue(old["clock_domain"])
+                    clock[0] = 110.0
+                    self.assertEqual(service.get_runtime_state()["csv_pending_data_stages"], stages,
+                                     "observation or new configuration postponed an existing deadline")
+                finally:
+                    release.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            self.assertEqual(service.get_runtime_state()["csv_pending_data_stages"], [])
+            row_count = 0
+            for path in tmp_dir.rglob("Factory_Integrated_Log_*.csv"):
+                with path.open(encoding="utf-8-sig") as handle:
+                    row_count += len(list(csv.reader(handle))) - 1
+            self.assertEqual(row_count, 3)
 
     def test_admission_freezes_payload_and_identity(self) -> None:
         started, release = threading.Event(), threading.Event()
