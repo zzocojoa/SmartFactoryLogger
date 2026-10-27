@@ -23,6 +23,22 @@ from backend.FacilityData.drivers.real_plc import RealPLCDriver
 
 
 class FactPollingTests(unittest.IsolatedAsyncioTestCase):
+    async def wait_for_csv_evidence(self, logger, root, expected):
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            records = [json.loads(line) for path in Path(root).rglob("*.trace.jsonl")
+                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            rows = [record for record in records if record["kind"] == "csv_row_data"]
+            if len(rows) == expected and logger.get_runtime_state()["pending_event_count"] == 0:
+                for record in rows:
+                    raw = Path(record["file_path"]).read_bytes()
+                    offset, length = record["row_byte_offset"], record["row_byte_length"]
+                    self.assertEqual(hashlib.sha256(raw[offset:offset + length]).hexdigest(),
+                                     record["output_bytes_sha256"])
+                return rows
+            await asyncio.sleep(.01)
+        self.fail("CSV rows and their committed evidence did not complete within the fixture deadline")
+
     async def test_rejected_poll_keeps_display_and_identity(self):
         started, release = threading.Event(), threading.Event()
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
@@ -70,14 +86,6 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_logger_loop_daily_rollover_and_stop_propagate_deferred_failure(self):
         for successful in [True, False]:
-            written = threading.Event()
-            original = CSVLoggerService._flush_v2_buffer
-            def flushed(logger, writer, handle, buffer):
-                rows = list(buffer)
-                result = original(logger, writer, handle, rows)
-                if result and rows and logger._sample_seq == 2:
-                    written.set()
-                return result
             with self.subTest(successful=successful), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
                 fact_path = Path(tmp) / "spot_observation_fact.csv"
                 owner = SpotObservationQueue(lambda: SpotObservationFactWriter(fact_path))
@@ -85,7 +93,6 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
                     stack.enter_context(patch.object(spot_api, name, value))
                 stack.enter_context(patch.object(spot_api.config, "SPOT_OBSERVATION_FACT_ENABLED", True))
                 stack.enter_context(patch.object(spot_api.config, "LOG_PATH", tmp))
-                stack.enter_context(patch.object(CSVLoggerService, "_flush_v2_buffer", flushed))
                 owner.enqueue(observation())
                 await asyncio.to_thread(owner._queue.join)
                 logger = CSVLoggerService(require_runtime_manifest_state=True)
@@ -95,7 +102,14 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     for day in [9, 10]:
                         logger.enqueue(FactoryData(Time=f"2026-09-{day:02d}T00:00:00Z", Status="Running"))
-                    self.assertTrue(await asyncio.to_thread(written.wait, 3))
+                    evidence = await self.wait_for_csv_evidence(logger, tmp, 2)
+                    self.assertEqual({record["producer_seq"] for record in evidence}, {1, 2})
+                    self.assertEqual(len({record["file_path"] for record in evidence}), 2)
+                    persisted = []
+                    for path in Path(tmp).glob("Factory_Integrated_Log_v2*.csv"):
+                        with path.open(encoding="utf-8-sig", newline="") as handle:
+                            persisted.extend(csv.DictReader(handle))
+                    self.assertEqual(sorted(int(row["sample_seq"]) for row in persisted), [1, 2])
                     self.assertEqual(len(logger._deferred_observation_closeouts), 1)
                     self.assertFalse(logger._runtime_write_failure_observed)
                     first = next(iter(logger._deferred_observation_closeouts))
@@ -121,8 +135,8 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(historical), 940)
         inputs = [historical[14], historical[908]]
         self.assertEqual([row["spot_poll_seq"] for row in inputs], ["1", "2"])
-        started, release, written = threading.Event(), threading.Event(), threading.Event()
-        original_load, original_flush = SpotObservationFactWriter._load_manifest_state_from_output, CSVLoggerService._flush_v2_buffer
+        started, release = threading.Event(), threading.Event()
+        original_load = SpotObservationFactWriter._load_manifest_state_from_output
         timings = {"kind": "synthetic Event/I-O timing using verified F01 raw payloads; not historical monotonic evidence"}
         def blocked(writer):
             timings["fact_initialization_entered"] = time.monotonic()
@@ -131,13 +145,6 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
                 raise TimeoutError("F01 test did not release initialization")
             result = original_load(writer)
             timings["fact_existing_file_scan_completed"] = time.monotonic()
-            return result
-        def flushed(logger, writer, handle, buffer):
-            rows = list(buffer)
-            result = original_flush(logger, writer, handle, rows)
-            if result and rows:
-                timings["csv_persisted"] = time.monotonic()
-                written.set()
             return result
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             for name, value in {"LOG_PATH": tmp, "SPOT_OBSERVATION_FACT_ENABLED": True,
@@ -151,7 +158,6 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
             # Seed a different synthetic service so initialization really hashes/indexes an existing file.
             SpotObservationFactWriter(Path(tmp) / "spot_observation_fact.csv").write_fact(observation())
             stack.enter_context(patch.object(SpotObservationFactWriter, "_load_manifest_state_from_output", blocked))
-            stack.enter_context(patch.object(CSVLoggerService, "_flush_v2_buffer", flushed))
             logger = CSVLoggerService(require_runtime_manifest_state=True)
             logger.apply_config(log_path=Path(tmp), auto_save=True, csv_v1_enabled=False, csv_v2_enabled=True,
                 csv_v2_operational_fields_enabled=True, csv_v2_temperature_hardening_enabled=True)
@@ -169,7 +175,8 @@ class FactPollingTests(unittest.IsolatedAsyncioTestCase):
                         logger.enqueue(FactoryData(Time=datetime.now(timezone.utc).isoformat(), Status="Running", **fields))
                         timings[f"csv_{index+1}_enqueued"] = time.monotonic()
                 self.assertTrue(await asyncio.to_thread(started.wait, 2))
-                self.assertTrue(await asyncio.to_thread(written.wait, 3))
+                await self.wait_for_csv_evidence(logger, tmp, 2)
+                timings["csv_evidence_observed"] = time.monotonic()
                 self.assertFalse(release.is_set())
                 self.assertEqual(spot_api._spot_temperature_snapshot["spot_poll_seq"], 2)
                 self.assertFalse(logger._runtime_write_failure_observed)
