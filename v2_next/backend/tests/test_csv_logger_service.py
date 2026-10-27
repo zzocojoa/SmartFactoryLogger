@@ -296,6 +296,82 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     for handle in opened:
                         handle.close()
 
+    def test_csv_close_uncertainty_blocks_rollover_and_new_admission(self) -> None:
+        original_open = Path.open
+        for v2 in (False, True):
+            for change in ("date", "destination"):
+                for leave_open in (False, True):
+                    with self.subTest(v2=v2, change=change, leave_open=leave_open), self.create_temp_dir() as tmp_dir:
+                        old_dir, new_dir = tmp_dir / "old", tmp_dir / "new"
+                        old_dir.mkdir()
+                        new_dir.mkdir()
+                        entered, release, failed = threading.Event(), threading.Event(), threading.Event()
+                        opened = []
+                        opened_paths = []
+                        service = self.create_service(old_dir, True, csv_v1_enabled=not v2, csv_v2_enabled=v2)
+
+                        class CloseFailure:
+                            def __init__(self, handle):
+                                self.handle = handle
+
+                            def __getattr__(self, name):
+                                return getattr(self.handle, name)
+
+                            def close(self):
+                                if not leave_open:
+                                    self.handle.close()
+                                failed.set()
+                                raise OSError("synthetic close uncertainty at rollover")
+
+                        def held_open(path, mode="r", *args, **kwargs):
+                            handle = original_open(path, mode, *args, **kwargs)
+                            if mode == "a" and path.name.startswith("Factory_Integrated_Log") and path.suffix == ".csv":
+                                opened.append(handle)
+                                opened_paths.append(path)
+                                if len(opened_paths) == 1:
+                                    entered.set()
+                                    if not release.wait(5):
+                                        handle.close()
+                                        raise TimeoutError("CSV rollover fixture was not released")
+                                    return CloseFailure(handle)
+                            return handle
+
+                        try:
+                            with patch.object(Path, "open", held_open):
+                                service.start()
+                                try:
+                                    first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                                    self.assertTrue(entered.wait(2))
+                                    if change == "destination":
+                                        service.apply_config(log_path=new_dir)
+                                    timestamp = "2026-03-10T07:20:25.000" if change == "date" else "2026-03-09T07:20:26.000"
+                                    second = service.enqueue_detailed(self.create_data(timestamp, 31.0))
+                                    release.set()
+                                    self.assertTrue(failed.wait(2))
+                                    deadline = time.monotonic() + 2
+                                    while (not service.get_runtime_state().get("csv_manual_recovery_required")
+                                           and len(opened_paths) == 1 and time.monotonic() < deadline):
+                                        time.sleep(.01)
+                                    late = service.enqueue_detailed(self.create_data(timestamp, 32.0))
+                                finally:
+                                    release.set()
+                                    closed = service.stop(timeout_sec=5)
+                            self.assertEqual(first["status"], "ACCEPTED")
+                            self.assertEqual(second["status"], "ACCEPTED")
+                            self.assertEqual(len(opened_paths), 1, "CSV rollover bypassed unresolved close ownership")
+                            self.assertEqual(len(list(tmp_dir.rglob("Factory_Integrated_Log*.csv"))), 1)
+                            self.assertEqual(len(self.read_rows(opened_paths[0])), 2)
+                            self.assertEqual(late["status"], "REJECTED_UNAVAILABLE")
+                            self.assertEqual(late["reason"], "csv_owner_requires_manual_recovery")
+                            self.assertFalse(closed)
+                            state = service.get_runtime_state()
+                            self.assertTrue(state["csv_manual_recovery_required"])
+                            self.assertEqual(state["pending_event_count"], 1)
+                            self.assertEqual(state["unclosed_csv_handle_count"], int(leave_open))
+                        finally:
+                            for handle in opened:
+                                handle.close()
+
     def test_trace_publish_failure_prevents_clean_csv_shutdown(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, auto_save=True)

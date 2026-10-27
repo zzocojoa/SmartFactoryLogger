@@ -454,6 +454,7 @@ class CSVLoggerService:
         self._pending_csv_locations: dict[int, _CSVRowLocation] = {}
         self._uncertain_csv_paths: set[Path] = set()
         self._unclosed_csv_handles: dict[int, TextIO] = {}
+        self._csv_manual_recovery_required = False
         self._csv_write_failure_count = 0
         self._last_csv_write_failure_reason: Optional[str] = None
         self._pending_row_copies: dict[int, list[str]] = {}
@@ -563,7 +564,7 @@ class CSVLoggerService:
             ):
                 raise RuntimeError("CSV trace evidence remains unresolved for the previous generation.")
             with self._runtime_lock:
-                if self._uncertain_csv_paths or self._unclosed_csv_handles:
+                if self._csv_manual_recovery_required or self._uncertain_csv_paths or self._unclosed_csv_handles:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
                 self._trace_start_seq = self._producer_seq
             self._trace_stop_seq = None
@@ -650,6 +651,12 @@ class CSVLoggerService:
                 return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
             if not write_config.auto_save:
                 return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
+            with self._runtime_lock:
+                if self._csv_manual_recovery_required:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_UNAVAILABLE",
+                            "reason": "csv_owner_requires_manual_recovery"}
             reserved_bytes = 0
             payload = None
             envelope = None
@@ -1057,6 +1064,8 @@ class CSVLoggerService:
         timestamp_str: str,
         prefix: str,
     ) -> Tuple[Optional[TextIO], Optional[_CSVWriter]]:
+        if self._csv_needs_manual_recovery():
+            return None, None
         filename = f"{prefix}_{timestamp_str}.csv"
         settings = self._write_settings()
         log_dir = self._get_log_dir()
@@ -1137,6 +1146,8 @@ class CSVLoggerService:
         return candidate
 
     def _open_v2_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[TextIO], Optional[_CSVWriter]]:
+        if self._csv_needs_manual_recovery():
+            return None, None
         settings = self._write_settings()
         if not settings.auto_save or not settings.v2_enabled:
             return None, None
@@ -3030,6 +3041,7 @@ class CSVLoggerService:
         except _CSVRecordUncertain:
             with self._runtime_lock:
                 self._uncertain_csv_paths.add(path)
+                self._csv_manual_recovery_required = True
             raise
         finally:
             payload = digest = None
@@ -3163,6 +3175,10 @@ class CSVLoggerService:
         with self._runtime_lock:
             self._last_write_at = time.time()
 
+    def _csv_needs_manual_recovery(self) -> bool:
+        with self._runtime_lock:
+            return self._csv_manual_recovery_required
+
     def _close_file(self, handle: Optional[TextIO]) -> bool:
         if handle is None:
             return True
@@ -3174,6 +3190,7 @@ class CSVLoggerService:
         except Exception as exc:
             with self._runtime_lock:
                 self._runtime_write_failure_observed = True
+                self._csv_manual_recovery_required = True
                 self._csv_write_failure_count += 1
                 self._last_csv_write_failure_reason = "csv_close_failed"
                 name = getattr(handle, "name", None)
@@ -3388,6 +3405,7 @@ class CSVLoggerService:
             last_csv_write_failure_reason = self._last_csv_write_failure_reason
             uncertain_csv_file_count = len(self._uncertain_csv_paths)
             unclosed_csv_handle_count = len(self._unclosed_csv_handles)
+            csv_manual_recovery_required = self._csv_manual_recovery_required
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -3417,6 +3435,7 @@ class CSVLoggerService:
             "last_csv_write_failure_reason": last_csv_write_failure_reason,
             "uncertain_csv_file_count": uncertain_csv_file_count,
             "unclosed_csv_handle_count": unclosed_csv_handle_count,
+            "csv_manual_recovery_required": csv_manual_recovery_required,
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "persistence_trace": trace.snapshot() if trace is not None else None,
             "persistence_trace_coverage": "PRODUCER_AND_CONFIG_BOUNDARIES" if trace is not None else "NOT_EVALUATED",
@@ -3470,6 +3489,17 @@ class CSVLoggerService:
                     except queue.Empty:
                         pass
 
+                if self._csv_needs_manual_recovery():
+                    # Keep the next admitted envelope, but do not create a new
+                    # file/contract to bypass uncertain ownership. The source
+                    # collector is independent and can continue updating its cache.
+                    if envelope is not None:
+                        deferred_item = envelope
+                    if not self.running:
+                        break
+                    time.sleep(0.2)
+                    continue
+
                 if envelope is not None and envelope.write_config.generation != current_config_version:
                     # Finish the old generation with its admitted settings,
                     # before adopting a later event's output contract.
@@ -3512,6 +3542,11 @@ class CSVLoggerService:
                     writer = None
                     v2_handle = None
                     v2_writer = None
+                    if self._csv_needs_manual_recovery():
+                        deferred_item = envelope
+                        if not self.running:
+                            break
+                        continue
                     current_file_date = None
                     settings = envelope.write_config
                     self._writer_context.settings = settings
@@ -3576,6 +3611,11 @@ class CSVLoggerService:
                             writer = None
                             v2_handle = None
                             v2_writer = None
+                            if self._csv_needs_manual_recovery():
+                                deferred_item = envelope
+                                if not self.running:
+                                    break
+                                continue
                             self.logger.info(
                                 "CSV daily rollover completed: %s -> %s",
                                 current_file_date.isoformat(),
@@ -3726,7 +3766,10 @@ class CSVLoggerService:
                 shutdown_flush_succeeded = False
                 self.logger.warning("CSV v2 final flush failed: %s", exc)
         if deferred_item is not None:
-            if buffer or v2_buffer:
+            if self._csv_needs_manual_recovery():
+                shutdown_flush_succeeded = False
+                self.logger.warning("CSV deferred row retained because file ownership requires manual recovery.")
+            elif buffer or v2_buffer:
                 shutdown_flush_succeeded = False
                 self.logger.warning(
                     "CSV deferred shutdown row was not written because previous-day final flush failed."
