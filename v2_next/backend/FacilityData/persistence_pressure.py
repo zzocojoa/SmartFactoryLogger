@@ -1,6 +1,8 @@
 """Memory-only storage pressure decisions; owner I/O is deliberately separate."""
 from dataclasses import dataclass, field
-from typing import Iterable
+import threading
+import time
+from typing import Callable, Iterable
 
 from backend.FacilityData.freshness import clock_domain_id, finite_number
 
@@ -105,3 +107,50 @@ class StoragePressureController:
         self._last_decision = StoragePressureDecision(state, availability, occupancy, overdue, oldest_age,
                                                       pending_recovery, self._normal_confirmations, tuple(sorted(reasons)))
         return self._last_decision
+
+
+class StoragePressureMonitor:
+    def __init__(self, sample_provider: Callable[[], Iterable[StoragePressureSample]]) -> None:
+        self.sample_provider = sample_provider
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._controller = StoragePressureController()
+        self._decision = StoragePressureDecision("PERSISTENCE_BLOCKED", "unknown", 0.0, None, None,
+                                                 0, 0, ("not_started",))
+
+    def start(self) -> bool:
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return False
+            self._stop.clear()
+            self._controller = StoragePressureController()
+            self._thread = threading.Thread(target=self._run, name="storage-pressure-controller", daemon=True)
+            self._thread.start()
+            return True
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            started = time.monotonic()
+            decision = self._controller.evaluate(self.sample_provider(), now_monotonic=started)
+            with self._lock:
+                self._decision = decision
+            self._stop.wait(max(0.0, 1.0 - (time.monotonic() - started)))
+
+    def snapshot(self) -> StoragePressureDecision:
+        with self._lock:
+            return self._decision
+
+    def stop(self, timeout: float = 2.0) -> bool:
+        with self._lock:
+            thread = self._thread
+            self._stop.set()
+        if thread is None:
+            return True
+        thread.join(timeout=max(0.0, timeout))
+        stopped = not thread.is_alive()
+        if stopped:
+            with self._lock:
+                if self._thread is thread:
+                    self._thread = None
+        return stopped

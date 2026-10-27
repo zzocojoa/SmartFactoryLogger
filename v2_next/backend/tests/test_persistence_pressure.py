@@ -1,7 +1,11 @@
 from dataclasses import replace
+import threading
+import time
 import unittest
 
-from backend.FacilityData.persistence_pressure import StoragePressureController, StoragePressureSample
+from backend.FacilityData.persistence_pressure import (
+    StoragePressureController, StoragePressureMonitor, StoragePressureSample,
+)
 
 
 class StoragePressureTests(unittest.TestCase):
@@ -98,6 +102,53 @@ class StoragePressureTests(unittest.TestCase):
         self.assertEqual(normal.state, "NORMAL")
         self.assertEqual(normal.max_stage_overdue_seconds, 0.0)
         self.assertEqual(normal.oldest_pending_age_seconds, 1.0)
+
+    def test_monitor_evaluates_without_ui_and_owns_one_thread(self):
+        first_sample = threading.Event()
+        sample_lock = threading.Lock()
+        current = self.sample(availability="unknown")
+        calls = []
+
+        def sample_provider():
+            with sample_lock:
+                calls.append((time.monotonic(), threading.get_ident()))
+                result = current
+            first_sample.set()
+            return [result]
+
+        monitor = StoragePressureMonitor(sample_provider)
+        try:
+            monitor.start()
+            self.assertTrue(first_sample.wait(2.0), "monitor never sampled without a UI request")
+            deadline = time.monotonic() + 2.0
+            while "storage_unknown" not in monitor.snapshot().reasons and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertIn("storage_unknown", monitor.snapshot().reasons)
+            self.assertFalse(monitor.start(), "a second evaluator thread was started")
+            with sample_lock:
+                current = replace(current, availability="available")
+                count = len(calls)
+            for _ in range(100):
+                self.assertEqual(monitor.snapshot().state, "PERSISTENCE_BLOCKED")
+            with sample_lock:
+                self.assertEqual(len(calls), count, "snapshot reads advanced the controller")
+            started = time.monotonic()
+            deadline = started + 5.0
+            while monitor.snapshot().state != "NORMAL" and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertEqual(monitor.snapshot().state, "NORMAL")
+            self.assertGreaterEqual(time.monotonic() - started, 2.0)
+            with sample_lock:
+                self.assertEqual(len({thread for _, thread in calls}), 1)
+                self.assertNotEqual(calls[0][1], threading.get_ident())
+                self.assertTrue(all(second[0] - first[0] >= 0.99 for first, second in zip(calls, calls[1:])))
+        finally:
+            self.assertTrue(monitor.stop(timeout=2.0))
+        with sample_lock:
+            stopped_count = len(calls)
+        time.sleep(1.1)
+        with sample_lock:
+            self.assertEqual(len(calls), stopped_count)
 
 
 if __name__ == "__main__":
