@@ -517,6 +517,49 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
+    def test_restart_refuses_unresolved_csv_outputs(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            original_open = Path.open
+
+            class FailedDataFile:
+                def __init__(self, handle):
+                    self.handle = handle
+                    self.writes = 0
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def write(self, text):
+                    self.writes += 1
+                    if self.writes > 1:
+                        raise OSError("injected permanent CSV data write failure")
+                    return self.handle.write(text)
+
+            def open_file(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                if mode == "a" and path.suffix == ".csv" and path.name.startswith("Factory_Integrated_Log"):
+                    return FailedDataFile(handle)
+                return handle
+
+            with patch.object(Path, "open", open_file):
+                service.start()
+                try:
+                    service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 33.0))
+                    self.assertFalse(service.stop(timeout_sec=5))
+                    before = service.get_runtime_state()
+                    self.assertEqual(before["pending_event_count"], 1)
+                    self.assertEqual(before["persistence_trace"]["pending_records"], 0)
+                    with self.assertRaisesRegex(RuntimeError, "CSV.*unresolved",
+                                                msg="restart accepted unresolved CSV outputs"):
+                        service.start()
+                    after = service.get_runtime_state()
+                    self.assertEqual(after["admission_summary"], before["admission_summary"])
+                    self.assertEqual(after["csv_persistence_outcomes"], before["csv_persistence_outcomes"])
+                    self.assertEqual(after["pending_payload_bytes"], before["pending_payload_bytes"])
+                finally:
+                    service.stop(timeout_sec=5)
+
     def test_csv_sink_outcomes_do_not_complete_a_partially_saved_event(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v2_enabled=True)

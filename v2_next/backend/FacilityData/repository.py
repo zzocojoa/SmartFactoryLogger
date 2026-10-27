@@ -583,6 +583,8 @@ class CSVLoggerService:
             with self._runtime_lock:
                 if self._csv_manual_recovery_required or self._uncertain_csv_paths or self._unclosed_csv_handles:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
+                if self._pending_events:
+                    raise RuntimeError("CSV output evidence remains unresolved for the previous generation.")
                 if self._admission_ledger.snapshot()["pending_rejection_count"]:
                     raise RuntimeError("CSV rejection evidence remains unresolved for the previous generation.")
                 self._trace_start_seq = self._producer_seq
