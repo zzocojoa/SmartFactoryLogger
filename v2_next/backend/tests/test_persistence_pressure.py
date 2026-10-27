@@ -199,6 +199,50 @@ class StoragePressureTests(unittest.TestCase):
         changed = replace(current, config_generation=3, destination_key="destination-C", availability="unknown")
         self.assertEqual(controller.evaluate([current, changed], now_monotonic=104.0).state, "PERSISTENCE_BLOCKED")
 
+    def test_stalled_sampler_expires_normal_and_requires_recovery(self):
+        block, entered, release = threading.Event(), threading.Event(), threading.Event()
+
+        def sample_provider():
+            if block.is_set():
+                entered.set()
+                if not release.wait(8.0):
+                    raise TimeoutError("fixture sampler was not released")
+            return [self.sample()]
+
+        monitor = StoragePressureMonitor(sample_provider)
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2.0
+            while monitor.snapshot().state != "NORMAL" and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(monitor.snapshot().state, "NORMAL")
+            block.set()
+            self.assertTrue(entered.wait(2.0))
+            deadline = time.monotonic() + 2.2
+            while monitor.snapshot().state == "NORMAL" and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(monitor.snapshot().state, "PERSISTENCE_BLOCKED",
+                             "stalled sampler retained a stale NORMAL decision")
+            self.assertIn("sampling_stale", monitor.snapshot().reasons)
+            self.assertFalse(monitor.start())
+            # Let the blocked call itself exceed two controller intervals.
+            time.sleep(max(0.0, deadline - time.monotonic()))
+            release.set()
+            deadline = time.monotonic() + 1.0
+            while monitor.snapshot().sampling_failure_count == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertGreaterEqual(monitor.snapshot().sampling_failure_count, 1)
+            self.assertNotEqual(monitor.snapshot().state, "NORMAL")
+            recovered_after = time.monotonic()
+            deadline = recovered_after + 5.0
+            while monitor.snapshot().state != "NORMAL" and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(monitor.snapshot().state, "NORMAL")
+            self.assertGreaterEqual(time.monotonic() - recovered_after, 1.9)
+        finally:
+            release.set()
+            self.assertTrue(monitor.stop(timeout=2.0))
+
     def test_monitor_stop_timeout_does_not_spawn_a_replacement(self):
         block = threading.Event()
         entered = threading.Event()

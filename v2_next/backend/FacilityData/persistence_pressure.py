@@ -118,6 +118,9 @@ class StoragePressureController:
 
 
 class StoragePressureMonitor:
+    # Two missed one-second controller intervals invalidate published health.
+    _STALE_AFTER_SECONDS = 2.0
+
     def __init__(self, sample_provider: Callable[[], Iterable[StoragePressureSample]]) -> None:
         self.sample_provider = sample_provider
         self._lock = threading.Lock()
@@ -126,6 +129,7 @@ class StoragePressureMonitor:
         self._controller = StoragePressureController()
         self._sampling_failure_count = 0
         self._decision = self._unavailable_decision("not_started")
+        self._decision_at: float | None = None
 
     def _unavailable_decision(self, reason: str) -> StoragePressureDecision:
         return StoragePressureDecision("PERSISTENCE_BLOCKED", "unknown", 0.0, None, None,
@@ -138,6 +142,7 @@ class StoragePressureMonitor:
             self._stop.clear()
             self._controller = StoragePressureController()
             self._decision = self._unavailable_decision("starting")
+            self._decision_at = None
             self._thread = threading.Thread(target=self._run, name="storage-pressure-controller", daemon=True)
             self._thread.start()
             return True
@@ -147,12 +152,20 @@ class StoragePressureMonitor:
             while not self._stop.is_set():
                 started = time.monotonic()
                 try:
-                    decision = self._controller.evaluate(self.sample_provider(), now_monotonic=started)
+                    samples = tuple(self.sample_provider())
+                    sampled_at = time.monotonic()
+                    if sampled_at - started >= self._STALE_AFTER_SECONDS:
+                        with self._lock:
+                            self._sampling_failure_count += 1
+                        decision = self._controller.mark_unavailable(now_monotonic=sampled_at, reason="sampling_stale")
+                    else:
+                        decision = self._controller.evaluate(samples, now_monotonic=sampled_at)
                 except Exception:
                     with self._lock:
                         self._sampling_failure_count += 1
                     decision = self._controller.mark_unavailable(now_monotonic=started, reason="sampling_failed")
                 with self._lock:
+                    self._decision_at = started
                     self._decision = (self._unavailable_decision("monitor_stopping") if self._stop.is_set()
                                       else replace(decision, sampling_failure_count=self._sampling_failure_count))
                 self._stop.wait(max(0.0, 1.0 - (time.monotonic() - started)))
@@ -163,6 +176,9 @@ class StoragePressureMonitor:
 
     def snapshot(self) -> StoragePressureDecision:
         with self._lock:
+            if (not self._stop.is_set() and self._decision_at is not None
+                    and time.monotonic() - self._decision_at >= self._STALE_AFTER_SECONDS):
+                return self._unavailable_decision("sampling_stale")
             return self._decision
 
     def stop(self, timeout: float = 2.0) -> bool:
