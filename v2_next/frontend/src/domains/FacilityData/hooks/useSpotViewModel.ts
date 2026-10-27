@@ -275,10 +275,20 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       currentConfig.image_refresh_interval, currentConfig.refresh_interval
     ) / 1000));
     const delayMs = (responseMetadata.retry_after_sec ?? fallbackSec) * 1000;
-    storagePressureTimerRef.current = window.setTimeout(() => {
+    const deadline = performance.now() + delayMs;
+    const recheckWhenDue = (): void => {
       storagePressureTimerRef.current = null;
+      if (shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() ||
+        document.visibilityState === 'hidden') return;
+      const remaining = deadline - performance.now();
+      if (remaining > 0) {
+        // Browser timers use a signed 32-bit delay; never overflow into a busy retry loop.
+        storagePressureTimerRef.current = window.setTimeout(recheckWhenDue, Math.min(remaining, 2147483647));
+        return;
+      }
       void runSpotFetchRef.current('storage-pressure-recheck');
-    }, delayMs);
+    };
+    recheckWhenDue();
   }, [cancelNormalImageRefresh, cancelPendingImageRetry, cancelStoragePressureRecheck]);
 
   const scheduleNormalImageRefresh = useCallback((): void => {

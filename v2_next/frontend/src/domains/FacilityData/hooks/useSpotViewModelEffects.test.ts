@@ -304,6 +304,25 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     } finally { unmount(); }
   });
 
+  it('does not turn a large positive Retry-After into an immediate retry through timer overflow', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementation(async () => new Response('', { status: 503, headers: {
+      'X-Spot-Image-Upstream-Suppressed': '1',
+      'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+      'Retry-After': '2147484',
+    } }));
+    const { unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+    } finally { unmount(); }
+  });
+
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);
