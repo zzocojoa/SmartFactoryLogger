@@ -137,7 +137,26 @@ def _index_sink_record(database: sqlite3.Connection, record: dict[str, Any], pro
             database.execute("INSERT INTO required_outputs VALUES (?, ?, ?, ?)", values)
         else:
             database.execute("INSERT INTO sink_receipts VALUES (?, ?, ?, ?, ?)", (*values, kind))
+    location_fields = ("file_device", "file_id", "row_byte_offset", "row_byte_length")
+    if (kind == "csv_row_data" and all(type(record.get(key)) is int and record[key] >= 0 for key in location_fields)
+            and record["row_byte_length"] > 0):
+        database.execute("INSERT INTO row_locations VALUES (?, ?, ?, ?)",
+                         (str(record["file_device"]), str(record["file_id"]), str(record["row_byte_offset"]),
+                          str(record["row_byte_offset"] + record["row_byte_length"])))
     return {"recorded_csv_processing_failure"} if kind == "csv_processing_failure" else set()
+
+
+def _csv_location_issues(database: sqlite3.Connection) -> set[str]:
+    previous_file: tuple[str, str] | None = None
+    last_end = 0
+    for device, file_id, first, end in database.execute(
+            "SELECT device, file_id, first_byte, end_byte FROM row_locations "
+            "ORDER BY device, file_id, length(first_byte), first_byte"):
+        current_file = (device, file_id)
+        if previous_file == current_file and int(first) < last_end:
+            return {"overlapping_csv_row_locations"}
+        previous_file, last_end = current_file, int(end)
+    return set()
 
 
 def _required_sink_issues(database: sqlite3.Connection) -> set[str]:
@@ -424,6 +443,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
         issues.update(_admission_identity_issues(database, terminal_summary))
         issues.update(_terminal_output_issues(database, terminal_summary))
     issues.update(_required_sink_issues(database))
+    issues.update(_csv_location_issues(database))
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -463,6 +483,8 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE INDEX required_output_identity ON required_outputs(sequence, sink)")
                 database.execute("CREATE TABLE sink_receipts (sequence TEXT, sink TEXT, source_hash TEXT, generation TEXT, kind TEXT)")
                 database.execute("CREATE INDEX sink_receipt_identity ON sink_receipts(sequence, sink)")
+                database.execute("CREATE TABLE row_locations (device TEXT, file_id TEXT, first_byte TEXT, end_byte TEXT)")
+                database.execute("CREATE INDEX row_location_order ON row_locations(device, file_id, length(first_byte), first_byte)")
                 return _validate_csv_trace(paths, database, data_roots)
     except (OSError, sqlite3.Error):
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",

@@ -67,6 +67,63 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_overlapping_csv_row_locations(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                for _ in range(2):
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"], [])
+            originals = {path: path.read_bytes() for path in paths}
+            rows = [record for contents in originals.values() for line in contents.splitlines()
+                    if (record := json.loads(line)).get("kind") == "csv_row_data" and record["sink_id"] == "csv_v1"]
+            rows.sort(key=lambda row: row["producer_seq"])
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["output_bytes_sha256"], rows[1]["output_bytes_sha256"])
+            self.assertNotEqual(rows[0]["row_byte_offset"], rows[1]["row_byte_offset"])
+            data_files = {path: path.read_bytes() for path in tmp_dir.glob("*.csv")}
+            for path, contents in originals.items():
+                amended = []
+                for line in contents.splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record == rows[1]:
+                        line = (json.dumps(dict(record, row_byte_offset=rows[0]["row_byte_offset"])) + "\n").encode()
+                    amended.append(line)
+                path.write_bytes(b"".join(amended))
+            amended_traces = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("overlapping_csv_row_locations", result["issues"],
+                          "one physical row was accepted for two admissions")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["output_content_status"], "VERIFIED")
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertEqual({path: path.read_bytes() for path in paths}, amended_traces)
+            self.assertEqual({path: path.read_bytes() for path in data_files}, data_files)
+            self.assertIn("overlapping_csv_row_locations", validate_csv_persistence_trace(paths)["issues"])
+            length = rows[0]["row_byte_length"]
+            for shift, expected_overlap in [(1, True), (length - 1, True), (length, False)]:
+                with self.subTest(shift=shift):
+                    # Metadata-only inspection must not narrow file offsets to
+                    # SQLite's signed 64-bit integer range or depend on paths'
+                    # input order. Actual byte proof remains NOT_EVALUATED.
+                    for path, contents in originals.items():
+                        amended = []
+                        for line in contents.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record in rows:
+                                offset = 2**80 + (shift if record == rows[1] else 0)
+                                line = (json.dumps(dict(record, row_byte_offset=offset)) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(list(reversed(paths)))
+                    self.assertEqual("overlapping_csv_row_locations" in result["issues"], expected_overlap)
+                    self.assertEqual(result["row_bytes_status"], "NOT_EVALUATED")
+
     def test_validator_rejects_canonical_output_mismatch(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
