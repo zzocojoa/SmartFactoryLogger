@@ -9,6 +9,41 @@ from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, Adm
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_staged_rejection_ranges_wait_for_their_trace_commit(self):
+        ledger = AdmissionRejectionLedger()
+        with patch("backend.FacilityData.persistence_trace.ADMISSION_REJECTION_RANGE_LIMIT", 2):
+            ledger.record(1, "INVALID", "bad_input", 1)
+            ledger.record(2, "REJECTED_FULL", "queue_full", 1)
+            first = ledger.claim_range()
+            ledger.stage_range(first, 4)
+            second = ledger.claim_range()
+            self.assertIsNot(second, first, "staged evidence did not allow the next rejection range")
+            self.assertEqual((second.first_sequence, second.last_sequence), (2, 2))
+            ledger.stage_range(second, 5)
+            ledger.record(3, "INVALID", "bad_input", 1)
+            self.assertEqual(ledger.snapshot()["omitted_rejection_count"], 1)
+            ledger.acknowledge_committed(3)
+            self.assertEqual(ledger.snapshot()["committed_rejection_count"], 0)
+            self.assertEqual(ledger.snapshot()["pending_rejection_count"], 2)
+            ledger.acknowledge_committed(4)
+            self.assertEqual(ledger.snapshot()["committed_rejection_count"], 1)
+            self.assertEqual(ledger.snapshot()["rejection_range_count"], 1)
+            ledger.acknowledge_committed(4)
+            self.assertEqual(ledger.snapshot()["committed_rejection_count"], 1)
+            ledger.record(4, "INVALID", "bad_input", 1)
+            third = ledger.claim_range()
+            self.assertEqual((third.first_sequence, third.last_sequence), (4, 4))
+            ledger.stage_range(third, 5)
+            ledger.acknowledge_committed(5)
+            state = ledger.snapshot()
+            self.assertEqual(state["committed_rejection_count"], 3)
+            self.assertEqual(state["committed_rejection_range_count"], 3)
+            self.assertEqual(state["pending_rejection_count"], 0)
+            self.assertEqual(state["rejection_range_count"], 0)
+            self.assertEqual(state["rejected_count"], 4)
+            self.assertEqual(ledger.rejection_ranges(), ())
+            self.assertTrue(state["details_incomplete"])
+
     def test_claimed_rejection_ranges_remain_reserved_until_acknowledged(self):
         ledger = AdmissionRejectionLedger()
         with patch("backend.FacilityData.persistence_trace.ADMISSION_REJECTION_RANGE_LIMIT", 2):
