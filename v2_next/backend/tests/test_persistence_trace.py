@@ -9,6 +9,26 @@ from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, Per
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_unaccounted_sequences_remain_incomplete_at_close(self):
+        ledger = AdmissionRejectionLedger(after_sequence=10)
+        ledger.record(11, "ACCEPTED", None, 1)
+        ledger.record(13, "INVALID", "bad_input", 1)
+        snapshot = ledger.snapshot()
+        self.assertTrue(snapshot["details_incomplete"], "unaccounted producer sequence was presented as complete")
+        self.assertEqual(snapshot["produced_count"], 3)
+        self.assertEqual(snapshot["accounted_count"], 2)
+        self.assertEqual(snapshot["unaccounted_count"], 1)
+        ledger.close(15)
+        closed = ledger.snapshot()
+        self.assertEqual(closed["produced_count"], 5)
+        self.assertEqual(closed["unaccounted_count"], 3)
+        self.assertEqual(closed["accounted_count"], 2)
+        self.assertEqual(closed["last_producer_seq"], 15)
+        self.assertTrue(closed["details_incomplete"])
+        self.assertEqual(closed["outcome_counts"], {"ACCEPTED": 1, "INVALID": 1})
+        self.assertEqual(closed["omitted_rejection_count"], 0)
+        self.assertEqual([(item.first_sequence, item.last_sequence) for item in ledger.rejection_ranges()], [(13, 13)])
+
     def test_rejection_ranges_merge_only_adjacent_matching_outcomes(self):
         ledger = AdmissionRejectionLedger()
         receipts = [(1, "INVALID", "bad_value", 7), (2, "INVALID", "bad_value", 7),

@@ -578,7 +578,7 @@ class CSVLoggerService:
                 if self._csv_manual_recovery_required or self._uncertain_csv_paths or self._unclosed_csv_handles:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
                 self._trace_start_seq = self._producer_seq
-                self._admission_ledger = AdmissionRejectionLedger()
+                self._admission_ledger = AdmissionRejectionLedger(after_sequence=self._producer_seq)
             self._trace_stop_seq = None
             self._trace_stop_recorded = False
             self._trace_config_generation = None
@@ -622,6 +622,8 @@ class CSVLoggerService:
                 # Admission uses the same lifecycle lock; later CLOSED requests
                 # must not extend this producer generation's observed interval.
                 self._trace_stop_seq = self._producer_seq
+                with self._runtime_lock:
+                    self._admission_ledger.close(self._producer_seq)
                 self.running = False
                 try:
                     self.queue.put_nowait(None)

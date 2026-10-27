@@ -32,13 +32,14 @@ class AdmissionRejectionRange:
 class AdmissionRejectionLedger:
     """Admission accounting owned by one serialized producer generation."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, after_sequence: int = 0) -> None:
+        self._after_sequence = after_sequence
         self._counts: Counter[str] = Counter()
         self._ranges: list[AdmissionRejectionRange] = []
         self._omitted = 0
         self._first_omitted: int | None = None
         self._last_omitted: int | None = None
-        self._last_sequence: int | None = None
+        self._last_sequence = after_sequence
 
     def record(self, sequence: int, status: str, reason: str | None, generation: int) -> None:
         self._last_sequence = sequence
@@ -60,17 +61,23 @@ class AdmissionRejectionLedger:
         self._last_omitted = sequence
 
     def snapshot(self) -> dict[str, Any]:
-        produced = sum(self._counts.values())
+        accounted = sum(self._counts.values())
+        produced = self._last_sequence - self._after_sequence
+        unaccounted = produced - accounted
         accepted, excluded = self._counts["ACCEPTED"], self._counts["DISABLED"]
         return {"produced_count": produced, "last_producer_seq": self._last_sequence,
+                "accounted_count": accounted, "unaccounted_count": unaccounted,
                 "accepted_count": accepted, "excluded_count": excluded,
-                "rejected_count": produced - accepted - excluded, "outcome_counts": dict(self._counts),
+                "rejected_count": accounted - accepted - excluded, "outcome_counts": dict(self._counts),
                 "rejection_range_count": len(self._ranges), "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
-                "details_incomplete": self._omitted > 0, "omitted_rejection_count": self._omitted,
+                "details_incomplete": self._omitted > 0 or unaccounted != 0, "omitted_rejection_count": self._omitted,
                 "first_omitted_producer_seq": self._first_omitted, "last_omitted_producer_seq": self._last_omitted}
 
     def rejection_ranges(self) -> tuple[AdmissionRejectionRange, ...]:
         return tuple(self._ranges)
+
+    def close(self, final_sequence: int) -> None:
+        self._last_sequence = final_sequence
 
 
 class _TraceContentUncertain(OSError):
