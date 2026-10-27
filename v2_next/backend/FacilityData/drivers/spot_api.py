@@ -299,6 +299,8 @@ _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
 _spot_image_capture_writer_signature: Optional[tuple[Path, Path, int, float]] = None
 _spot_image_storage_activation: Optional[tuple[str, tuple[Path, Path, int, float]]] = None
 _spot_image_storage_generation = 0
+_spot_image_initialization_retry_at: Optional[float] = None
+_spot_image_initialization_retry_delay = 1.0
 _spot_image_capture_last_enqueue_at = 0.0
 _spot_image_capture_last_enqueue_monotonic: Optional[float] = None
 _spot_image_capture_last_write_at = 0.0
@@ -672,6 +674,11 @@ def _start_spot_image_capture_worker(*, force: bool = False) -> None:
             return
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
             return
+        if _spot_image_initialization_retry_at is not None and (
+            _SPOT_IMAGE_CAPTURE_STOP.is_set() or force
+            or time.monotonic() < _spot_image_initialization_retry_at
+        ):
+            return
         _SPOT_IMAGE_CAPTURE_STOP.clear()
         _spot_image_capture_thread = threading.Thread(
             target=_spot_image_capture_worker,
@@ -685,7 +692,7 @@ def _request_spot_image_manifest_initialization() -> None:
     # Reuse the owned, joined image worker even when no images are captured.
     # Otherwise a cold startup would merely move the historical scan to exit.
     with _spot_image_capture_lock:
-        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
+        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set():
             return
         _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.set()
     _start_spot_image_capture_worker()
@@ -694,15 +701,24 @@ def _request_spot_image_manifest_initialization() -> None:
 def _activate_spot_image_storage() -> None:
     """Schedule configuration changes; all destination I/O stays in the owner."""
     global _spot_image_storage_activation, _spot_image_storage_generation
+    global _spot_image_initialization_retry_at, _spot_image_initialization_retry_delay
     with config.PERSISTENCE_CONFIG_LOCK:
         mode = _spot_image_capture_mode()
         activation = None if mode == "off" else (mode, _spot_image_capture_config_signature())
     with _spot_image_capture_lock:
-        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or activation == _spot_image_storage_activation:
+        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set():
             return
-        _spot_image_storage_activation = activation
-        _spot_image_storage_generation += 1
-    if activation is not None:
+        changed = activation != _spot_image_storage_activation
+        if changed:
+            _spot_image_storage_activation = activation
+            _spot_image_storage_generation += 1
+            _spot_image_initialization_retry_at = None
+            _spot_image_initialization_retry_delay = 1.0
+            if activation is None:
+                _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
+        initialize = activation is not None and (
+            changed or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set())
+    if initialize:
         _request_spot_image_manifest_initialization()
 
 
@@ -760,6 +776,7 @@ def _spot_image_capture_worker() -> None:
     global _spot_image_capture_pending_payload_bytes
     global _spot_image_capture_recovery, _spot_image_capture_retry_at, _spot_image_capture_retry_delay
     global _spot_image_capture_retry_error_count, _spot_image_capture_recovered_count
+    global _spot_image_initialization_retry_at, _spot_image_initialization_retry_delay
     writer: Optional[SpotImageCaptureWriter] = None
     try:
         while (not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty()
@@ -777,18 +794,34 @@ def _spot_image_capture_worker() -> None:
                 event = _spot_image_capture_recovery
             elif (_SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
                   and _SPOT_IMAGE_CAPTURE_QUEUE.empty()):
-                _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
+                with _spot_image_capture_lock:
+                    initialization_generation = _spot_image_storage_generation
+                    _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
                 try:
                     current_writer = _get_spot_image_capture_writer()
                     if writer is not None and writer is not current_writer:
                         writer.close_retention_scan()
                     writer = current_writer
                     _probe_spot_image_storage_if_due(writer)
+                    with _spot_image_capture_lock:
+                        if initialization_generation == _spot_image_storage_generation:
+                            _spot_image_initialization_retry_at = None
+                            _spot_image_initialization_retry_delay = 1.0
                 except Exception:
                     # Initialization is not an image capture. Keep its failure
                     # separate from the capture enqueue/write/failure equation.
                     _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.set()
+                    with _spot_image_capture_lock:
+                        if (initialization_generation == _spot_image_storage_generation
+                                and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
+                                and not _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()):
+                            _spot_image_initialization_retry_at = time.monotonic() + _spot_image_initialization_retry_delay
+                            _spot_image_initialization_retry_delay = min(30.0, _spot_image_initialization_retry_delay * 2.0)
+                            _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.set()
                     _logger.exception("SPOT image manifest initialization failed")
+                    # The service tick may restart only after this owner's
+                    # finally has completed and Thread.is_alive() is false.
+                    break
                 continue
             else:
                 try:
@@ -1067,6 +1100,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_recovery, _spot_image_capture_retry_at, _spot_image_capture_retry_delay
     global _spot_image_capture_retry_error_count, _spot_image_capture_recovered_count
     global _spot_image_storage_activation, _spot_image_storage_generation
+    global _spot_image_initialization_retry_at, _spot_image_initialization_retry_delay
     stop_spot_image_capture_writer(timeout_sec=0.5)
     if _spot_image_capture_recovery is not None:
         _spot_image_capture_recovery = None
@@ -1106,6 +1140,8 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_shutdown_baseline = None
         _spot_image_storage_activation = None
         _spot_image_storage_generation = 0
+        _spot_image_initialization_retry_at = None
+        _spot_image_initialization_retry_delay = 1.0
     _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.clear()
     _SPOT_IMAGE_CAPTURE_STOP.clear()
     _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()

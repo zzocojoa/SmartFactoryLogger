@@ -648,6 +648,57 @@ class CsvImageStartupTests(unittest.TestCase):
             release.set()
             spot_api.stop_spot_image_capture_writer(timeout_sec=2)
 
+    def test_failed_image_initializer_restarts_after_owner_exit_and_backoff(self):
+        failed, recovered = threading.Event(), threading.Event()
+        resolve = Path.resolve
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        fact_path = self.root / spot_image_fact.SPOT_IMAGE_FACT_FILENAME
+        unavailable, clock, attempts = [True], [100.0], []
+
+        def resolve_path(path, *args, **kwargs):
+            if path == fact_path:
+                attempts.append(threading.current_thread())
+                if unavailable[0]:
+                    failed.set()
+                    raise PermissionError('temporary constructor path failure')
+            return resolve(path, *args, **kwargs)
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            if all(item['current_storage_availability'] == 'available' for item in result):
+                recovered.set()
+            return result
+
+        try:
+            with patch.object(Path, 'resolve', resolve_path), \
+                    patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                    patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                    patch.object(spot_api.time, 'monotonic', side_effect=lambda: clock[0]):
+                spot_api._activate_spot_image_storage()
+                self.assertTrue(failed.wait(.8))
+                first_owner = spot_api._spot_image_capture_thread
+                first_owner.join(.5)
+                self.assertFalse(first_owner.is_alive(), 'failed initializer owner remained alive')
+                unavailable[0] = False
+                clock[0] = 100.99
+                spot_api._activate_spot_image_storage()
+                self.assertIs(spot_api._spot_image_capture_thread, first_owner)
+                self.assertFalse(recovered.is_set())
+                clock[0] = 101.0
+                spot_api._activate_spot_image_storage()
+                self.assertTrue(recovered.wait(.8), 'initializer did not recover after its deadline')
+                second_owner = spot_api._spot_image_capture_thread
+                self.assertIsNot(second_owner, first_owner)
+                for _ in range(3):
+                    spot_api._activate_spot_image_storage()
+                self.assertIs(spot_api._spot_image_capture_thread, second_owner)
+                self.assertEqual(attempts, [first_owner, second_owner])
+                self.assertTrue(spot_api._SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set())
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
+        finally:
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
+
     def test_initialization_failure_is_not_counted_as_a_lost_capture(self):
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
                 patch.object(SpotImageCaptureWriter, '_initialize_manifest_state',
