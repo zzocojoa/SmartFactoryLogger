@@ -11,7 +11,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import logging
+import os
 import queue
+import stat
 import threading
 import time
 from typing import Any, Callable, Iterator, Literal, Mapping
@@ -33,6 +35,14 @@ FactAdmissionStatus = Literal[
     "ACCEPTED", "REJECTED_FULL", "REJECTED_LIMIT", "REJECTED_UNAVAILABLE",
     "REJECTED_CLOSED", "DISABLED", "INVALID",
 ]
+
+
+def _required_file_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    if not stat.S_ISREG(info.st_mode) or not info.st_ino:
+        raise RuntimeError("observation fact file identity is unavailable")
+    # Windows path stat and handle fstat may expose different creation-time
+    # values. Compare the same identity fields used by image fact ownership.
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,7 @@ class SpotObservationQueue:
         self._worker_failure_count = 0
         self._summary: dict[str, Any] | None = None
         self._file_stamp: tuple[int, int] | None = None
+        self._required_file_identity: tuple[int, int, int, int] | None = None
         self._required_file_probe_at: float | None = 0.0
         self._required_file_probe_delay = 1.0
         self._state: dict[str, Any] = {
@@ -90,6 +101,7 @@ class SpotObservationQueue:
             "required_file_error_type": None, "required_file_failure_count": 0,
             "required_file_checked_monotonic": None, "required_file_last_success_monotonic": None,
             "required_file_next_probe_monotonic": None,
+            "required_file_manual_recovery": False,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
         self._thread.start()
@@ -106,6 +118,8 @@ class SpotObservationQueue:
         except (TypeError, ValueError, OverflowError):
             return self._reject("INVALID", "snapshot_serialization_failed", observation_key)
         with self._lock:
+            if self._state["required_file_manual_recovery"]:
+                return self._reject_locked("REJECTED_UNAVAILABLE", "file_manual_recovery", observation_key)
             if self._state["initialization_state"] == "failed" and not self._stop.is_set():
                 return self._reject_locked("REJECTED_UNAVAILABLE", "initialization_failed", observation_key)
             if not self._state["accepting"]:
@@ -178,6 +192,7 @@ class SpotObservationQueue:
             state["initialization_state"] == "ready" and state["pending_write_count"] == 0
             and state["write_failure_count"] == 0 and state["rejected_count"] == 0
             and state["spool_pending_count"] == 0 and state["spool_failure_count"] == 0
+            and not state["required_file_manual_recovery"]
         )
         return state
 
@@ -253,6 +268,7 @@ class SpotObservationQueue:
         with self._lock:
             self._summary = summary
             self._file_stamp = (stat.st_size, stat.st_mtime_ns)
+            self._required_file_identity = _required_file_identity(stat)
             self._state["write_failure_count"] = self._worker_failure_count + writer.failure_count
             self._state["spool_failure_count"] = writer.spool_failure_count
             self._state["spool_last_error_code"] = writer.spool_last_error_code
@@ -267,20 +283,35 @@ class SpotObservationQueue:
                 or time.monotonic() < self._required_file_probe_at):
             return
         error_type = None
+        manual_recovery = opened = False
         try:
-            with writer.output_path.open("r+b"):
-                pass
+            expected = self._required_file_identity
+            if expected is None or _required_file_identity(writer.output_path.lstat()) != expected:
+                raise RuntimeError("observation fact changed before access verification")
+            with writer.output_path.open("r+b") as handle:
+                opened = True
+                if _required_file_identity(os.fstat(handle.fileno())) != expected:
+                    raise RuntimeError("observation fact handle changed during access verification")
+            if _required_file_identity(writer.output_path.lstat()) != expected:
+                raise RuntimeError("observation fact changed after access verification")
+        except (FileNotFoundError, RuntimeError) as exc:
+            error_type, manual_recovery = type(exc).__name__, True
         except OSError as exc:
             error_type = type(exc).__name__
+            # A close failure leaves resource ownership unresolved.
+            manual_recovery = opened
         checked = time.monotonic()
         with self._lock:
             self._state["required_file_availability"] = "blocked" if error_type else "available"
             self._state["required_file_error_type"] = error_type
             self._state["required_file_checked_monotonic"] = checked
+            self._state["required_file_manual_recovery"] = manual_recovery
             if error_type:
                 self._state["required_file_failure_count"] += 1
-                self._required_file_probe_at = checked + self._required_file_probe_delay
+                self._required_file_probe_at = None if manual_recovery else checked + self._required_file_probe_delay
                 self._required_file_probe_delay = min(30.0, 2 * self._required_file_probe_delay)
+                if manual_recovery:
+                    self._state["accepting"] = False
             else:
                 self._state["required_file_last_success_monotonic"] = checked
                 self._required_file_probe_at = None
@@ -301,6 +332,8 @@ class SpotObservationQueue:
                 self._state["initialization_state"] = "ready"
                 self._state["initialization_duration_ms"] = (time.monotonic()-started)*1000
             self._probe_required_file_access(writer)
+            if self._state["required_file_manual_recovery"]:
+                return
         except Exception:
             with self._lock:
                 self._state["initialization_state"] = "failed"
@@ -313,6 +346,8 @@ class SpotObservationQueue:
                 event = self._queue.get(timeout=.05)
             except queue.Empty:
                 self._probe_required_file_access(writer)
+                if self._state["required_file_manual_recovery"]:
+                    break
                 continue
             started = time.monotonic()
             decoded = None

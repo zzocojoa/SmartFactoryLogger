@@ -11,6 +11,7 @@ import unittest
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
@@ -333,6 +334,80 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_fact_handle_timestamp_difference_is_not_file_replacement(self):
+        original_fstat = os.fstat
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def different_creation_time(fd):
+                info = original_fstat(fd)
+                fields = {name: getattr(info, name) for name in
+                          ("st_mode", "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")}
+                fields["st_ctime_ns"] = path.stat().st_ctime_ns + 12345
+                return SimpleNamespace(**fields)
+
+            with patch.object(os, "fstat", different_creation_time):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    for _ in range(100):
+                        if owner.snapshot()["required_file_availability"] != "unknown":
+                            break
+                        threading.Event().wait(.01)
+                    state = owner.snapshot()
+                    self.assertEqual(state["required_file_availability"], "available")
+                    self.assertFalse(state["required_file_manual_recovery"])
+                finally:
+                    owner.close(2)
+
+    def test_replaced_fact_during_access_retry_requires_manual_recovery(self):
+        original_open = Path.open
+        attempted = threading.Event()
+        clock = [100.0]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            original, before = path.read_bytes(), path.stat()
+
+            def locked_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "r+b" and clock[0] == 100.0:
+                    attempted.set()
+                    raise PermissionError("synthetic lock before file replacement")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", locked_open), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    self.assertTrue(attempted.wait(2))
+                    for _ in range(100):
+                        if owner.snapshot().get("required_file_availability") == "blocked":
+                            break
+                        threading.Event().wait(.01)
+                    self.assertEqual(owner.snapshot()["required_file_availability"], "blocked")
+                    replacement = path.with_suffix(".replacement")
+                    replacement.write_bytes(original)
+                    os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
+                    replacement.replace(path)
+                    self.assertNotEqual(path.stat().st_ino, before.st_ino)
+                    clock[0] = 101.0
+                    owner._thread.join(.8)
+                    state = owner.snapshot()
+                    self.assertTrue(state.get("required_file_manual_recovery", False),
+                                    "replacement was treated as a successful access recovery")
+                    self.assertEqual(state["required_file_availability"], "blocked")
+                    self.assertFalse(state["writer_alive"])
+                    self.assertFalse(state["writes_drained"])
+                    self.assertIsNone(state["required_file_next_probe_monotonic"])
+                    self.assertEqual(owner.enqueue_detailed(observation()).status, "REJECTED_UNAVAILABLE")
+                    with self.assertRaises(FactPersistencePending):
+                        owner.manifest_summary()
+                finally:
+                    owner.close(2)
+            self.assertEqual(path.read_bytes(), original)
+
     def test_required_fact_access_recovers_without_new_observations(self):
         original_open = Path.open
         clock, attempts = [100.0], []
