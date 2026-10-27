@@ -4,6 +4,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Reject new CSV admission while persistence evidence has two full segments or
+  cannot reserve the workspace needed by a pending trace record. Reopen admission
+  after actual evidence commits release enough capacity, preserving prior failures.
+  Mark record/header workspace that cannot fit even an empty budget incomplete
+  instead of treating it as temporary pressure.
 - Retain admitted CSV rows until their per-sink trace segments are committed.
   Distinguish data-written/evidence-pending rows, preserve producer-stop evidence
   before shutdown publication, and retain earlier trace failures after recovery.
