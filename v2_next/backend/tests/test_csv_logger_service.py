@@ -409,6 +409,72 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(boundaries[0]["after_producer_seq"], first["producer_seq"] - 1)
             self.assertEqual(boundaries[1]["final_producer_seq"], last["producer_seq"])
 
+    def test_csv_evidence_retry_preserves_written_rows(self) -> None:
+        for v2 in (False, True):
+            with self.subTest(v2=v2), self.create_temp_dir() as tmp_dir:
+                service = self.create_service(tmp_dir, True, csv_v2_enabled=v2)
+                allow_publish, failed = threading.Event(), threading.Event()
+                original_replace = Path.replace
+
+                def fail_row_evidence(source, target):
+                    if (str(target).endswith(".trace.jsonl") and not allow_publish.is_set()
+                            and b'"kind":"csv_row_data"' in source.read_bytes()):
+                        failed.set()
+                        raise OSError("injected CSV row evidence publication failure")
+                    return original_replace(source, target)
+
+                with patch.object(Path, "replace", fail_row_evidence):
+                    service.start()
+                    try:
+                        receipts = [service.enqueue_detailed(self.create_data(
+                            f"2026-03-09T07:20:25.{index}00", 30.0 + index)) for index in range(2)]
+                        self.assertTrue(failed.wait(5), "CSV row evidence failure was not exercised")
+                        expected_rows = 4 if v2 else 2
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            before = service.get_runtime_state()
+                            if before["csv_data_written_evidence_pending_count"] == expected_rows:
+                                break
+                            time.sleep(.01)
+                        self.assertEqual(before["pending_event_count"], 2)
+                        self.assertEqual(before["csv_data_written_evidence_pending_count"], expected_rows)
+                        before_bytes = {path: path.read_bytes() for path in tmp_dir.glob("*.csv")}
+                        self.assertEqual(len(before_bytes), 2 if v2 else 1)
+                        self.assertTrue(all(len(self.read_rows(path)) == 3 for path in before_bytes))
+                        allow_publish.set()
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            after = service.get_runtime_state()
+                            if after["pending_event_count"] == 0:
+                                break
+                            time.sleep(.01)
+                        self.assertEqual(after["pending_event_count"], 0, "recovered evidence did not release CSV events")
+                        self.assertEqual(after["csv_data_written_evidence_pending_count"], 0)
+                        self.assertEqual(after["pending_payload_bytes"], 0)
+                        self.assertGreaterEqual(after["persistence_trace"]["failure_count"], 1)
+                    finally:
+                        allow_publish.set()
+                        closed = service.stop(timeout_sec=5)
+                self.assertFalse(closed, "evidence recovery erased the historical write failure")
+                self.assertEqual({path: path.read_bytes() for path in before_bytes}, before_bytes)
+                records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                           for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+                evidence = [record for record in records if record["kind"] == "csv_row_data"]
+                sinks = {"csv_v1", "csv_v2"} if v2 else {"csv_v1"}
+                expected = {(receipt["producer_seq"], sink) for receipt in receipts for sink in sinks}
+                self.assertEqual(len(evidence), len(expected))
+                self.assertEqual({(record["producer_seq"], record["sink_id"]) for record in evidence}, expected)
+                for record in evidence:
+                    receipt = next(receipt for receipt in receipts if receipt["producer_seq"] == record["producer_seq"])
+                    self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
+                    self.assertEqual(record["config_generation"], receipt["config_generation"])
+                    path = Path(record["file_path"])
+                    offset, length = record["row_byte_offset"], record["row_byte_length"]
+                    self.assertEqual(hashlib.sha256(before_bytes[path][offset:offset + length]).hexdigest(),
+                                     record["output_bytes_sha256"])
+                    info = path.stat()
+                    self.assertEqual((record["file_device"], record["file_id"]), (info.st_dev, info.st_ino))
+
     def test_producer_stop_boundary_excludes_post_stop_rejections(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, auto_save=True)
