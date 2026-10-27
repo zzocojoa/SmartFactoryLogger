@@ -1056,7 +1056,10 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                     raise OSError('primary startup failure')
                 stack.enter_context(patch.object(app.config_sync_agent, 'start', side_effect=fail_start))
                 if fail_receipt:
-                    stack.enter_context(patch.object(evidence.os, 'fsync', side_effect=OSError('receipt failure')))
+                    # Fail receipt I/O only. Mutating the shared os module also
+                    # faults the real CSV producer trace, a different scenario.
+                    receipt_os = stack.enter_context(patch.object(evidence, 'os', wraps=os))
+                    receipt_os.fsync.side_effect = OSError('receipt failure')
                 async def run():
                     async with app.lifespan(app.app):
                         self.fail('startup should not succeed')
@@ -1079,6 +1082,10 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 finally:
                     self.assertTrue(logger.stop(timeout_sec=3, finalize_spot_image_manifest=False))
                     self.assertTrue(all(not thread.is_alive() for thread in csv_threads))
+                    trace_state = logger.get_runtime_state()['persistence_trace']
+                    self.assertEqual(trace_state['failure_count'], 0)
+                    self.assertEqual(trace_state['pending_records'], 0)
+                    self.assertTrue(list((self.root / '.sfl_trace' / logger.logger_service_instance_id).glob('*.trace.jsonl')))
 
     def test_evidence_io_stall_never_prevents_real_worker_cleanup(self):
         for phase in ('begin', 'final'):
