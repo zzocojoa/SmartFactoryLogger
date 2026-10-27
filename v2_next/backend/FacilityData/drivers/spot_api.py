@@ -70,6 +70,7 @@ from backend.FacilityData.spot_observation_fact import (
 )
 from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
 from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FILENAME, SpotImageCaptureWriter
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -1281,20 +1282,6 @@ def _enqueue_spot_image_capture_locked(
         snapshot = get_spot_temperature_poll_snapshot()
     if not _should_enqueue_spot_image_capture(mode, snapshot):
         return ImageCaptureAdmissionResult("DISABLED", "policy_skipped_mode", capture_id)
-    try:
-        snapshot_payload = (json.dumps(snapshot, ensure_ascii=False, allow_nan=False,
-                                       separators=(",", ":"), sort_keys=True).encode("utf-8")
-                            if snapshot is not None else None)
-    except (TypeError, ValueError, OverflowError, RecursionError):
-        # Persistence cannot serialize this link; it must not fail live viewing.
-        with _spot_image_capture_lock:
-            _spot_image_capture_dropped_count += 1
-            _spot_image_capture_dropped_invalid_count += 1
-            _spot_image_capture_last_error_at = time.time()
-            _spot_image_capture_last_error_code = "snapshot_serialization_failed"
-            _spot_image_capture_last_error_message = "capture observation snapshot is not serializable"
-        return ImageCaptureAdmissionResult("INVALID", "snapshot_serialization_failed", capture_id)
-    payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
     now = time.time()
     monotonic_now = time.monotonic()
@@ -1316,32 +1303,71 @@ def _enqueue_spot_image_capture_locked(
                 return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
             _spot_image_capture_dropped_pending_limit_count += 1
             return ImageCaptureAdmissionResult("REJECTED_LIMIT", "pending_item_limit", capture_id)
-        if _spot_image_capture_pending_payload_bytes + payload_size > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
+        available = _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT - _spot_image_capture_pending_payload_bytes
+    reserved_bytes = transferred_bytes = 0
+    prepared_snapshot = snapshot_payload = event = None
+    try:
+        workspace = 0
+        if snapshot is not None:
+            prepared_snapshot, payload_bound, characters, width = prepare_json_payload(
+                snapshot, available - len(image_bytes),
+            )
+            text_bytes = characters * width
+            # Preflight uses spaced JSON, an upper bound for the existing
+            # compact/sorted wire bytes. Joining chunks owns two text copies.
+            workspace = max(2 * text_bytes, text_bytes + payload_bound)
+        required = len(image_bytes) + workspace
+        with _spot_image_capture_lock:
+            if _spot_image_capture_pending_payload_bytes + required > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
+                raise PayloadBudgetExceeded
+            _spot_image_capture_pending_payload_bytes += required
+            reserved_bytes = required
+        # No image-accounting lock is held during JSON traversal or encoding.
+        if prepared_snapshot is not None:
+            snapshot_payload = encode_json_payload(prepared_snapshot, sort_keys=True, compact=True)
+            if len(snapshot_payload) > payload_bound:
+                raise ValueError("Image snapshot exceeded its preflight bound")
+        payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
+        event = _SpotImageCaptureEvent(
+            image_bytes=bytes(image_bytes), captured_at=captured_at, source_url=image_url,
+            source=source, image_age_ms=image_age_ms, link_checked_at=link_checked_at,
+            observation_snapshot=snapshot_payload, reserved_payload_bytes=payload_size,
+            writer_signature=_spot_image_capture_config_signature(), capture_id=capture_id,
+        )
+        with _spot_image_capture_lock:
+            if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
+                return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
+            try:
+                _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
+            except queue.Full:
+                _spot_image_capture_dropped_count += 1
+                _spot_image_capture_dropped_queue_full_count += 1
+                return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
+            transferred_bytes = payload_size
+            _spot_image_capture_enqueued_count += 1
+            _spot_image_capture_last_enqueue_at = now
+            _spot_image_capture_last_enqueue_monotonic = monotonic_now
+    except PayloadBudgetExceeded:
+        with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
             _spot_image_capture_dropped_payload_limit_count += 1
-            return ImageCaptureAdmissionResult("REJECTED_LIMIT", "pending_byte_limit", capture_id)
-        event = _SpotImageCaptureEvent(
-            image_bytes=bytes(image_bytes),
-            captured_at=captured_at,
-            source_url=image_url,
-            source=source,
-            image_age_ms=image_age_ms,
-            link_checked_at=link_checked_at,
-            observation_snapshot=snapshot_payload,
-            reserved_payload_bytes=payload_size,
-            writer_signature=_spot_image_capture_config_signature(),
-            capture_id=capture_id,
-        )
-        try:
-            _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
-        except queue.Full:
+        return ImageCaptureAdmissionResult("REJECTED_LIMIT", "pending_byte_limit", capture_id)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        # Persistence cannot serialize this link; it must not fail live viewing.
+        with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
-            _spot_image_capture_dropped_queue_full_count += 1
-            return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
-        _spot_image_capture_enqueued_count += 1
-        _spot_image_capture_pending_payload_bytes += payload_size
-        _spot_image_capture_last_enqueue_at = now
-        _spot_image_capture_last_enqueue_monotonic = monotonic_now
+            _spot_image_capture_dropped_invalid_count += 1
+            _spot_image_capture_last_error_at = time.time()
+            _spot_image_capture_last_error_code = "snapshot_serialization_failed"
+            _spot_image_capture_last_error_message = "capture observation snapshot is not serializable"
+        return ImageCaptureAdmissionResult("INVALID", "snapshot_serialization_failed", capture_id)
+    finally:
+        # Only the queued event may retain the snapshot when returning the
+        # serialization workspace; failed admission retains no new bytes.
+        prepared_snapshot = snapshot_payload = event = None
+        if reserved_bytes:
+            with _spot_image_capture_lock:
+                _spot_image_capture_pending_payload_bytes -= reserved_bytes - transferred_bytes
     _start_spot_image_capture_worker()
     return ImageCaptureAdmissionResult("ACCEPTED", None, capture_id)
 

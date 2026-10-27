@@ -17,6 +17,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -417,7 +418,9 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
 
     def test_capture_payload_budget_includes_inflight_and_linked_snapshot(self):
-        limit = 5 * 1024**2
+        # Two retained captures (~4.5 MiB) plus the second admission's JSON
+        # workspace fit; a third capture plus its workspace must be refused.
+        limit = 6 * 1024**2
         self.stack.enter_context(patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', limit))
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
         self.stack.enter_context(patch.object(spot, '_spot_temperature_snapshot', None))
@@ -473,6 +476,40 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             rows = list(csv.DictReader(handle))
         self.assertEqual([row['spot_image_linked_observation_key'] for row in rows],
                          ['budget-fixture:1', 'budget-fixture:2', 'budget-fixture:4'])
+
+    def test_oversized_image_snapshot_is_rejected_before_serialization(self):
+        self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
+        snapshot = {'spot_service_instance_id': 'preflight-fixture', 'spot_poll_seq': 1,
+                    'spot_last_poll_completed_at': '2026-09-29T00:00:01Z',
+                    'diagnostic_text': 'x' * (128 * 1024**2)}
+        with patch.object(spot, '_spot_temperature_snapshot', snapshot):
+            tracemalloc.start()
+            try:
+                receipt = self.enqueue()
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+        self.assertEqual((receipt.status, receipt.reason), ('REJECTED_LIMIT', 'pending_byte_limit'))
+        self.assertLessEqual(peak, 2 * 1024**2,
+                             'oversized image snapshot was serialized before budget rejection')
+        rejected = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(rejected['pending_payload_bytes'], 0)
+        self.assertEqual(rejected['enqueued_count'], 0)
+        self.assertEqual(rejected['dropped_payload_limit_count'], 1)
+        snapshot['diagnostic_text'] = 'normal'
+        snapshot['spot_poll_seq'] = 2
+        with patch.object(spot, '_spot_temperature_snapshot', snapshot):
+            self.assertTrue(self.enqueue().accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual(final['written_count'], 1)
+        self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertEqual(final['dropped_payload_limit_count'], 1)
+        self.assertTrue(final['accounting_consistent'])
+        self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 1)
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual([row['spot_image_linked_observation_key'] for row in rows], ['preflight-fixture:2'])
 
     def test_invalid_link_snapshot_rejects_capture_and_next_capture_succeeds(self):
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
