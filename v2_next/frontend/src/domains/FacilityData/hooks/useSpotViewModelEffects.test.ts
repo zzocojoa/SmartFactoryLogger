@@ -56,6 +56,7 @@ const imageResponse = (suppressed: boolean, retry = '2'): Response => new Respon
 
 describe('useSpotViewModelEffects image lifecycle', () => {
   afterEach(() => {
+    delete window.smartFactoryElectron;
     vi.useRealTimers();
     service.config.mockReset();
     service.image.mockReset();
@@ -370,6 +371,103 @@ describe('useSpotViewModelEffects image lifecycle', () => {
       expect(service.image).toHaveBeenCalledTimes(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(1); });
       expect(service.image).toHaveBeenCalledTimes(2);
+    } finally { unmount(); }
+  });
+
+  it('drains a suppressed response body after unmount without allocating a URL or starting another timer', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:must-not-be-created');
+      static revokeObjectURL = vi.fn();
+    });
+    const listeners = new Set<(stopping: boolean) => void | Promise<void>>();
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: vi.fn(async () => ({ ok: true })),
+      isShuttingDown: () => false,
+      onShutdownStateChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    };
+    let finishBody!: () => void;
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      finishBody = () => {
+        controller.enqueue(new Uint8Array([0xff, 0xd8, ...Array<number>(16).fill(0), 0xff, 0xd9]));
+        controller.close();
+      };
+    } });
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockResolvedValueOnce(new Response(body, { headers: {
+      'Content-Type': 'image/jpeg',
+      'X-Spot-Image-Upstream-Suppressed': '1',
+      'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+      'Retry-After': '1',
+    } }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      expect(result.current.diagnostics.in_flight).toBe(true);
+      unmount();
+      let drained = false;
+      const draining = Promise.all(Array.from(listeners, (listener) => listener(true))).then(() => { drained = true; });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(drained).toBe(false);
+      await act(async () => { finishBody(); await draining; });
+      expect(drained).toBe(true);
+      expect(listeners.size).toBe(0);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+    } finally { unmount(); vi.unstubAllGlobals(); }
+  });
+
+  it.each(['unflagged-503', 'invalid-pressure-jpeg'])('keeps %s in the ordinary error path', async (kind) => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementation(async () => kind === 'unflagged-503'
+      ? new Response('', { status: 503, headers: { 'Retry-After': '2' } })
+      : new Response('<html>broken</html>', { headers: {
+        'Content-Type': 'image/jpeg',
+        'X-Spot-Image-Upstream-Suppressed': '1',
+        'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+        'Retry-After': '2',
+      } }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      expect(result.current.diagnostics.error_count).toBe(1);
+      expect(result.current.imageUrl).toBe('');
+      if (kind === 'unflagged-503') {
+        expect(result.current.diagnostics.consecutive_retry_attempt).toBe(1);
+        await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+        expect(service.image).toHaveBeenCalledTimes(2);
+      } else {
+        expect(result.current.diagnostics.automatic_retry_pending).toBe(false);
+        await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+        expect(service.image).toHaveBeenCalledTimes(1);
+      }
+    } finally { unmount(); }
+  });
+
+  it.each([null, '-1', '1.5', 'invalid'])('uses the configured positive fallback for Retry-After %s', async (retry) => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementation(async () => new Response('', { status: 503, headers: {
+      'X-Spot-Image-Upstream-Suppressed': '1',
+      'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+      ...(retry === null ? {} : { 'Retry-After': retry }),
+    } }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2999); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(service.image).toHaveBeenCalledTimes(2);
+      expect(result.current.diagnostics.error_count).toBe(0);
+      expect(result.current.diagnostics.consecutive_retry_attempt).toBe(0);
     } finally { unmount(); }
   });
 
