@@ -195,7 +195,7 @@ class SpotImageCaptureWriter:
         return self.log_path / self.fact_filename
 
     def probe_storage_destinations(self, *, captured_at: float) -> tuple[dict[str, Any], ...]:
-        """Owner-only directory checks; never clear existing fact uncertainty."""
+        """Owner-only destination checks, preserving file and directory evidence separately."""
         day = datetime.fromtimestamp(captured_at, timezone.utc)
         image_directory = self.capture_root / day.strftime("%Y") / day.strftime("%m") / day.strftime("%d")
         results = []
@@ -208,18 +208,30 @@ class SpotImageCaptureWriter:
                     _probe_storage_directory(destination)
             except (OSError, RuntimeError) as exc:
                 error_type = type(exc).__name__
+            file_error_type = None
+            file_scope = "new_capture_directory" if sink_id == "image_jpeg" else "not_checked"
+            if sink_id == "image_fact" and error_type is None:
+                try:
+                    file_scope = self._check_fact_access()
+                except (OSError, RuntimeError) as exc:
+                    file_error_type = type(exc).__name__
+            manual_recovery = sink_id == "image_fact" and self._fact_append_is_uncertain()
             results.append({
                 "sink_id": sink_id, "destination_path": str(destination.absolute()),
                 "config_generation": self._destination_probe_generation,
                 "probe_scope": "directory_only", "probe_status": "blocked" if error_type else "available",
                 "probe_error_type": error_type, "probe_checked_monotonic": time.monotonic(),
+                "file_check_scope": file_scope, "file_check_error_type": file_error_type,
+                "manual_recovery_required": manual_recovery,
+                "current_storage_availability": (
+                    "blocked" if error_type or file_error_type or manual_recovery else "available"),
             })
         with self._destination_probe_lock:
-            previous = {(item["sink_id"], item["destination_path"]): item["probe_status"]
+            previous = {(item["sink_id"], item["destination_path"]): item["current_storage_availability"]
                         for item in self._destination_probe_results}
-            if any(item["probe_status"] == "blocked" for item in results):
+            if any(item["current_storage_availability"] == "blocked" for item in results):
                 self._destination_probe_failure_count += 1
-                progress = any(item["probe_status"] == "available"
+                progress = any(item["current_storage_availability"] == "available"
                                and previous.get((item["sink_id"], item["destination_path"])) == "blocked"
                                for item in results)
                 if progress:
@@ -232,8 +244,23 @@ class SpotImageCaptureWriter:
             self._destination_probe_results = tuple(results)
         return self.destination_probe_snapshot()
 
+    def _check_fact_access(self) -> str:
+        """Check an existing required file without creating, truncating or appending it."""
+        with _SPOT_IMAGE_FACT_FILE_LOCK:
+            self._assert_fact_unchanged()
+            if self._fact_identity is None:
+                return "new_fact_path"
+            with self.fact_path.open("r+b") as handle:
+                opened = os.fstat(handle.fileno())
+                identity = (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+                if identity != self._fact_identity or self._fact_identity_snapshot() != identity:
+                    self._mark_fact_append_uncertain()
+                    raise RuntimeError("SPOT image fact changed during access verification")
+            self._assert_fact_unchanged()
+            return "existing_fact_access"
+
     def destination_probe_snapshot(self) -> tuple[dict[str, Any], ...]:
-        """Memory-only copy; directory success does not establish file integrity."""
+        """Memory-only copy; access checks do not establish complete historical integrity."""
         with self._destination_probe_lock:
             return tuple(dict(item) for item in self._destination_probe_results)
 

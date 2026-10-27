@@ -107,6 +107,38 @@ class CsvImageStartupTests(unittest.TestCase):
                 patch.object(spot_api, '_spot_diagnostic_journal_shutdown_started', False):
             asyncio.run(exercise())
 
+    def test_fact_access_failure_survives_directory_probe_and_recovers(self):
+        writer = SpotImageCaptureWriter(log_path=self.root / 'fact', capture_root=self.root / 'images')
+        writer.write_capture(image_bytes=b'preserved capture', captured_at=1793106000.0,
+                             source_url='http://spot.invalid/image.jpg', source='test',
+                             image_age_ms=None, link_checked_at=None, observation_snapshot=None)
+        original = writer.fact_path.read_bytes()
+        file_open = Path.open
+        blocked = [True]
+
+        def open_file(path, mode='r', *args, **kwargs):
+            if path == writer.fact_path and any(flag in mode for flag in ('+', 'a', 'w')) and blocked[0]:
+                raise PermissionError('required fact file is temporarily locked')
+            return file_open(path, mode, *args, **kwargs)
+
+        with patch.object(Path, 'open', open_file):
+            result = {item['sink_id']: item for item in writer.probe_storage_destinations(captured_at=1793106000.0)}
+            self.assertEqual(result['image_fact']['probe_status'], 'available')
+            self.assertEqual(result['image_fact'].get('current_storage_availability', 'unknown'), 'blocked')
+            self.assertEqual(result['image_fact']['file_check_error_type'], 'PermissionError')
+            self.assertFalse(result['image_fact']['manual_recovery_required'])
+            self.assertEqual(result['image_jpeg']['current_storage_availability'], 'available')
+            self.assertIsNotNone(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'])
+            blocked[0] = False
+            recovered = {item['sink_id']: item for item in writer.probe_storage_destinations(captured_at=1793106000.0)}
+        self.assertEqual(recovered['image_fact']['current_storage_availability'], 'available')
+        self.assertEqual(recovered['image_fact']['file_check_scope'], 'existing_fact_access')
+        self.assertIsNone(recovered['image_fact']['file_check_error_type'])
+        self.assertIsNone(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'])
+        self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
+        self.assertEqual(writer.fact_path.read_bytes(), original)
+        self.assertEqual(writer.written_count, 1)
+
     def test_destination_probe_does_not_reuse_fact_directory_success(self):
         log_path = self.root / 'fact'
         log_path.mkdir()
