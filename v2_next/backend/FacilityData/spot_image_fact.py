@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, Generator, Mapping, Optional, TextIO
 
 from backend.FacilityData.spot_observation_fact import build_spot_observation_key
-from backend.FacilityData.persistence_payload import PayloadBudgetExceeded
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, csv_record_sizes
 
 
 SPOT_IMAGE_FACT_COLUMNS = [
@@ -189,7 +189,6 @@ class SpotImageCaptureWriter:
         mime, width, height, extension = image_metadata(image_bytes)
         relative_path = self._relative_image_path(captured_dt, capture_id, extension)
         output_path = self.capture_root / captured_dt.strftime("%Y") / captured_dt.strftime("%m") / captured_dt.strftime("%d")
-        output_path.mkdir(parents=True, exist_ok=True)
         image_path = output_path / f"{capture_id}{extension}"
 
         fact = build_spot_image_fact(
@@ -208,6 +207,8 @@ class SpotImageCaptureWriter:
             link_stale_threshold_ms=self.link_stale_threshold_ms,
             observation_snapshot=observation_snapshot,
         )
+        if csv_record_sizes(fact[column] for column in SPOT_IMAGE_FACT_COLUMNS)[1] > SPOT_IMAGE_FACT_ROW_BYTE_LIMIT:
+            raise PayloadBudgetExceeded("image_fact_row_byte_limit")
 
         existing_fact = self._cached_fact_for_capture_id(capture_id)
         if existing_fact is None and self._capture_may_already_be_recorded(
@@ -218,6 +219,7 @@ class SpotImageCaptureWriter:
         if existing_fact is not None and any(existing_fact.get(key) != fact[key] for key in SPOT_IMAGE_FACT_COLUMNS):
             raise RuntimeError("SPOT image capture identity conflicts with stored fact")
 
+        output_path.mkdir(parents=True, exist_ok=True)
         if not self._reuse_capture_file(image_path, image_bytes):
             tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
             tmp_path.write_bytes(image_bytes)
