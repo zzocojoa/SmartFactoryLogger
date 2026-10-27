@@ -19,6 +19,7 @@ from backend.FacilityData.persistence_trace import TRACE_SEGMENT_BYTE_LIMIT, TRA
 # is not a CSV row limit. Hash reads retain only one 4 KiB chunk.
 CSV_ROW_READ_LIMIT = 64 * 1024**2
 CSV_READ_CHUNK_BYTES = 4096
+CSV_METADATA_READ_LIMIT = TRACE_SEGMENT_BYTE_LIMIT
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -572,6 +573,53 @@ def _csv_file_extent_issues(database: sqlite3.Connection, roots: Sequence[tuple[
     return issues, checked
 
 
+def _read_csv_metadata(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> tuple[str | None, set[str]]:
+    path = Path(record["file_path"]).with_suffix(".metadata.json")
+    if not any(path.is_relative_to(raw) or path.is_relative_to(resolved) for raw, resolved in roots):
+        return None, {"csv_metadata_outside_allowed_roots"}
+    try:
+        resolved_path = path.resolve(strict=True)
+        if not any(resolved_path.is_relative_to(resolved) for _, resolved in roots):
+            return None, {"csv_metadata_outside_allowed_roots"}
+        if not stat.S_ISREG(resolved_path.stat().st_mode):
+            return None, {"csv_metadata_not_regular_file"}
+        with resolved_path.open("rb") as handle:
+            before = os.fstat(handle.fileno())
+            raw = handle.read(CSV_METADATA_READ_LIMIT + 1)
+            after = os.fstat(handle.fileno())
+            if _file_signature(before) != _file_signature(after) or _file_signature(after) != _file_signature(resolved_path.stat()):
+                return None, {"csv_metadata_changed_during_validation"}
+        if len(raw) > CSV_METADATA_READ_LIMIT:
+            return None, {"csv_metadata_byte_limit"}
+        text = raw.decode("utf-8-sig")
+        if not isinstance(json.loads(text, object_pairs_hook=_unique_object), dict):
+            return None, {"invalid_csv_metadata"}
+        return text, set()
+    except FileNotFoundError:
+        return None, {"csv_metadata_missing"}
+    except (UnicodeError, ValueError, RecursionError):
+        return None, {"invalid_csv_metadata"}
+    except (OSError, RuntimeError):
+        return None, {"csv_metadata_read_error"}
+
+
+def _index_csv_metadata_files(database: sqlite3.Connection, roots: Sequence[tuple[Path, Path]]) -> tuple[set[str], int]:
+    issues: set[str] = set()
+    checked = 0
+    for device, file_id in database.execute("SELECT DISTINCT device, file_id FROM csv_file_ranges"):
+        (body,) = database.execute("SELECT body FROM csv_file_ranges WHERE device=? AND file_id=? "
+                                   "ORDER BY length(end_byte) DESC, end_byte DESC LIMIT 1", (device, file_id)).fetchone()
+        record = json.loads(body)
+        if record["sink_id"] != "csv_v2":
+            continue
+        checked += 1
+        metadata, errors = _read_csv_metadata(record, roots)
+        issues.update(errors)
+        if metadata is not None:
+            database.execute("INSERT INTO csv_metadata VALUES (?, ?)", (record["file_extent_id"], metadata))
+    return issues, checked
+
+
 def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, data_roots: Sequence[Path]) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
@@ -716,6 +764,10 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     configuration_issues.update(_csv_configuration_issues(database))
     extent_issues, checked_files = _csv_file_extent_issues(database, roots)
     file_issues.update(extent_issues)
+    metadata_issues: set[str] = set()
+    checked_metadata = 0
+    if data_roots and not (byte_issues or file_issues):
+        metadata_issues, checked_metadata = _index_csv_metadata_files(database, roots)
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -731,6 +783,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     issues.update(destination_issues)
     issues.update(configuration_issues)
     issues.update(file_issues)
+    issues.update(metadata_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -743,6 +796,9 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                                         if closeout_evaluated and summaries == 1 else "NOT_EVALUATED"),
             "checked_csv_rows": checked_rows,
             "checked_csv_files": checked_files,
+            "checked_csv_metadata": checked_metadata,
+            "metadata_read_status": ("INCOMPLETE" if byte_issues or file_issues or metadata_issues else "VERIFIED"
+                                     if checked_metadata else "NOT_EVALUATED"),
             "file_extent_status": "INCOMPLETE" if byte_issues or file_issues else "VERIFIED" if checked_files else "NOT_EVALUATED",
             "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "destination_status": "INCOMPLETE" if byte_issues or destination_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
@@ -774,6 +830,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE INDEX csv_boundary_extent ON csv_file_boundaries(extent)")
                 database.execute("CREATE TABLE csv_file_ranges (device TEXT, file_id TEXT, first_byte TEXT, end_byte TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_file_range_order ON csv_file_ranges(device, file_id, length(first_byte), first_byte)")
+                database.execute("CREATE TABLE csv_metadata (extent TEXT PRIMARY KEY, body TEXT)")
                 database.execute("CREATE TABLE csv_configurations (generation TEXT, effective TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_configuration_order ON csv_configurations(length(effective), effective)")
                 return _validate_csv_trace(paths, database, data_roots)
@@ -784,4 +841,5 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",
                 "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED",
                 "configuration_status": "NOT_EVALUATED", "checked_csv_files": 0,
-                "file_extent_status": "NOT_EVALUATED", "runtime_closeout_status": "NOT_EVALUATED"}
+                "file_extent_status": "NOT_EVALUATED", "runtime_closeout_status": "NOT_EVALUATED",
+                "checked_csv_metadata": 0, "metadata_read_status": "NOT_EVALUATED"}

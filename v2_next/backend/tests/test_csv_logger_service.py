@@ -67,6 +67,60 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_requires_actual_csv_metadata(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=False, csv_v2_enabled=True)
+            service.apply_config(csv_v2_sidecar_enabled=True)
+            service.start()
+            try:
+                for second in range(2):
+                    service.enqueue_detailed(self.create_data(f"2026-03-09T07:20:{25 + second}.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"], [])
+            metadata_path, = tmp_dir.glob("Factory_Integrated_Log*.metadata.json")
+            original = metadata_path.read_bytes()
+            metadata_path.unlink()
+            traces = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_metadata_missing", result["issues"],
+                          "a closed v2 file without its actual metadata was ignored")
+            self.assertEqual(result["metadata_read_status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["file_extent_status"], "VERIFIED")
+            self.assertEqual(result["runtime_closeout_status"], "VERIFIED")
+            self.assertEqual({path: path.read_bytes() for path in paths}, traces)
+            metadata_path.write_bytes(original)
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["metadata_read_status"], "VERIFIED")
+            self.assertEqual(result["checked_csv_metadata"], 1)
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual(validate_csv_persistence_trace(paths)["metadata_read_status"], "NOT_EVALUATED")
+            for content, issue in ((b"{", "invalid_csv_metadata"), (b"[]", "invalid_csv_metadata"),
+                                   (b"\xff", "invalid_csv_metadata"),
+                                   (b'{"schema_metadata":{},"schema_metadata":{}}', "invalid_csv_metadata"),
+                                   (b" " * (1024**2 + 1), "csv_metadata_byte_limit")):
+                with self.subTest(issue=issue, size=len(content)):
+                    metadata_path.write_bytes(content)
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["metadata_read_status"], "INCOMPLETE")
+                    self.assertEqual(metadata_path.read_bytes(), content)
+            metadata_path.write_bytes(original)
+            original_open = Path.open
+
+            def deny_metadata(path, mode="r", *args, **kwargs):
+                if path == metadata_path and mode == "rb":
+                    raise PermissionError("injected metadata read denial")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", deny_metadata):
+                result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_metadata_read_error", result["issues"])
+            self.assertEqual(metadata_path.read_bytes(), original)
+
     def test_validator_preserves_metadata_closeout_failure(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             original_replace = Path.replace
