@@ -311,6 +311,7 @@ class PersistenceTraceWriter:
             raise _TraceContentUncertain("trace_publication_changed_after_access")
 
     def _publish(self, segment: _TraceSegment) -> tuple[Path, tuple[int, int, int, int]]:
+        self._check_latest_publication()
         self.root.mkdir(parents=True, exist_ok=True)
         stem = f"{self._instance_id}-{segment.sequence:08d}"
         final = self.root / f"{stem}.trace.jsonl"
@@ -390,6 +391,8 @@ class PersistenceTraceWriter:
                 now = self.clock()
                 if self._next_retry_monotonic is not None and now < self._next_retry_monotonic:
                     return False  # Producer/closeout force cannot bypass an owned retry schedule.
+                if self._probe_failed and now < self._next_probe_monotonic:
+                    return False  # New evidence cannot bypass failed required-file access.
                 if (not force and not segment.sealed and len(segment.records) < TRACE_SEGMENT_RECORD_LIMIT
                         and segment.size < TRACE_SEGMENT_BYTE_LIMIT and now < segment.flush_due_monotonic):
                     return True

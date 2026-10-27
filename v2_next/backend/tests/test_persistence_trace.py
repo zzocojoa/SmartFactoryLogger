@@ -13,6 +13,51 @@ from backend.FacilityData.freshness import clock_domain_id
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_new_trace_records_cannot_bypass_failed_required_file(self):
+        clock, denied, attempts = [100.0], [True], []
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "required-file-retry", clock=lambda: clock[0])
+            writer.append({"kind": "first"})
+            self.assertTrue(writer.flush(force=True))
+            final, = root.glob("*.trace.jsonl")
+            original = final.read_bytes()
+
+            def open_file(path, *args, **kwargs):
+                if path == final and denied[0]:
+                    attempts.append(clock[0])
+                    raise PermissionError("injected required trace access failure")
+                return original_open(path, *args, **kwargs)
+
+            with patch.object(Path, "open", open_file):
+                clock[0] = 101.0
+                writer.probe_storage()
+                self.assertEqual(writer.snapshot()["current_storage_availability"], "blocked")
+                writer.append({"kind": "second"})
+                clock[0] = 101.5
+                self.assertFalse(writer.flush(force=True),
+                                 "new trace record bypassed a failed required file")
+                self.assertEqual(attempts, [101.0])
+                clock[0] = 102.0
+                self.assertFalse(writer.flush(force=True))
+                self.assertEqual(attempts, [101.0, 102.0])
+                self.assertEqual(len(list(root.glob("*.trace.jsonl"))), 1)
+                self.assertEqual(list(root.glob("*.pending")), [])
+                self.assertEqual(writer.snapshot()["pending_records"], 1)
+                denied[0] = False
+                clock[0] = 103.0
+                self.assertTrue(writer.flush(force=True))
+            state = writer.snapshot()
+            self.assertEqual(state["current_storage_availability"], "available")
+            self.assertEqual(state["failure_count"], 1)
+            self.assertEqual(state["probe_failure_count"], 1)
+            self.assertEqual(state["pending_records"], 0)
+            self.assertEqual(final.read_bytes(), original)
+            kinds = [json.loads(line)["kind"] for path in sorted(root.glob("*.trace.jsonl"))
+                     for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(kinds, ["first", "second"])
+
     def test_trace_probe_preserves_changed_publication(self):
         for change in ("replace", "delete", "edit"):
             with self.subTest(change=change), tempfile.TemporaryDirectory() as folder:
