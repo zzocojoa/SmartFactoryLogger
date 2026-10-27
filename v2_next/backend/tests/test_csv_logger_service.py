@@ -67,6 +67,85 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_preserves_metadata_closeout_failure(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            original_replace = Path.replace
+            failures = []
+
+            def fail_final_metadata(path, destination):
+                if path.name.endswith(".metadata.json.tmp"):
+                    metadata = json.loads(path.read_text(encoding="utf-8-sig"))
+                    if metadata.get("csv_closeout", {}).get("finalized") is True:
+                        failures.append(str(path))
+                        raise OSError("injected metadata closeout replacement failure")
+                return original_replace(path, destination)
+
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.apply_config(csv_v2_sidecar_enabled=True)
+            with patch.object(Path, "replace", fail_final_metadata):
+                service.start()
+                try:
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+                finally:
+                    self.assertFalse(service.stop(timeout_sec=5))
+            self.assertTrue(failures, "the actual sidecar replacement did not fail")
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            originals = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_runtime_closeout_failed", result["issues"],
+                          "metadata closeout failed after CSV data but the independent audit ignored it")
+            self.assertEqual(result["runtime_closeout_status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["file_extent_status"], "VERIFIED")
+            self.assertEqual({path: path.read_bytes() for path in paths}, originals)
+
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            service.start()
+            try:
+                service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            originals = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["runtime_closeout_status"], "VERIFIED")
+            cases = [({"data_closeout_succeeded": False}, "csv_runtime_closeout_failed"),
+                     ({"runtime_write_failure_observed": True}, "csv_runtime_closeout_failed"),
+                     ({"csv_write_failure_count": 1}, "recorded_csv_write_failure"),
+                     ({"processing_failure_count": 1}, "recorded_csv_write_failure"),
+                     ({"pending_event_count": 1}, "csv_shutdown_pending_count_mismatch"),
+                     ({"unresolved_file_owner_count": 1}, "unresolved_csv_shutdown_state"),
+                     ({"unclosed_handle_count": 1}, "unresolved_csv_shutdown_state"),
+                     ({"pending_event_count": True}, "invalid_csv_closeout_state"),
+                     ({"csv_write_failure_count": -1}, "invalid_csv_closeout_state"),
+                     ({"data_closeout_succeeded": "true"}, "invalid_csv_closeout_state"),
+                     ({"contract_version": "future"}, "unsupported_csv_closeout_contract"),
+                     ("trace", "csv_trace_history_incomplete"), ("missing", None)]
+            for change, issue in cases:
+                with self.subTest(change=change):
+                    for path, content in originals.items():
+                        amended = []
+                        for line in content.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record.get("kind") == "admission_summary":
+                                if change == "missing":
+                                    record.pop("runtime_closeout")
+                                elif change == "trace":
+                                    record["trace_failure_count"] = 1
+                                else:
+                                    record["runtime_closeout"].update(change)
+                                line = (json.dumps(record) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(paths)
+                    if issue:
+                        self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["runtime_closeout_status"], "INCOMPLETE" if issue else "NOT_EVALUATED")
+                    self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+
     def test_validator_accepts_successive_file_owners(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir / "first", True, csv_v1_enabled=True, csv_v2_enabled=True)

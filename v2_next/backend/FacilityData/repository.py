@@ -3710,7 +3710,7 @@ class CSVLoggerService:
         self._finish_csv_decode(None)
         return flushed
 
-    def _finish_persistence_trace(self) -> bool:
+    def _finish_persistence_trace(self, *, data_closeout_succeeded: bool) -> bool:
         if self._persistence_trace is None:
             self._begin_persistence_trace(self._write_settings())
         trace = self._persistence_trace
@@ -3753,6 +3753,14 @@ class CSVLoggerService:
             sink_outcomes = self._csv_persistence_outcomes_locked()
             sink_outcomes["coverage"] = "TERMINAL_REQUIRED_SINK_COUNTS"
             failure_evidence_pending = bool(self._pending_csv_failure_evidence)
+            closeout = {"contract_version": "CSV_SHUTDOWN_STATE_V1",
+                        "data_closeout_succeeded": data_closeout_succeeded,
+                        "runtime_write_failure_observed": self._runtime_write_failure_observed,
+                        "csv_write_failure_count": self._csv_write_failure_count,
+                        "processing_failure_count": self._processing_failure_count,
+                        "pending_event_count": len(self._pending_events),
+                        "unresolved_file_owner_count": len(self._csv_file_extents),
+                        "unclosed_handle_count": len(self._unclosed_csv_handles)}
         if state["pending_records"] or admission["pending_outcome_count"] or failure_evidence_pending:
             return False  # A terminal summary must not precede its retained ranges.
         summary = dict(admission, kind="admission_summary", contract_version="CSV_ADMISSION_SUMMARY_V1",
@@ -3760,7 +3768,7 @@ class CSVLoggerService:
                        admission_evidence_status="INCOMPLETE" if admission["details_incomplete"] else "RECORDED",
                        data_integrity_status="NOT_EVALUATED", trace_failure_count=state["failure_count"],
                        trace_incomplete=state["incomplete"], trace_boundary_failed=self._trace_boundary_failed,
-                       required_sink_outcomes=sink_outcomes)
+                       required_sink_outcomes=sink_outcomes, runtime_closeout=closeout)
         summary_token = trace.append(summary)
         if summary_token is None:
             self._trace_boundary_failed = True
@@ -4298,7 +4306,7 @@ class CSVLoggerService:
             self.logger.warning(
                 "Skipped SPOT image fact final manifest because image capture did not drain."
             )
-        if not self._finish_persistence_trace():
+        if not self._finish_persistence_trace(data_closeout_succeeded=shutdown_flush_succeeded):
             shutdown_flush_succeeded = False
         self._shutdown_flush_succeeded = shutdown_flush_succeeded and not self._runtime_write_failure_observed
         del self._writer_context.settings

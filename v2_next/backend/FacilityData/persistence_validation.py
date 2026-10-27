@@ -225,6 +225,35 @@ def _file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
+def _runtime_closeout_issues(summary: dict[str, Any]) -> tuple[set[str], bool]:
+    if "runtime_closeout" not in summary:
+        return set(), False  # Legacy aggregate totals do not prove closeout.
+    closeout = summary["runtime_closeout"]
+    if not isinstance(closeout, dict) or closeout.get("contract_version") != "CSV_SHUTDOWN_STATE_V1":
+        return {"unsupported_csv_closeout_contract"}, True
+    counts = ("csv_write_failure_count", "processing_failure_count", "pending_event_count",
+              "unresolved_file_owner_count", "unclosed_handle_count")
+    flags = ("data_closeout_succeeded", "runtime_write_failure_observed")
+    if (any(type(closeout.get(key)) is not int or closeout[key] < 0 for key in counts)
+            or any(type(closeout.get(key)) is not bool for key in flags)
+            or type(summary.get("trace_failure_count")) is not int or summary["trace_failure_count"] < 0
+            or any(type(summary.get(key)) is not bool for key in ("trace_incomplete", "trace_boundary_failed"))):
+        return {"invalid_csv_closeout_state"}, True
+    issues: set[str] = set()
+    if not closeout["data_closeout_succeeded"] or closeout["runtime_write_failure_observed"]:
+        issues.add("csv_runtime_closeout_failed")
+    if closeout["csv_write_failure_count"] or closeout["processing_failure_count"]:
+        issues.add("recorded_csv_write_failure")
+    if any(closeout[key] for key in ("pending_event_count", "unresolved_file_owner_count", "unclosed_handle_count")):
+        issues.add("unresolved_csv_shutdown_state")
+    outcomes = summary.get("required_sink_outcomes")
+    if not isinstance(outcomes, dict) or closeout["pending_event_count"] != outcomes.get("outstanding_event_count"):
+        issues.add("csv_shutdown_pending_count_mismatch")
+    if summary["trace_failure_count"] or summary["trace_incomplete"] or summary["trace_boundary_failed"]:
+        issues.add("csv_trace_history_incomplete")
+    return issues, True
+
+
 def _index_csv_configuration(database: sqlite3.Connection, record: dict[str, Any], body: str) -> set[str]:
     generation, effective = record.get("config_generation"), record.get("effective_from_producer_seq")
     sinks, destination = record.get("required_sinks"), record.get("admitted_log_dir")
@@ -553,6 +582,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     summary_bounds: tuple[int, int] | None = None
     identities: dict[str, str] = {}
     terminal_summary: dict[str, Any] | None = None
+    closeout_issues: set[str] = set()
+    closeout_evaluated = False
     byte_issues: set[str] = set()
     content_issues: set[str] = set()
     destination_issues: set[str] = set()
@@ -678,6 +709,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     if terminal_summary is not None:
         issues.update(_admission_identity_issues(database, terminal_summary))
         issues.update(_terminal_output_issues(database, terminal_summary))
+        closeout_issues, closeout_evaluated = _runtime_closeout_issues(terminal_summary)
+        issues.update(closeout_issues)
     issues.update(_required_sink_issues(database))
     issues.update(_csv_location_issues(database))
     configuration_issues.update(_csv_configuration_issues(database))
@@ -706,6 +739,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED",
+            "runtime_closeout_status": ("INCOMPLETE" if closeout_issues else "VERIFIED"
+                                        if closeout_evaluated and summaries == 1 else "NOT_EVALUATED"),
             "checked_csv_rows": checked_rows,
             "checked_csv_files": checked_files,
             "file_extent_status": "INCOMPLETE" if byte_issues or file_issues else "VERIFIED" if checked_files else "NOT_EVALUATED",
@@ -749,4 +784,4 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",
                 "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED",
                 "configuration_status": "NOT_EVALUATED", "checked_csv_files": 0,
-                "file_extent_status": "NOT_EVALUATED"}
+                "file_extent_status": "NOT_EVALUATED", "runtime_closeout_status": "NOT_EVALUATED"}
