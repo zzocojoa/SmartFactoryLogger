@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import queue
+import stat
 import threading
 import time
 from datetime import date, datetime, timezone
@@ -475,6 +476,7 @@ class CSVLoggerService:
         self._csv_file_extents: dict[int, dict[str, Any]] = {}
         # Only current and still-admitted generations retain probe metadata.
         self._csv_storage_probes: dict[tuple[int, str], dict[str, Any]] = {}
+        self._csv_probe_files: dict[tuple[int, str], dict[str, Any]] = {}
         self._csv_probe_failure_count = 0
         self._csv_probe_workspace_bytes = 0
         self._uncertain_csv_paths: set[Path] = set()
@@ -630,6 +632,7 @@ class CSVLoggerService:
             with self._runtime_lock:
                 self._csv_next_flush_monotonic = time.monotonic() + CSV_FLUSH_INTERVAL_SECONDS
                 self._csv_storage_probes.clear()
+                self._csv_probe_files.clear()
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
@@ -1167,6 +1170,7 @@ class CSVLoggerService:
         settings = self._write_settings()
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
+        self._remember_csv_probe_file("csv_v1", full_path)
         handle = None
         try:
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
@@ -1254,6 +1258,7 @@ class CSVLoggerService:
         filename = f"{prefix}_{timestamp_str}.csv"
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
+        self._remember_csv_probe_file("csv_v2", full_path)
         handle = None
         try:
             if full_path.exists() and full_path.stat().st_size > 0:
@@ -1272,6 +1277,7 @@ class CSVLoggerService:
                         contract.schema_version,
                     )
                     full_path = rollover_path
+                    self._remember_csv_probe_file("csv_v2", full_path)
                     if full_path.exists() and full_path.stat().st_size > 0:
                         if not self._v2_header_matches_current_schema(full_path, contract):
                             self.logger.error(
@@ -3444,6 +3450,7 @@ class CSVLoggerService:
                   "start_byte": info.st_size}
         self._append_csv_file_boundary(dict(extent, kind="csv_file_start"))
         self._csv_file_extents[id(handle)] = extent
+        self._remember_csv_probe_file(sink, path, identity=(info.st_dev, info.st_ino))
 
     def _close_file(self, handle: Optional[TextIO]) -> bool:
         if handle is None:
@@ -3859,11 +3866,76 @@ class CSVLoggerService:
                 "probe_scope": "directory_only", "probe_status": "unknown", "probe_error": None,
                 "probe_failure_count": 0, "last_probe_monotonic": None,
                 "last_probe_success_monotonic": None, "next_probe_monotonic": 0.0,
-                "retry_delay_sec": 1.0, "clock_domain": clock_domain_id()}
+                "retry_delay_sec": 1.0, "clock_domain": clock_domain_id(),
+                "required_file_key": None, "file_check_scope": "not_checked", "file_check_error": None,
+                "file_check_failure_count": 0, "manual_recovery_required": False,
+                "current_storage_availability": "unknown"}
+
+    def _remember_csv_probe_file(self, sink: str, path: Path,
+                                 identity: Optional[tuple[int, int]] = None) -> None:
+        settings = getattr(self._writer_context, "settings", None)
+        if settings is None:
+            return  # Legacy direct file access has no running owner contract.
+        key = settings.generation, sink
+        self._csv_probe_files[key] = {"path": path, "identity": identity}
+        with self._runtime_lock:
+            state = self._csv_storage_probes.get(key)
+            if state is not None:
+                state.update(current_storage_availability="unknown", next_probe_monotonic=0.0)
+
+    def _check_csv_probe_file(self, key: tuple[int, str]) -> str:
+        """Confirm access without appending, truncating or replacing the CSV."""
+        required = self._csv_probe_files.get(key)
+        if required is None:
+            return "no_current_file"
+        path, identity = required["path"], required["identity"]
+        if identity is None:
+            raise OSError("csv_file_initialization_unconfirmed")
+
+        def file_identity(info: os.stat_result) -> tuple[int, int]:
+            if not stat.S_ISREG(info.st_mode) or not info.st_ino:
+                raise _CSVRecordUncertain("csv_probe_file_identity_unavailable")
+            return info.st_dev, info.st_ino
+
+        try:
+            before = path.lstat()
+            if file_identity(before) != identity:
+                raise _CSVRecordUncertain("csv_probe_file_replaced")
+            handle = path.open("r+b", buffering=0)
+            try:
+                opened = os.fstat(handle.fileno())
+                if file_identity(opened) != identity:
+                    raise _CSVRecordUncertain("csv_probe_opened_file_replaced")
+                handle.read(1)
+                after = os.fstat(handle.fileno())
+                if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                    raise _CSVRecordUncertain("csv_probe_file_changed_during_read")
+            finally:
+                try:
+                    handle.close()
+                except Exception as exc:
+                    with self._runtime_lock:
+                        if not handle.closed:
+                            self._unclosed_csv_handles[id(handle)] = handle
+                    raise _CSVRecordUncertain("csv_probe_close_unconfirmed") from exc
+            current = path.lstat()
+            if (file_identity(current) != identity
+                    or (after.st_size, after.st_mtime_ns) != (current.st_size, current.st_mtime_ns)):
+                raise _CSVRecordUncertain("csv_probe_file_changed_after_close")
+        except (FileNotFoundError, _CSVRecordUncertain):
+            with self._runtime_lock:
+                self._uncertain_csv_paths.add(path)
+                self._csv_manual_recovery_required = True
+            raise
+        return "existing_csv_identity_and_access"
 
     def _csv_storage_snapshot_locked(self, current: CSVWriteConfig) -> list[dict[str, Any]]:
-        return [dict(self._csv_storage_probes.get(key) or self._new_csv_probe_state(*key, directory))
-                for key, directory in self._csv_storage_targets_locked(current).items()]
+        results = [dict(self._csv_storage_probes.get(key) or self._new_csv_probe_state(*key, directory))
+                   for key, directory in self._csv_storage_targets_locked(current).items()]
+        if self._csv_manual_recovery_required:
+            for state in results:
+                state.update(current_storage_availability="blocked", manual_recovery_required=True)
+        return results
 
     def _refresh_csv_storage_probe(self) -> None:
         """One bounded directory probe on the existing writer, never on readers."""
@@ -3874,6 +3946,7 @@ class CSVLoggerService:
         now = time.monotonic()
         with self._runtime_lock:
             targets = self._csv_storage_targets_locked(current)
+            self._csv_probe_files = {key: value for key, value in self._csv_probe_files.items() if key in targets}
             self._csv_storage_probes = {key: self._csv_storage_probes.get(key)
                                        or self._new_csv_probe_state(*key, directory)
                                        for key, directory in targets.items()}
@@ -3883,17 +3956,32 @@ class CSVLoggerService:
                 return
             _, key = min(due)
             state = dict(self._csv_storage_probes[key])
-        error = None
+        error = file_error = None
+        file_scope = "not_checked"
         try:
             with self._reserve_csv_output(128, probe=True):
                 _probe_storage_directory(targets[key])
         except Exception as exc:
             error = type(exc).__name__
+        required = self._csv_probe_files.get(key)
+        if error is None and not self._csv_needs_manual_recovery():
+            try:
+                with self._reserve_csv_output(128, probe=True):
+                    file_scope = self._check_csv_probe_file(key)
+            except Exception as exc:
+                file_error = type(exc).__name__
         finished = time.monotonic()
+        manual = self._csv_needs_manual_recovery()
         state.update(last_probe_monotonic=finished, probe_error=error,
-                     probe_status="blocked" if error else "available")
-        if error:
-            state["probe_failure_count"] += 1
+                     probe_status="blocked" if error else "available",
+                     required_file_key=(hashlib.sha256(str(required["path"]).encode("utf-8")).hexdigest()
+                                        if required is not None else None),
+                     file_check_scope=file_scope, file_check_error=file_error,
+                     manual_recovery_required=manual,
+                     current_storage_availability="blocked" if error or file_error or manual else "available")
+        state["probe_failure_count"] += int(error is not None)
+        state["file_check_failure_count"] += int(file_error is not None)
+        if error or file_error or manual:
             state["next_probe_monotonic"] = finished + state["retry_delay_sec"]
             state["retry_delay_sec"] = min(30.0, state["retry_delay_sec"] * 2)
         else:
@@ -3901,7 +3989,7 @@ class CSVLoggerService:
                          next_probe_monotonic=finished + 1.0)
         with self._runtime_lock:
             self._csv_storage_probes[key] = state
-            self._csv_probe_failure_count += int(error is not None)
+            self._csv_probe_failure_count += int(error is not None or file_error is not None)
 
     def _csv_pending_data_stages_locked(self) -> list[dict[str, Any]]:
         """In-memory data-stage clocks, independent of later evidence confirmation.
@@ -4327,7 +4415,8 @@ class CSVLoggerService:
                 item = envelope = row = v2_row = None
                 self._finish_csv_decode(decoded_sequence)
 
-        shutdown_flush_succeeded = not self._runtime_write_failure_observed and self._processing_failure_count == 0
+        shutdown_flush_succeeded = (not self._runtime_write_failure_observed and self._processing_failure_count == 0
+                                    and not self._csv_needs_manual_recovery())
         if buffer:
             try:
                 if auto_save and (f_handle is None or writer is None):
@@ -4458,7 +4547,8 @@ class CSVLoggerService:
             )
         if not self._finish_persistence_trace(data_closeout_succeeded=shutdown_flush_succeeded):
             shutdown_flush_succeeded = False
-        self._shutdown_flush_succeeded = shutdown_flush_succeeded and not self._runtime_write_failure_observed
+        self._shutdown_flush_succeeded = (shutdown_flush_succeeded and not self._runtime_write_failure_observed
+                                          and not self._csv_needs_manual_recovery())
         del self._writer_context.settings
         self.logger.info("CSV logger thread stopped.")
 
