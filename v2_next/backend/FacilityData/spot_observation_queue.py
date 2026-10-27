@@ -6,6 +6,7 @@ a promise of lossless operation through an unbounded storage outage.
 from __future__ import annotations
 
 import copy
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
@@ -23,6 +24,7 @@ from backend.FacilityData.persistence_payload import (
 from backend.FacilityData.spot_observation_fact import (
     FactPayloadBudgetExceeded, SpotObservationFactWriter, build_spot_observation_key,
 )
+from backend.FacilityData.freshness import clock_domain_id
 
 
 FACT_PENDING_PAYLOAD_BYTE_LIMIT = 16 * 1024**2
@@ -62,6 +64,9 @@ class SpotObservationQueue:
             raise ValueError("capacity must be positive")
         self._factory = factory
         self._queue: queue.Queue[_FactEvent] = queue.Queue(maxsize=capacity)
+        # FIFO timestamps remain owned through the in-flight write, bounded by
+        # the same admitted-item limit as the payload queue.
+        self._pending_enqueued_at: deque[float] = deque()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._writer: SpotObservationFactWriter | None = None
@@ -125,8 +130,9 @@ class SpotObservationQueue:
                 payload = _encode_json_payload(source)
                 if len(payload) != payload_size:
                     raise ValueError("JSON payload size changed after reservation")
-                self._queue.put_nowait(_FactEvent(payload, text_characters * text_width,
-                                                  observation_key, time.monotonic()))
+                event = _FactEvent(payload, text_characters * text_width, observation_key, time.monotonic())
+                self._queue.put_nowait(event)
+                self._pending_enqueued_at.append(event.enqueued_at)
                 self._state["accepted_count"] += 1
                 self._state["pending_source_payload_bytes"] += payload_size
                 accepted = True
@@ -153,6 +159,12 @@ class SpotObservationQueue:
         # Never wait on a writer/file/spool lock, scan, or filesystem call.
         with self._lock:
             state = dict(self._state)
+            oldest = self._pending_enqueued_at[0] if self._pending_enqueued_at else None
+            state["oldest_pending_monotonic"] = oldest
+            # Fact data has no scheduled flush delay. Retries or newer arrivals
+            # must not postpone the immediate stage deadline fixed at admission.
+            state["stage_due_monotonic"] = oldest
+            state["clock_domain"] = clock_domain_id()
         state["pending_write_count"] = state["accepted_count"] - state["completed_count"]
         state["queue_depth"] = self._queue.qsize()
         state["writer_alive"] = self._thread.is_alive()
@@ -311,6 +323,7 @@ class SpotObservationQueue:
                 del event
                 with self._lock:
                     self._state["inflight"] = False
+                    self._pending_enqueued_at.popleft()
                     self._state["completed_count"] += 1
                     self._state["pending_payload_bytes"] -= payload_size + processing_bytes
                     self._state["pending_source_payload_bytes"] -= payload_size

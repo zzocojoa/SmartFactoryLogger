@@ -17,6 +17,7 @@ import httpx
 from backend.FacilityData.drivers import spot_api
 from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter, build_spot_observation_fact
 from backend.FacilityData.spot_observation_queue import SpotObservationQueue, FactPersistencePending
+from backend.FacilityData.freshness import clock_domain_id
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.drivers.real_plc import RealPLCDriver
@@ -332,6 +333,58 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_pending_deadline_includes_inflight_without_sliding(self):
+        opened = [threading.Event(), threading.Event()]
+        release = [threading.Event(), threading.Event()]
+        original_open = Path.open
+        clock, writes = [100.0], []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def delayed_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    index = len(writes)
+                    writes.append(index)
+                    opened[index].set()
+                    if not release[index].wait(5):
+                        raise TimeoutError("test fact append not released")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", delayed_open), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    self.assertTrue(owner.enqueue(observation(1)))
+                    self.assertTrue(opened[0].wait(2))
+                    state = owner.snapshot()
+                    self.assertEqual(state["queue_depth"], 0)
+                    self.assertTrue(state["inflight"])
+                    self.assertEqual(state["pending_write_count"], 1)
+                    self.assertEqual(state.get("oldest_pending_monotonic"), 100.0)
+                    self.assertEqual(state["stage_due_monotonic"], 100.0)
+                    self.assertEqual(state["clock_domain"], clock_domain_id())
+                    clock[0] = 105.0
+                    self.assertTrue(owner.enqueue(observation(2)))
+                    self.assertEqual(owner.snapshot()["stage_due_monotonic"], 100.0)
+                    release[0].set()
+                    self.assertTrue(opened[1].wait(2))
+                    with patch.object(Path, "stat", side_effect=AssertionError("snapshot performed file I/O")):
+                        state = owner.snapshot()
+                    self.assertEqual(state["pending_write_count"], 1)
+                    self.assertEqual(state["oldest_pending_monotonic"], 105.0)
+                    self.assertEqual(state["stage_due_monotonic"], 105.0)
+                finally:
+                    for event in release:
+                        event.set()
+                    owner.close(3)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+                self.assertEqual(owner.snapshot()["pending_write_count"], 0)
+                self.assertIsNone(owner.snapshot()["oldest_pending_monotonic"])
+                self.assertIsNone(owner.snapshot()["stage_due_monotonic"])
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1", "2"])
+
     def test_initialization_failure_is_unavailable_not_closed(self):
         original_open = Path.open
         with tempfile.TemporaryDirectory() as tmp:
