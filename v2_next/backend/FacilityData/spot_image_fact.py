@@ -321,7 +321,7 @@ class SpotImageCaptureWriter:
         try:
             with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 existing_header = next(csv.reader(handle), [])
-        except (OSError, UnicodeError, csv.Error):
+        except (UnicodeError, csv.Error):
             existing_header = []
         if existing_header == SPOT_IMAGE_FACT_COLUMNS:
             return False

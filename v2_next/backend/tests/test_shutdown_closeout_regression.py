@@ -1351,6 +1351,38 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "manifest state is unavailable"):
                         _ = writer.fact_sha256
 
+    def test_image_fact_header_read_failure_preserves_original_for_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8header-read\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            first = writer.write_capture(**args)
+            original = writer.fact_path.read_bytes()
+            opened = Path.open
+
+            def fail_header_read(path, mode="r", *open_args, **kwargs):
+                if path == writer.fact_path and mode == "r":
+                    raise PermissionError(13, "temporary fact header read failure")
+                return opened(path, mode, *open_args, **kwargs)
+
+            second_args = dict(args, captured_at=args["captured_at"] + 1)
+            with patch.object(Path, "open", new=fail_header_read):
+                with self.assertRaisesRegex(PermissionError, "header read failure"):
+                    writer.write_capture(**second_args)
+            self.assertEqual(writer.fact_path.read_bytes(), original)
+            self.assertEqual(list(root.glob("*.schema-mismatch.csv")), [])
+            images = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in root.rglob("*.jpg")}
+            self.assertEqual(len(images), 2)
+            second = writer.write_capture(**second_args)
+            self.assertEqual({path: (path.read_bytes(), path.stat().st_mtime_ns) for path in images}, images)
+            with writer.fact_path.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual([row["spot_image_capture_id"] for row in rows],
+                             [first["spot_image_capture_id"], second["spot_image_capture_id"]])
+            self.assertEqual(writer.fact_sha256, hashlib.sha256(writer.fact_path.read_bytes()).hexdigest())
+
     def test_image_uncertainty_survives_writer_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
