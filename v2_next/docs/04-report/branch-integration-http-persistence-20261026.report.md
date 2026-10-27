@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~4단계 일부 진행. CSV 접수 ID·설정/경로 고정, 데이터/증거 분리 확정, 실제 행·파일 범위·종료·sidecar 대조와 QA CLI를 구현했다. 이미지 고정 ID 충돌 거부, 기존 JPEG 검산/재사용, 검산 공간 예약, 부분 fact 쓰기 뒤 해당 writer 차단을 추가했다. 전체 fact/JPEG 복구·독립 대조, 압력 제어·API/화면·관측 재사용 계약과 전체 17명세 검증은 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 현재 코드 `dbc79f20` 전체 backend 1,087시험 중1,086통과·private F01 미제공1skip, 432.346초·exit0. backend Ruff·기본 mypy12파일 exit0. 전체 health는 이미지 후속 변경 전 `4d671d6c`에서 exit0이며 최신 전체 실행으로 확대하지 않는다. 전체 구현 뒤 최종 health·새 설치본 빌드/검증·master 통합은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~4단계와 이미지 owner 재시도 일부 진행. CSV 접수·데이터/증거·행/파일/종료/sidecar 대조와 QA CLI, JPEG 검산/재사용·원래 event/예약 유지·단조 backoff·writer 교체 후 불확실 상태 보존을 구현했다. 전체 fact/JPEG 대조·손상 history 처리·압력 제어·API/화면 계약과17명세 전체는 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 최신 코드 `5157bede` 전체 backend 1,094시험 중1,093통과·private F01 미제공1skip, 439.105초·exit0. backend Ruff·기본 mypy12파일 exit0. 전체 health는 이미지 후속 변경 전 `4d671d6c`에서 exit0이다. 전체 구현 뒤 최종 health·새 설치본 빌드/검증·master 통합은 미완료 |
 
 ## 보존과 통합
 
@@ -899,3 +899,21 @@ CSV의 기존 EMA 계산을 canonical bytes 생성 전에 끝내 같은 예약 �
 `.pdca-status.json`에 누락된 HTTP 개선을 DO/부분 구현으로 등록했다. 기존 feature 기록은 보존했다. 과거 네 feature의 check/act 표시는 후속 근거와의 연결 정리가 남아 있으며, 기능 전체 미구현이나 현장 시험 전체 재실행을 뜻하지 않는다: `nsis-startup-render-performance`, `spot-camera-rest-api-conformance`, `spot-request-churn-remediation`, `spot-tcp-source-port-quarantine-v2`.
 
 원래 일곱 목표의 범위는 유지한다. 1~4는 완료,5는 작업 브랜치/upstream 완료·master 미완료,6은 부분 구현,7은 부분 검증이다. 남은 사항은 fact/JPEG 전체 복구와 독립 대조, 저장 압력/목적지 probe/재시도, API·화면·관측 참조 계약,7단계/17시나리오 전체,최종 통합 health·새 설치본 검증·master 통합이다. 운영 등록 build `cd46692a`와 승인된 예외·제외 범위는 그대로다.
+
+
+## 2026-10-27 이미지 owner의 동일 작업 복구와 경로별 불확실 상태
+
+- `732dd9c5`: 단일 image worker가 일시 OSError에 실패한 원래 capture event·접수 경로·snapshot·payload 예약을 유지한다. 새 취득/UI 요청 없이1→2→4→8→16→30초 상한으로 재시도하며, 성공한 뒤에만 작업을 완료하고 예약을 해제한다. 새 설정의 작은 capture 한도를 이미 접수한1.5MB JPEG에 소급하지 않고 기존 JPEG를 재작성하지 않는다.
+- 재시도 오류는 `retry_error_count`, 최종 실패는 기존 `failure_count`, 복구 대기는 `pending_recovery`, 성공한 복구는 `recovered_count`로 분리한다. enqueue=written+final_failure+unfinished 관계를 유지하며 복구 성공이 오류 이력이나 기존 clean 종료 조건을 지우지 않는다. 종료 시작 이후 새 재시도를 예약하지 않고, 대기 작업은 미완료·예약 유지 상태로 남긴다.
+- `eee891e3`: 부분/짧은 fact 쓰기·닫기 실패의 수동 복구 상태를 같은 프로세스의 writer 재생성·설정 변경으로 우회하지 못하게 했다. 정규화한 경로의 SHA25632bytes key를 최대4,096개 보관하며 한도를 넘으면 기존 표식을 지우지 않고 이미지 fact 쓰기를 차단한다. 다른 정상 경로는 상한 초과 전까지 별도로 사용할 수 있다. 영속 저널이나 프로세스 재시작 후 복구 보장은 추가하지 않았다.
+- `4610d46b`, `73686a4b`: 일시적인 fact 헤더 읽기 실패와 기존 capture ID 조회 실패를 그대로 전달한다. 읽지 못한 원본을 schema-mismatch 파일로 이관하거나, 없는 기록으로 캐시해 중복 append하지 않는다.
+- `cf7f06c0`: 제어한 단조 시계와 실제 파일 I/O 실패로 backoff 상한/성공 후 초기화/종료 중 중지, 실제 부분 append 후 설정 변경에도 원본 보존을 추가 검증했다. 이 두 검사는 이미 구현한 동작의 회귀 검사이며 새로운 행동 RED로 세지 않는다.
+
+행동 RED4건을 확인했다. 첫 복구 GREEN의 실패는 fixture가 실제 취득 ID를 전달하지 않고 영수증에 ID가 있으리라 가정한 오류였다. 이를 명시적인 취득 ID로 수정했다. 기존 역사 실패 fixture4건은 일시 OSError를 즉시 최종 실패로 가정해 실패했으므로 최종 실패 주입으로 명확히 분리했고, 이후 실제 종료 시작 전송 drain에서 새 재시도가 예약되는 회귀1건을 확인해 수정했다. 원래 실패 로그와 판정은 보존했다.
+
+- `5157bedec39bd85e34d18a6b5581aab9f1444a39` 전체 backend **1,094시험 중1,093통과·private F01자료 미제공1skip**,439.105초·exit0. backend Ruff·기본 mypy12파일·diff 검사도 exit0이다.
+- 관련90시험·75시험, 실제 장애 재현과 경계 회귀를 포함한20실행의 명령/전체 출력/종료 코드/해시·최종 소스5파일·고정 원문4문서 검산: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-owned-recovery/verification.json`.
+- 최초 전체 backend는1,094시험 중 CSV fixture1건 실패·1skip이었다. 초기 producer_start trace의 publish 실패가 처리 실패 증거 준비보다 먼저 발생할 수 있는데 시험이 두 사건을 같은 신호로 처리했다. 단독 통과만으로 무시하지 않고 초기 trace를 먼저 실패시키는 순서에서 두 recovery 모드 모두0≠2를 재현했다. `5157bede`는 실제 처리 실패 증거2건을 기다리도록 시험 동기화만 수정했다. 관련 CSV 저장 코드는 `a204a0b9`와 Git blob hash가 같으며 기존 증거/합계/원본 보존 assertion은 유지했다. 수정 후 단독 및 위 전체R2를 검사했다.
+- 전용 security-review 도구가 없어 단일 owner, 예약 승계, 재시도 payload 중복 없음, bounded key, 원본 자동 절단/삭제 없음과 인증/네트워크 비변경을 직접 검토했다. 서버·설치본·운영 설정·백업은 변경하지 않았다.
+
+잔여 범위는 명시적으로 유지한다. malformed 역사 fact/마지막 행 처리, 역사 ID 조회와 출력 작업 공간 상한, 고정 fact·메타데이터 실패의 전체 복구 및 독립 대조, 실제 목적지별 probe/가용성과 초기 owner 활성화, 압력 제어·API·화면·관측 참조 계약,7단계/17시나리오 전체·최종 health/새 설치본/master 통합은 미완료다. 이번 부분 검증을 RR-T03 전체 또는 정식 출시 PASS로 바꾸지 않는다. 이전 목표 턴은 감사·검증·문서 정합화·원격 반영을 완료한 PROGRESS였고 전체 일곱 목표를 줄이지 않는다.

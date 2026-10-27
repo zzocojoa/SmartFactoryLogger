@@ -4,6 +4,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Retain the original image event and payload reservation across transient I/O
+  errors, with bounded monotonic retry backoff and explicit pending/history
+  counters. Stop new retries at shutdown, preserve uncertainty across writer
+  replacement, and keep original fact files intact after temporary read errors.
+  Per-destination probing, complete integrity reconciliation and API/UI pressure
+  handling are still pending.
+
 - Verify and reuse an existing JPEG when retrying its fact append, without
   rewriting its bytes or modification time. Compare bounded file windows and
   identity before/after reading, reserve that workspace in the capture owner's

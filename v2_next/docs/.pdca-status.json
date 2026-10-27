@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T09:43:22.651280+00:00",
+  "lastUpdated": "2026-10-27T10:35:44.492886+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,22 +48293,22 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "dbc79f20",
+      "currentDevelopmentCommit": "5157bedec39bd85e34d18a6b5581aab9f1444a39",
       "lastBackendVerification": {
-        "commit": "dbc79f2003161e04ec6d68f0ba5df2146a607b58",
-        "total": 1087,
-        "passed": 1086,
+        "commit": "5157bedec39bd85e34d18a6b5581aab9f1444a39",
+        "total": 1094,
+        "passed": 1093,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-file-recovery-r2/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-owned-recovery/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
         "Bounded fact spool and capture payload accounting",
-        "Verified JPEG reuse with owner read reservation; same-ID content conflicts and uncertain fact append preserved"
+        "Same capture event/reservation retries transient I/O with bounded backoff; original JPEG reuse; process-local bounded uncertainty survives writer replacement; transient fact reads preserve originals"
       ],
       "remainingScope": [
-        "Complete fact/JPEG same-event recovery and independent data reconciliation",
+        "Complete fact/JPEG reconciliation, malformed history/tail handling and bounded historical lookup/workspace accounting",
         "Storage-pressure controller, destination probes and bounded retries",
         "API dispatch suppression and frontend timer/observation-reference contracts",
         "All r4 RV/RR-T/FR-T scenarios and final installer verification",
@@ -48319,7 +48319,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_RECHECK_20261027_63a52959/health-result.json"
       },
-      "updatedAt": "2026-10-27T09:43:22.651280+00:00"
+      "updatedAt": "2026-10-27T10:35:44.492886+00:00"
     }
   },
   "pipeline": {
@@ -50409,5 +50409,5 @@
       "scope": "approved_ui_s1_logic_review_package_server_application_collection_preservation_and_next_rollback"
     }
   ],
-  "updatedAt": "2026-10-27T09:43:22.651280+00:00"
+  "updatedAt": "2026-10-27T10:35:44.492886+00:00"
 }
