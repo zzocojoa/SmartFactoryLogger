@@ -4022,6 +4022,10 @@ async def start_spot_poll_loop():
         _spot_shutdown_transport_stopped = False
         _spot_shutdown_started_monotonic = None
     await asyncio.to_thread(_get_spot_diagnostic_request_journal)
+    if _spot_image_capture_mode() != "off":
+        # The single image owner prepares history before any capture or UI
+        # request. Its file scan must never delay temperature polling.
+        _request_spot_image_manifest_initialization()
     _start_spot_http_transport()
     _img_accepting_requests = True
     _spot_poll_running = True

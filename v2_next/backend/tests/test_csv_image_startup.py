@@ -1,4 +1,5 @@
 """CSV startup must not wait for historical image-manifest initialization."""
+import asyncio
 import json
 import tempfile
 import threading
@@ -52,6 +53,54 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertFalse(metadata['spot_image_fact_closeout']['writes_drained'])
         self.assertEqual(metadata['spot_image_fact_closeout']['reason'], 'image-persistence-pending-at-open')
         self.assertFalse(self.logger._runtime_write_failure_observed)
+
+    def test_poll_start_initializes_image_owner_without_capture(self):
+        started, release = threading.Event(), threading.Event()
+        initialize = SpotImageCaptureWriter._initialize_manifest_state
+        owners = []
+
+        def blocked(writer):
+            owners.append(threading.current_thread())
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('test initializer not released')
+            initialize(writer)
+
+        async def idle_poll():
+            await asyncio.Event().wait()
+
+        async def exercise():
+            try:
+                await asyncio.wait_for(spot_api.start_spot_poll_loop(), timeout=.5)
+                self.assertTrue(await asyncio.to_thread(started.wait, .5),
+                                'image owner did not start without a capture or UI request')
+                task = spot_api._spot_poll_task
+                self.assertFalse(task.done())
+                await spot_api.start_spot_poll_loop()
+                self.assertIs(spot_api._spot_poll_task, task)
+                self.assertEqual(len(owners), 1)
+                self.assertIsNot(owners[0], threading.current_thread())
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(spot_api._SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks, 0)
+            finally:
+                release.set()
+                task = spot_api._spot_poll_task
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
+        with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                patch.object(SpotImageCaptureWriter, '_initialize_manifest_state', blocked), \
+                patch.object(spot_api.config, 'SPOT_OBSERVATION_FACT_ENABLED', False), \
+                patch.object(spot_api, '_get_spot_diagnostic_request_journal', return_value=None), \
+                patch.object(spot_api, '_start_spot_http_transport'), \
+                patch.object(spot_api, '_spot_poll_loop', idle_poll), \
+                patch.object(spot_api, '_spot_poll_task', None), \
+                patch.object(spot_api, '_spot_poll_running', False), \
+                patch.object(spot_api, '_img_accepting_requests', False), \
+                patch.object(spot_api, '_spot_diagnostic_journal_shutdown_started', False):
+            asyncio.run(exercise())
 
     def test_csv_opens_while_image_writer_initialization_is_blocked(self):
         started, release, opened = threading.Event(), threading.Event(), threading.Event()
