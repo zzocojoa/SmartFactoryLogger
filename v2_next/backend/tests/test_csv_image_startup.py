@@ -365,6 +365,58 @@ class CsvImageStartupTests(unittest.TestCase):
         finally:
             self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
 
+    def test_image_owner_recovers_required_file_without_new_capture(self):
+        original_writer = SpotImageCaptureWriter(log_path=self.root, capture_root=self.root / 'spot_images')
+        original_writer.write_capture(image_bytes=b'preserved capture', captured_at=1793106000.0,
+                                      source_url='http://spot.invalid/image.jpg', source='test',
+                                      image_age_ms=None, link_checked_at=None, observation_snapshot=None)
+        original = original_writer.fact_path.read_bytes()
+        file_open = Path.open
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        blocked, clock, calls = [True], [100.0], []
+        condition = threading.Condition()
+
+        def open_file(path, mode='r', *args, **kwargs):
+            if path == original_writer.fact_path and mode == 'r+b' and blocked[0]:
+                raise PermissionError('required fact file is locked')
+            return file_open(path, mode, *args, **kwargs)
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            with condition:
+                calls.append((threading.current_thread(), result))
+                condition.notify_all()
+            return result
+
+        def wait_for_count(count, timeout=.8):
+            with condition:
+                return condition.wait_for(lambda: len(calls) >= count, timeout=timeout)
+
+        try:
+            with patch.object(Path, 'open', open_file), \
+                    patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                    patch.object(spot_image_fact.time, 'monotonic', side_effect=lambda: clock[0]):
+                self.request_initializer()
+                self.assertTrue(wait_for_count(1))
+                writer = spot_api._spot_image_capture_writer
+                self.assertEqual(calls[0][1][0]['current_storage_availability'], 'blocked')
+                self.assertEqual(calls[0][1][0]['probe_status'], 'available')
+                blocked[0] = False
+                clock[0] = 100.99
+                self.assertFalse(wait_for_count(2, .15))
+                clock[0] = 101
+                self.assertTrue(wait_for_count(2), 'owner did not recheck required file access')
+                self.assertTrue(all(item['current_storage_availability'] == 'available' for item in calls[-1][1]))
+                self.assertEqual(len({call[0] for call in calls}), 1)
+                self.assertIsNot(calls[0][0], threading.current_thread())
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(writer.written_count, 0)
+                self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
+                self.assertIsNone(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'])
+                self.assertEqual(writer.fact_path.read_bytes(), original)
+        finally:
+            self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
     def test_image_owner_probes_new_utc_day_without_capture(self):
         wall = [datetime(2026, 10, 27, 23, 59, 30, tzinfo=timezone.utc).timestamp()]
         probe = SpotImageCaptureWriter.probe_storage_destinations
