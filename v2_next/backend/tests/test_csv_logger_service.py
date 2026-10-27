@@ -510,6 +510,62 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
+    def test_rejected_csv_admissions_survive_trace_failure_and_commit_once(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            invalid = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            invalid.Press = float("nan")
+            allow_publish = threading.Event()
+            original_replace = Path.replace
+
+            def replace(path, target):
+                if str(target).endswith(".trace.jsonl") and not allow_publish.is_set():
+                    raise OSError("injected rejection evidence publication failure")
+                return original_replace(path, target)
+
+            with patch.object(Path, "replace", replace):
+                service.start()
+                try:
+                    receipts = [service.enqueue_detailed(invalid), service.enqueue_detailed(invalid)]
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        state = service.get_runtime_state()
+                        if state["persistence_trace"] and state["persistence_trace"]["failure_count"]:
+                            break
+                        time.sleep(.01)
+                    self.assertGreater(state["persistence_trace"]["failure_count"], 0)
+                    self.assertEqual(state["admission_summary"]["pending_rejection_count"], 2)
+                    self.assertEqual(state["admission_summary"]["committed_rejection_count"], 0)
+                    allow_publish.set()
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        state = service.get_runtime_state()
+                        if state["admission_summary"]["committed_rejection_count"] == 2:
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(state["admission_summary"]["committed_rejection_count"], 2,
+                                     "rejected admission evidence was not committed after storage recovered")
+                    receipts.append(service.enqueue_detailed(invalid))
+                finally:
+                    allow_publish.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed, "recovery erased the prior trace failure")
+            summary = service.get_runtime_state()["admission_summary"]
+            self.assertEqual(summary["pending_rejection_count"], 0)
+            self.assertEqual(summary["committed_rejection_count"], 3)
+            records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                       for line in path.read_text(encoding="utf-8").splitlines()]
+            ranges = [record for record in records if record.get("kind") == "admission_rejection_range"]
+            saved = {sequence: record for record in ranges
+                     for sequence in range(record["first_producer_seq"], record["last_producer_seq"] + 1)}
+            self.assertEqual(sorted(saved), [receipt["producer_seq"] for receipt in receipts])
+            self.assertEqual(sum(record["last_producer_seq"] - record["first_producer_seq"] + 1
+                                 for record in ranges), len(receipts))
+            for receipt in receipts:
+                self.assertEqual(saved[receipt["producer_seq"]]["status"], receipt["status"])
+                self.assertEqual(saved[receipt["producer_seq"]]["reason"], receipt["reason"])
+                self.assertEqual(saved[receipt["producer_seq"]]["config_generation"], receipt["config_generation"])
+
     def test_admission_summary_tracks_only_active_producer_generation(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, False)
@@ -538,7 +594,9 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(summary["outcome_counts"], {"DISABLED": 2, "INVALID": 3, "ACCEPTED": 2})
             self.assertEqual(summary["after_producer_seq"], before["producer_seq"])
             self.assertEqual(summary["last_producer_seq"], receipts[-1]["producer_seq"])
-            self.assertEqual(summary["rejection_range_count"], 2)
+            self.assertEqual(summary["rejection_range_count"], 0)
+            self.assertEqual(summary["pending_rejection_count"], 0)
+            self.assertEqual(summary["committed_rejection_count"], 3)
             self.assertFalse(summary["details_incomplete"])
             rows = [row for path in self.list_v1_files(tmp_dir) for row in self.read_rows(path)[1:]]
             self.assertEqual([float(row[3]) for row in rows], [33., 34.])

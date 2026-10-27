@@ -29,7 +29,7 @@ from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
-from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter
+from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter, TRACE_SEGMENT_RECORD_LIMIT
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
     SPOT_INVALID_SENTINEL_VALUES,
@@ -3521,17 +3521,59 @@ class CSVLoggerService:
         self._trace_boundary_failed |= token is None
         self._trace_stop_recorded = True
 
+    def _drain_admission_rejections(self, *, force: bool = False) -> bool:
+        trace = self._persistence_trace
+        if trace is None:
+            return True
+        committed = trace.snapshot()["committed_segment_seq"]
+        with self._runtime_lock:
+            self._admission_ledger.acknowledge_committed(committed)
+            count = self._admission_ledger.snapshot()["rejection_range_count"]
+        # Limit one worker turn even while the producer keeps rejecting inputs.
+        for _ in range(min(count, TRACE_SEGMENT_RECORD_LIMIT)):
+            with self._runtime_lock:
+                claimed = self._admission_ledger.claim_range()
+            if claimed is None:
+                break
+            token = trace.append({"kind": "admission_rejection_range",
+                                  "contract_version": "CSV_ADMISSION_REJECTIONS_V1",
+                                  "first_producer_seq": claimed.first_sequence,
+                                  "last_producer_seq": claimed.last_sequence,
+                                  "status": claimed.status, "reason": claimed.reason,
+                                  "config_generation": claimed.config_generation})
+            if token is None:
+                break  # The same frozen range remains claimed for the next attempt.
+            with self._runtime_lock:
+                self._admission_ledger.stage_range(claimed, token)
+        # File I/O stays outside the producer's lifecycle/config/runtime locks.
+        flushed = trace.flush(force=force)
+        committed = trace.snapshot()["committed_segment_seq"]
+        with self._runtime_lock:
+            self._admission_ledger.acknowledge_committed(committed)
+        return flushed
+
     def _finish_persistence_trace(self) -> bool:
         trace = self._persistence_trace
         if trace is None:
             return True
         self._record_persistence_trace_stop()
-        while trace.snapshot()["pending_records"]:
-            if not trace.flush(force=True):
+        while True:
+            previous_commit = trace.snapshot()["committed_segment_seq"]
+            if not self._drain_admission_rejections(force=True):
                 break
+            state = trace.snapshot()
+            with self._runtime_lock:
+                pending = self._admission_ledger.snapshot()["pending_rejection_count"]
+            if not state["pending_records"] and not pending:
+                break
+            if state["committed_segment_seq"] == previous_commit:
+                break  # Preserve unresolved ranges instead of spinning at shutdown.
         state = trace.snapshot()
+        with self._runtime_lock:
+            admission = self._admission_ledger.snapshot()
         return not (self._trace_boundary_failed or state["pending_records"]
-                    or state["failure_count"] or state["incomplete"])
+                    or state["failure_count"] or state["incomplete"]
+                    or admission["pending_rejection_count"] or admission["details_incomplete"])
 
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
@@ -3643,8 +3685,7 @@ class CSVLoggerService:
             row = None
             v2_row = None
             try:
-                if self._persistence_trace is not None:
-                    self._persistence_trace.flush()
+                self._drain_admission_rejections()
                 item: Optional[FactoryData] = None
                 envelope: Optional[CSVEventEnvelope] = None
                 if deferred_item is not None:
