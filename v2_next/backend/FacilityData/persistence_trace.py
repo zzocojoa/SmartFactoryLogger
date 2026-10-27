@@ -1,7 +1,7 @@
 """Bounded persistence-result segments, owned by a data-path writer."""
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -17,6 +17,51 @@ TRACE_SEGMENT_BYTE_LIMIT = 1024**2
 TRACE_PENDING_BYTE_LIMIT = 2 * TRACE_SEGMENT_BYTE_LIMIT
 TRACE_READBACK_BYTES = 4096
 TRACE_FLUSH_INTERVAL_SEC = 1.0
+ADMISSION_REJECTION_RANGE_LIMIT = 4096
+
+
+@dataclass(frozen=True)
+class AdmissionRejectionRange:
+    first_sequence: int
+    last_sequence: int
+    status: str
+    reason: str | None
+    config_generation: int
+
+
+class AdmissionRejectionLedger:
+    """Admission accounting owned by one serialized producer generation."""
+
+    def __init__(self) -> None:
+        self._counts: Counter[str] = Counter()
+        self._ranges: list[AdmissionRejectionRange] = []
+        self._omitted = 0
+        self._first_omitted: int | None = None
+        self._last_omitted: int | None = None
+
+    def record(self, sequence: int, status: str, reason: str | None, generation: int) -> None:
+        self._counts[status] += 1
+        if status in ("ACCEPTED", "DISABLED"):
+            return
+        if len(self._ranges) < ADMISSION_REJECTION_RANGE_LIMIT:
+            self._ranges.append(AdmissionRejectionRange(sequence, sequence, status, reason, generation))
+            return
+        self._omitted += 1
+        if self._first_omitted is None:
+            self._first_omitted = sequence
+        self._last_omitted = sequence
+
+    def snapshot(self) -> dict[str, Any]:
+        produced = sum(self._counts.values())
+        accepted, excluded = self._counts["ACCEPTED"], self._counts["DISABLED"]
+        return {"produced_count": produced, "accepted_count": accepted, "excluded_count": excluded,
+                "rejected_count": produced - accepted - excluded, "outcome_counts": dict(self._counts),
+                "rejection_range_count": len(self._ranges), "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
+                "details_incomplete": self._omitted > 0, "omitted_rejection_count": self._omitted,
+                "first_omitted_producer_seq": self._first_omitted, "last_omitted_producer_seq": self._last_omitted}
+
+    def rejection_ranges(self) -> tuple[AdmissionRejectionRange, ...]:
+        return tuple(self._ranges)
 
 
 class _TraceContentUncertain(OSError):

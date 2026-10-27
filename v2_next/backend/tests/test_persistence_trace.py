@@ -5,10 +5,44 @@ import tracemalloc
 import unittest
 from unittest.mock import patch
 
-from backend.FacilityData.persistence_trace import PersistenceTraceWriter
+from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_rejection_ranges_bound_details_without_losing_counts(self):
+        ledger = AdmissionRejectionLedger()
+        reasons = (("REJECTED_FULL", "queue_full"), ("REJECTED_LIMIT", "pending_byte_limit"),
+                   ("REJECTED_UNAVAILABLE", "unavailable"), ("REJECTED_CLOSED", "closed"),
+                   ("INVALID", "invalid"))
+        for index in range(4097):
+            sequence = index * 3 + 1
+            ledger.record(sequence, "ACCEPTED", None, 1)
+            ledger.record(sequence + 1, "DISABLED", "auto_save_disabled", 1)
+            status, reason = reasons[index % len(reasons)]
+            ledger.record(sequence + 2, status, reason, 1)
+        summary = ledger.snapshot()
+        self.assertTrue(summary["details_incomplete"], "range overflow was presented as complete coverage")
+        self.assertEqual(summary["produced_count"], 12291)
+        self.assertEqual(summary["accepted_count"], 4097)
+        self.assertEqual(summary["excluded_count"], 4097)
+        self.assertEqual(summary["rejected_count"], 4097)
+        self.assertEqual(sum(summary["outcome_counts"].values()), 12291)
+        self.assertEqual(summary["rejection_range_count"], 4096)
+        self.assertEqual(summary["omitted_rejection_count"], 1)
+        self.assertEqual(summary["first_omitted_producer_seq"], 12291)
+        self.assertEqual(summary["last_omitted_producer_seq"], 12291)
+        ranges = ledger.rejection_ranges()
+        self.assertEqual(len(ranges), 4096)
+        self.assertEqual([(item.first_sequence, item.last_sequence) for item in ranges],
+                         [(index * 3 + 3, index * 3 + 3) for index in range(4096)])
+        ledger.record(12292, "REJECTED_LIMIT", "pending_byte_limit", 1)
+        after = ledger.snapshot()
+        self.assertTrue(after["details_incomplete"])
+        self.assertEqual(after["rejected_count"], 4098)
+        self.assertEqual(after["omitted_rejection_count"], 2)
+        self.assertEqual(after["last_omitted_producer_seq"], 12292)
+        self.assertEqual(ledger.rejection_ranges(), ranges, "overflow extended an unrelated retained range")
+
     def test_unusable_workspace_is_not_transient_pressure(self):
         wide = "x" * 300_000 + "😀"
         for location in ("record", "header"):
