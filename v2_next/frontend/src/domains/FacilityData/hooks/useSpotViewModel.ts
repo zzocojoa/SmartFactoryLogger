@@ -287,6 +287,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() ||
       !currentConfig?.image_url ||
       automaticRetryTimerRef.current !== null ||
+      storagePressureTimerRef.current !== null ||
       (typeof document !== 'undefined' && document.visibilityState === 'hidden')
     ) {
       return;
@@ -577,9 +578,14 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           receivedAt: responseReceivedAt,
           requestUrl: currentConfig.image_url,
         });
+        if (responseMetadata.image_upstream_suppressed === true &&
+          responseMetadata.suppression_reason === 'storage_pressure') {
+          pressureRecheck = responseMetadata;
+          cancelPendingImageRetry();
+        }
         setDiagnostics((prev) => ({
           ...prev,
-          last_image_status: 'ok',
+          last_image_status: pressureRecheck ? 'storage_pressure' : 'ok',
           last_image_source: responseMetadata.source,
           last_image_latency_ms: responseMetadata.latency_ms,
         }));
@@ -767,8 +773,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     const shouldRequestNext =
       pendingImageUrlRef.current === currentImageState.imageUrl &&
       loadedImageUrl === currentImageState.imageUrl;
+    const isPressureImage = currentImageState.metadata?.image_upstream_suppressed === true &&
+      currentImageState.metadata.suppression_reason === 'storage_pressure';
     if (shouldRequestNext) {
-      resetImageRecovery();
+      if (!isPressureImage) resetImageRecovery();
       if (pendingPreviousUrl && pendingPreviousUrl !== currentImageState.imageUrl) {
         URL.revokeObjectURL(pendingPreviousUrl);
       }
@@ -782,7 +790,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       currentImageState.lastSuccessAt,
       currentImageState.metadata
     );
-    if (shouldRequestNext) {
+    if (shouldRequestNext && !isPressureImage) {
       scheduleNormalImageRefresh();
     }
   }, [resetImageRecovery, scheduleNormalImageRefresh, syncDashboardSpotImageState]);

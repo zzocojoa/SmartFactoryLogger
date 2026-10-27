@@ -48,6 +48,18 @@ const setVisibilityState = (state: DocumentVisibilityState): void => {
   });
 };
 
+const imageResponse = (suppressed: boolean, retry = '2'): Response => new Response(
+  new Uint8Array([0xff, 0xd8, ...Array<number>(16).fill(0), 0xff, 0xd9]), {
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'X-Spot-Image-Captured-At': new Date(Date.now() - 30000).toISOString(),
+      'X-Spot-Image-Source': suppressed ? 'cache' : 'camera',
+      'X-Spot-Image-Upstream-Suppressed': suppressed ? '1' : '0',
+      ...(suppressed ? { 'X-Spot-Image-Suppression-Reason': 'storage_pressure', 'Retry-After': retry } : {}),
+    },
+  }
+);
+
 describe('useSpotViewModelEffects image lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -100,6 +112,44 @@ describe('useSpotViewModelEffects image lifecycle', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(1); });
       expect(service.image).toHaveBeenCalledTimes(beforeRetry + 1);
     } finally { unmount(); }
+  });
+
+  it('rechecks suppressed JPEGs before delayed onLoad without resetting recovery or duplicating timers', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let serial = 0;
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => `blob:pressure-${++serial}`);
+      static revokeObjectURL = vi.fn();
+    });
+    service.config.mockResolvedValue({ ...SPOT_CONFIG, image_refresh_interval: 0.25 });
+    service.image.mockResolvedValueOnce(new Response('', { status: 502 }))
+      .mockImplementation(async () => imageResponse(true));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      const firstUrl = result.current.imageUrl;
+      expect(firstUrl).toBe('blob:pressure-1');
+      expect(result.current.metadata?.source).toBe('cache');
+      expect(result.current.diagnostics.consecutive_retry_attempt).toBe(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(service.image).toHaveBeenCalledTimes(3);
+      const currentUrl = result.current.imageUrl;
+      act(() => { result.current.handleImageLoad(firstUrl); result.current.handleImageLoad(currentUrl); });
+      expect(result.current.diagnostics.consecutive_retry_attempt).toBe(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+      expect(service.image).toHaveBeenCalledTimes(3);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1750); });
+      expect(service.image).toHaveBeenCalledTimes(4);
+      service.image.mockImplementation(async () => imageResponse(false));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      act(() => { result.current.handleImageLoad(result.current.imageUrl); });
+      expect(result.current.diagnostics.consecutive_retry_attempt).toBe(0);
+      await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+      expect(service.image).toHaveBeenCalledTimes(6);
+    } finally { unmount(); vi.unstubAllGlobals(); }
   });
 
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
