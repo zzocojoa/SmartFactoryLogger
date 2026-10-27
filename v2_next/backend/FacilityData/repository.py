@@ -354,6 +354,7 @@ class _CSVRowLocation:
     data_reported: bool = False
     sink_id: Optional[str] = None
     evidence_sequence: Optional[int] = None
+    file_extent_id: Optional[str] = None
 
 
 class _CSVRecordOutput:
@@ -462,6 +463,9 @@ class CSVLoggerService:
         # Locations live only while the admitted rows remain pending. Paths are
         # shared with their writer; retained digest bytes have an explicit charge.
         self._pending_csv_locations: dict[int, _CSVRowLocation] = {}
+        # Only the current v1/v2 handles own live extent records. Committed
+        # boundaries reside in bounded trace segments, not a file-history list.
+        self._csv_file_extents: dict[int, dict[str, Any]] = {}
         self._uncertain_csv_paths: set[Path] = set()
         self._unclosed_csv_handles: dict[int, TextIO] = {}
         self._csv_manual_recovery_required = False
@@ -1145,6 +1149,7 @@ class CSVLoggerService:
             if handle.tell() == 0 and settings.v1_header:
                 writer.writerow(settings.v1_header)
                 handle.flush()
+            self._begin_csv_file_extent(handle, full_path, "csv_v1")
             self.logger.info("CSV log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
@@ -1160,6 +1165,7 @@ class CSVLoggerService:
                     if handle.tell() == 0 and settings.v1_header:
                         writer.writerow(settings.v1_header)
                         handle.flush()
+                    self._begin_csv_file_extent(handle, fallback_path, "csv_v1")
                     self.logger.warning("CSV log fallback path used: %s", fallback_path)
                     self.active_log_dir = settings.fallback_log_dir
                     return handle, writer
@@ -1256,6 +1262,7 @@ class CSVLoggerService:
                 handle.flush()
             self._write_v2_sidecar(full_path, contract)
             self._current_v2_csv_path = full_path
+            self._begin_csv_file_extent(handle, full_path, "csv_v2")
             self.logger.info("CSV v2 log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
@@ -3112,6 +3119,9 @@ class CSVLoggerService:
                 output_digest = self._csv_output_content_digest(columns, values)
                 if location is None:
                     location = _CSVRowLocation(path, info.st_dev, info.st_ino, offset, len(payload), digest, output_digest)
+                    extent = self._csv_file_extents.get(id(handle))
+                    if extent is not None:
+                        location.file_extent_id = extent["file_extent_id"]
                     with self._runtime_lock:
                         self._pending_csv_locations[row_key] = location
                     reserved = False  # The pending row now owns this charge.
@@ -3214,6 +3224,7 @@ class CSVLoggerService:
                             "config_generation": envelope.write_config.generation,
                             "source_payload_hash": envelope.source_payload_hash,
                             "file_path": str(location.path), "file_device": location.device,
+                            "file_extent_id": location.file_extent_id,
                             "file_id": location.inode, "row_byte_offset": location.offset,
                             "row_byte_length": location.length, "output_bytes_sha256": location.digest.hex(),
                             "output_contract_version": CSV_OUTPUT_CONTENT_CONTRACT,
@@ -3362,11 +3373,51 @@ class CSVLoggerService:
         with self._runtime_lock:
             return self._csv_manual_recovery_required
 
+    def _append_csv_file_boundary(self, record: dict[str, Any]) -> None:
+        trace = self._persistence_trace
+        if trace is None:
+            return
+        token = trace.append(record)
+        if token is None and trace.flush(force=True):
+            token = trace.append(record)
+        if token is None:
+            self._trace_boundary_failed = True
+            raise RuntimeError("CSV file boundary could not be retained.")
+
+    def _begin_csv_file_extent(self, handle: TextIO, path: Path, sink: str) -> None:
+        if self._persistence_trace is None:
+            return  # Compatibility writes without a producer have no ID proof.
+        if len(self._csv_file_extents) >= 2:
+            raise RuntimeError("CSV file ownership is still unresolved.")
+        handle.flush()
+        info = os.fstat(handle.fileno())
+        if not info.st_ino or handle.tell() != info.st_size:
+            raise _CSVRecordUncertain("csv_file_start_position_unconfirmed")
+        extent = {"contract_version": "CSV_FILE_EXTENT_V1", "file_extent_id": str(uuid4()),
+                  "file_path": str(path), "file_device": info.st_dev, "file_id": info.st_ino,
+                  "sink_id": sink, "config_generation": self._write_settings().generation,
+                  "start_byte": info.st_size}
+        self._append_csv_file_boundary(dict(extent, kind="csv_file_start"))
+        self._csv_file_extents[id(handle)] = extent
+
     def _close_file(self, handle: Optional[TextIO]) -> bool:
         if handle is None:
             return True
         try:
+            extent = self._csv_file_extents.get(id(handle))
+            if extent is not None:
+                handle.flush()
+                info = os.fstat(handle.fileno())
+                if (info.st_dev, info.st_ino) != (extent["file_device"], extent["file_id"]):
+                    raise _CSVRecordUncertain("csv_file_end_identity_changed")
             handle.close()
+            if extent is not None:
+                current = Path(extent["file_path"]).stat()
+                if ((info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+                        != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns)):
+                    raise _CSVRecordUncertain("csv_file_changed_while_closing")
+                self._append_csv_file_boundary(dict(extent, kind="csv_file_end", end_byte=info.st_size, closed=True))
+                self._csv_file_extents.pop(id(handle))
             with self._runtime_lock:
                 self._unclosed_csv_handles.pop(id(handle), None)
             return True
@@ -4226,8 +4277,6 @@ class CSVLoggerService:
         with self._runtime_lock:
             if self._pending_events or self._processing_failure_count:
                 shutdown_flush_succeeded = False
-        if not self._finish_persistence_trace():
-            shutdown_flush_succeeded = False
         if not self._close_file(f_handle):
             shutdown_flush_succeeded = False
         if not self._close_v2_file(
@@ -4249,6 +4298,8 @@ class CSVLoggerService:
             self.logger.warning(
                 "Skipped SPOT image fact final manifest because image capture did not drain."
             )
+        if not self._finish_persistence_trace():
+            shutdown_flush_succeeded = False
         self._shutdown_flush_succeeded = shutdown_flush_succeeded and not self._runtime_write_failure_observed
         del self._writer_context.settings
         self.logger.info("CSV logger thread stopped.")

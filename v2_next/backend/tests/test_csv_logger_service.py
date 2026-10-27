@@ -67,6 +67,51 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_csv_file_extents_preserve_append_and_rollover(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            prior = self.create_service(tmp_dir, True)
+            prior.start()
+            try:
+                self.assertEqual(prior.enqueue_detailed(
+                    self.create_data("2026-03-09T07:20:25.000", 29.0))["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(prior.stop(timeout_sec=5))
+            existing = {str(path): path.read_bytes() for path in tmp_dir.glob("*.csv")}
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                for stamp in ("2026-03-09T07:20:25.000", "2026-03-10T07:20:26.000"):
+                    self.assertEqual(service.enqueue_detailed(self.create_data(stamp, 30.0))["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted((tmp_dir / ".sfl_trace" / service.logger_service_instance_id).glob("*.trace.jsonl"))
+            records = [json.loads(line) for path in paths for line in path.read_bytes().splitlines()[1:]]
+            starts = [record for record in records if record.get("kind") == "csv_file_start"]
+            ends = [record for record in records if record.get("kind") == "csv_file_end"]
+            self.assertEqual((len(starts), len(ends)), (4, 4),
+                             "four CSV files require independent start and end receipts")
+            self.assertEqual(records[-1]["kind"], "admission_summary")
+            for start in starts:
+                end, = [record for record in ends if record["file_extent_id"] == start["file_extent_id"]]
+                file_path = Path(start["file_path"])
+                content = file_path.read_bytes()
+                self.assertEqual(start["contract_version"], "CSV_FILE_EXTENT_V1")
+                for field in ("file_path", "file_device", "file_id", "sink_id", "config_generation", "start_byte"):
+                    self.assertEqual(start[field], end[field])
+                self.assertTrue(end["closed"])
+                self.assertEqual(end["end_byte"], len(content))
+                prefix = existing.get(str(file_path))
+                if prefix is not None:
+                    self.assertEqual(start["start_byte"], len(prefix))
+                    self.assertTrue(content.startswith(prefix))
+                else:
+                    self.assertEqual(start["start_byte"], content.index(b"\n") + 1)
+                rows = [record for record in records if record.get("kind") == "csv_row_data"
+                        and record["file_extent_id"] == start["file_extent_id"]]
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["row_byte_offset"], start["start_byte"])
+                self.assertEqual(rows[0]["row_byte_offset"] + rows[0]["row_byte_length"], end["end_byte"])
+
     def test_validator_rejects_config_interval_mismatch(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir / "before", True)
@@ -1012,6 +1057,11 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     self.assertGreaterEqual(state["csv_write_failure_count"], 1)
                     self.assertEqual(state["uncertain_csv_file_count"], 1)
                     self.assertEqual(state["unclosed_csv_handle_count"], int(leave_open))
+                    records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                               for line in path.read_bytes().splitlines()[1:]]
+                    self.assertEqual(sum(record.get("kind") == "csv_file_start" for record in records), 1)
+                    self.assertFalse(any(record.get("kind") == "csv_file_end" for record in records),
+                                     "failed close must not publish a successful file-end receipt")
                     with self.assertRaisesRegex(RuntimeError, "CSV file state"):
                         service.start()
                 finally:
