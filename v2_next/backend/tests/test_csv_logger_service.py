@@ -67,6 +67,48 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_accepts_successive_file_owners(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir / "first", True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                for directory in ("first", "second", "first"):
+                    service.apply_config(log_path=tmp_dir / directory)
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            files = {path: path.read_bytes() for path in tmp_dir.rglob("*.csv")}
+            self.assertEqual(len(files), 4)
+            result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [], "valid successive owners of one CSV were rejected")
+            self.assertEqual(result["file_extent_status"], "VERIFIED")
+            self.assertEqual(result["checked_csv_files"], 4)
+            self.assertEqual(result["checked_csv_rows"], 6)
+            self.assertEqual({path: path.read_bytes() for path in files}, files)
+            originals = {path: path.read_bytes() for path in paths}
+            starts = [record for content in originals.values() for line in content.splitlines()
+                      if (record := json.loads(line)).get("kind") == "csv_file_start"
+                      and record["sink_id"] == "csv_v1" and Path(record["file_path"]).parent == tmp_dir / "first"]
+            self.assertEqual(len(starts), 2)
+            reopened = max(starts, key=lambda record: record["start_byte"])
+            for delta, issue in ((-1, "csv_file_owner_overlap"), (1, "csv_file_owner_gap")):
+                with self.subTest(delta=delta):
+                    for path, content in originals.items():
+                        amended = []
+                        for line in content.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if (record.get("kind") in ("csv_file_start", "csv_file_end")
+                                    and record["file_extent_id"] == reopened["file_extent_id"]):
+                                line = (json.dumps(dict(record, start_byte=record["start_byte"] + delta)) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["file_extent_status"], "INCOMPLETE")
+                    self.assertEqual(result["row_bytes_status"], "VERIFIED")
+
     def test_validator_rejects_unaccounted_csv_file_ranges(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
@@ -1135,6 +1177,9 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     self.assertEqual(sum(record.get("kind") == "csv_file_start" for record in records), 1)
                     self.assertFalse(any(record.get("kind") == "csv_file_end" for record in records),
                                      "failed close must not publish a successful file-end receipt")
+                    validation = validate_csv_persistence_trace(sorted(tmp_dir.rglob("*.trace.jsonl")), data_roots=[tmp_dir])
+                    self.assertIn("missing_csv_file_boundary", validation["issues"])
+                    self.assertEqual(validation["file_extent_status"], "INCOMPLETE")
                     with self.assertRaisesRegex(RuntimeError, "CSV file state"):
                         service.start()
                 finally:

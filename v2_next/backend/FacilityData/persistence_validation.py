@@ -450,7 +450,7 @@ def _index_csv_file_boundary(database: sqlite3.Connection, record: dict[str, Any
     return set()
 
 
-def _csv_extent_file_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> set[str]:
+def _csv_extent_file_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]], *, exact_end: bool = True) -> set[str]:
     path = Path(record["file_path"])
     if (path.suffix.lower() != ".csv"
             or not any(path.is_relative_to(raw) or path.is_relative_to(resolved) for raw, resolved in roots)):
@@ -467,7 +467,7 @@ def _csv_extent_file_issues(record: dict[str, Any], roots: Sequence[tuple[Path, 
                 return {"csv_file_changed_during_validation"}
             if (info.st_dev, info.st_ino) != (record["file_device"], record["file_id"]):
                 return {"csv_file_identity_mismatch"}
-            if info.st_size != record["end_byte"]:
+            if info.st_size < record["end_byte"] or (exact_end and info.st_size != record["end_byte"]):
                 return {"csv_file_end_size_mismatch"}
     except (OSError, ValueError, OverflowError, RuntimeError):
         return {"csv_data_read_error"}
@@ -494,8 +494,10 @@ def _csv_file_extent_issues(database: sqlite3.Connection, roots: Sequence[tuple[
         if any(start[field] != end[field] for field in fields):
             issues.add("csv_file_boundary_contract_mismatch")
             continue
-        checked += 1
-        issues.update(_csv_extent_file_issues(end, roots))
+        issues.update(_csv_extent_file_issues(end, roots, exact_end=False))
+        database.execute("INSERT INTO csv_file_ranges VALUES (?, ?, ?, ?, ?)",
+                         (str(end["file_device"]), str(end["file_id"]), str(end["start_byte"]),
+                          str(end["end_byte"]), json.dumps(end)))
         next_byte = start["start_byte"]
         for (body,) in database.execute("SELECT body FROM csv_rows WHERE extent=? "
                                         "ORDER BY length(first_byte), first_byte", (extent,)):
@@ -515,6 +517,29 @@ def _csv_file_extent_issues(database: sqlite3.Connection, roots: Sequence[tuple[
             next_byte = max(next_byte, row_end)
         if next_byte < end["end_byte"]:
             issues.add("csv_file_coverage_gap")
+    # Reopening the same physical file after a configuration transition creates
+    # another owner, not another physical file. Every successive owner must begin
+    # at the preceding owner's end; only the final end is the current EOF.
+    previous_file: tuple[str, str] | None = None
+    final_end = 0
+    final_record: dict[str, Any] | None = None
+    for device, file_id, first, last, body in database.execute(
+            "SELECT device, file_id, first_byte, end_byte, body FROM csv_file_ranges "
+            "ORDER BY device, file_id, length(first_byte), first_byte, length(end_byte), end_byte"):
+        current = (device, file_id)
+        if current != previous_file:
+            if final_record is not None:
+                issues.update(_csv_extent_file_issues(final_record, roots))
+            checked += 1
+            final_record, final_end = json.loads(body), int(last)
+        else:
+            if int(first) != final_end:
+                issues.add("csv_file_owner_overlap" if int(first) < final_end else "csv_file_owner_gap")
+            if int(last) >= final_end:
+                final_record, final_end = json.loads(body), int(last)
+        previous_file = current
+    if final_record is not None:
+        issues.update(_csv_extent_file_issues(final_record, roots))
     return issues, checked
 
 
@@ -712,6 +737,8 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE INDEX csv_extent_rows ON csv_rows(extent, length(first_byte), first_byte)")
                 database.execute("CREATE TABLE csv_file_boundaries (extent TEXT, kind TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_boundary_extent ON csv_file_boundaries(extent)")
+                database.execute("CREATE TABLE csv_file_ranges (device TEXT, file_id TEXT, first_byte TEXT, end_byte TEXT, body TEXT)")
+                database.execute("CREATE INDEX csv_file_range_order ON csv_file_ranges(device, file_id, length(first_byte), first_byte)")
                 database.execute("CREATE TABLE csv_configurations (generation TEXT, effective TEXT, body TEXT)")
                 database.execute("CREATE INDEX csv_configuration_order ON csv_configurations(length(effective), effective)")
                 return _validate_csv_trace(paths, database, data_roots)
