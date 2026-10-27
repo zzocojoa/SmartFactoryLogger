@@ -292,6 +292,7 @@ _spot_image_capture_thread: Optional[threading.Thread] = None
 _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
 _spot_image_capture_writer_signature: Optional[tuple[Path, Path, int, float]] = None
 _spot_image_storage_activation: Optional[tuple[str, tuple[Path, Path, int, float]]] = None
+_spot_image_storage_generation = 0
 _spot_image_capture_last_enqueue_at = 0.0
 _spot_image_capture_last_enqueue_monotonic: Optional[float] = None
 _spot_image_capture_last_write_at = 0.0
@@ -678,7 +679,7 @@ def _request_spot_image_manifest_initialization() -> None:
 
 def _activate_spot_image_storage() -> None:
     """Schedule configuration changes; all destination I/O stays in the owner."""
-    global _spot_image_storage_activation
+    global _spot_image_storage_activation, _spot_image_storage_generation
     with config.PERSISTENCE_CONFIG_LOCK:
         mode = _spot_image_capture_mode()
         activation = None if mode == "off" else (mode, _spot_image_capture_config_signature())
@@ -686,6 +687,7 @@ def _activate_spot_image_storage() -> None:
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or activation == _spot_image_storage_activation:
             return
         _spot_image_storage_activation = activation
+        _spot_image_storage_generation += 1
     if activation is not None:
         _request_spot_image_manifest_initialization()
 
@@ -721,10 +723,19 @@ def _spot_image_capture_failure_evidence(
 
 def _probe_spot_image_storage_if_due(writer: SpotImageCaptureWriter) -> None:
     captured_at = time.time()
-    if (_spot_image_capture_mode() != "off" and _SPOT_IMAGE_CAPTURE_QUEUE.empty()
-            and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
-            and not _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()
-            and writer.destination_probe_due(captured_at=captured_at, now_monotonic=time.monotonic())):
+    with config.PERSISTENCE_CONFIG_LOCK:
+        mode = _spot_image_capture_mode()
+        signature = _spot_image_capture_config_signature()
+    with _spot_image_capture_lock:
+        activation = _spot_image_storage_activation
+        generation = _spot_image_storage_generation
+    if (mode == "off" or not _SPOT_IMAGE_CAPTURE_QUEUE.empty()
+            or _SPOT_IMAGE_CAPTURE_STOP.is_set() or _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()
+            or writer is not _spot_image_capture_writer or signature != _spot_image_capture_writer_signature
+            or (generation > 0 and activation != (mode, signature))):
+        return
+    writer.bind_destination_probe_generation(generation)
+    if writer.destination_probe_due(captured_at=captured_at, now_monotonic=time.monotonic()):
         writer.probe_storage_destinations(captured_at=captured_at)
 
 
@@ -1040,7 +1051,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_last_enqueue_monotonic
     global _spot_image_capture_recovery, _spot_image_capture_retry_at, _spot_image_capture_retry_delay
     global _spot_image_capture_retry_error_count, _spot_image_capture_recovered_count
-    global _spot_image_storage_activation
+    global _spot_image_storage_activation, _spot_image_storage_generation
     stop_spot_image_capture_writer(timeout_sec=0.5)
     if _spot_image_capture_recovery is not None:
         _spot_image_capture_recovery = None
@@ -1079,6 +1090,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_last_fact = None
         _spot_image_shutdown_baseline = None
         _spot_image_storage_activation = None
+        _spot_image_storage_generation = 0
     _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.clear()
     _SPOT_IMAGE_CAPTURE_STOP.clear()
     _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()

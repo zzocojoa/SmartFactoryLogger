@@ -171,6 +171,7 @@ class SpotImageCaptureWriter:
     _destination_probe_retry_at: Optional[float] = field(default=None, init=False, repr=False)
     _destination_probe_retry_delay: float = field(default=1.0, init=False, repr=False)
     _destination_probe_failure_count: int = field(default=0, init=False, repr=False)
+    _destination_probe_generation: int = field(default=0, init=False, repr=False)
     _destination_probe_lock: Any = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -209,6 +210,7 @@ class SpotImageCaptureWriter:
                 error_type = type(exc).__name__
             results.append({
                 "sink_id": sink_id, "destination_path": str(destination.absolute()),
+                "config_generation": self._destination_probe_generation,
                 "probe_scope": "directory_only", "probe_status": "blocked" if error_type else "available",
                 "probe_error_type": error_type, "probe_checked_monotonic": time.monotonic(),
             })
@@ -239,7 +241,17 @@ class SpotImageCaptureWriter:
         with self._destination_probe_lock:
             return {"next_retry_at_monotonic": self._destination_probe_retry_at,
                     "retry_delay_sec": self._destination_probe_retry_delay,
+                    "config_generation": self._destination_probe_generation,
                     "failure_count": self._destination_probe_failure_count}
+
+    def bind_destination_probe_generation(self, generation: int) -> None:
+        with self._destination_probe_lock:
+            if generation == self._destination_probe_generation:
+                return
+            self._destination_probe_generation = generation
+            self._destination_probe_results = ()
+            self._destination_probe_retry_at = None
+            self._destination_probe_retry_delay = 1.0
 
     def destination_probe_due(self, *, captured_at: float, now_monotonic: float) -> bool:
         day = datetime.fromtimestamp(captured_at, timezone.utc)

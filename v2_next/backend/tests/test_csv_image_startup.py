@@ -297,6 +297,54 @@ class CsvImageStartupTests(unittest.TestCase):
         finally:
             self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
 
+    def test_reenable_same_destination_invalidates_previous_probe(self):
+        first, second, release, finished = (threading.Event() for _ in range(4))
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        directory_probe = spot_image_fact._probe_storage_directory
+        call_count = [0]
+
+        def observed(writer, *, captured_at):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                second.set()
+                if not release.wait(5):
+                    raise TimeoutError('reactivation probe was not released')
+            result = probe(writer, captured_at=captured_at)
+            (first if call_count[0] == 1 else finished).set()
+            return result
+
+        def fail_new_image_probe(destination):
+            if call_count[0] >= 2 and destination != self.root:
+                raise PermissionError('fixture image destination unavailable after reenable')
+            directory_probe(destination)
+
+        try:
+            with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                    patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                    patch.object(spot_image_fact, '_probe_storage_directory', fail_new_image_probe):
+                spot_api._activate_spot_image_storage()
+                self.assertTrue(first.wait(.8))
+                writer = spot_api._spot_image_capture_writer
+                original_generation = writer.destination_probe_retry_snapshot().get('config_generation')
+                with patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_ENABLED', False):
+                    spot_api._activate_spot_image_storage()
+                spot_api._activate_spot_image_storage()
+                self.assertTrue(second.wait(.8), 'reenable reused the previous successful probe')
+                self.assertIs(spot_api._spot_image_capture_writer, writer)
+                self.assertEqual(writer.destination_probe_snapshot(), ())
+                generation = writer.destination_probe_retry_snapshot()['config_generation']
+                self.assertGreater(generation, original_generation)
+                release.set()
+                self.assertTrue(finished.wait(.8))
+                results = {item['sink_id']: item for item in writer.destination_probe_snapshot()}
+                self.assertEqual(results['image_jpeg']['probe_status'], 'blocked')
+                self.assertEqual(results['image_fact']['probe_status'], 'available')
+                self.assertTrue(all(item['config_generation'] == generation for item in results.values()))
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+        finally:
+            release.set()
+            self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
     def test_destination_probe_success_does_not_clear_uncertain_history(self):
         log_path = self.root / 'fact'
         log_path.mkdir()
