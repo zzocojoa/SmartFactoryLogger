@@ -67,6 +67,29 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_persistence_validation_rejects_inconsistent_admission_totals(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            service.start()
+            try:
+                service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            changed = 0
+            for path in paths:
+                records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+                for record in records:
+                    if record.get("kind") == "admission_summary":
+                        record["accepted_count"] += 1
+                        changed += 1
+                path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8", newline="")
+            self.assertEqual(changed, 1)
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "inconsistent admission totals were not rejected")
+            self.assertIn("admission_totals_mismatch", result["issues"])
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+
     def test_persistence_validation_rejects_missing_terminal_summary(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)

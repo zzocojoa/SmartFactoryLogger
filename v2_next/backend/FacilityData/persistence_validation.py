@@ -15,6 +15,34 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _admission_total_issues(summary: dict[str, Any]) -> set[str]:
+    fields = ("produced_count", "accounted_count", "unaccounted_count", "accepted_count",
+              "excluded_count", "rejected_count", "after_producer_seq", "last_producer_seq")
+    if any(type(summary.get(field)) is not int or summary[field] < 0 for field in fields):
+        return {"invalid_admission_totals"}
+    issues: set[str] = set()
+    if (summary["accepted_count"] + summary["excluded_count"] + summary["rejected_count"]
+            != summary["accounted_count"]
+            or summary["accounted_count"] + summary["unaccounted_count"] != summary["produced_count"]
+            or summary["last_producer_seq"] - summary["after_producer_seq"] != summary["produced_count"]):
+        issues.add("admission_totals_mismatch")
+    if summary["unaccounted_count"]:
+        issues.add("unaccounted_producer_ids")
+    counts = summary.get("outcome_counts")
+    allowed = {"ACCEPTED", "DISABLED", "REJECTED_FULL", "REJECTED_LIMIT", "REJECTED_UNAVAILABLE",
+               "REJECTED_CLOSED", "INVALID"}
+    if (not isinstance(counts, dict) or any(key not in allowed or type(value) is not int or value < 0
+                                          for key, value in counts.items())):
+        issues.add("invalid_admission_status_counts")
+    elif (sum(counts.values()) != summary["accounted_count"]
+          or counts.get("ACCEPTED", 0) != summary["accepted_count"]
+          or counts.get("DISABLED", 0) != summary["excluded_count"]):
+        issues.add("admission_status_totals_mismatch")
+    if summary.get("details_incomplete") is True:
+        issues.add("reported_admission_detail_loss")
+    return issues
+
+
 def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
@@ -59,6 +87,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
             records += 1
             if record.get("kind") == "admission_summary":
                 summaries += 1
+                issues.update(_admission_total_issues(record))
     if not paths:
         issues.add("missing_trace")
     if paths and not unsupported and summaries == 0:
@@ -69,7 +98,7 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
     if unsupported:
         issues.add("unsupported_trace_schema")
     return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1",
-            "coverage": "BOUNDED_SEGMENT_PARSE_AND_TERMINAL_PRESENCE",
+            "coverage": "TRACE_PARSE_AND_ADMISSION_TOTALS",
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED"}

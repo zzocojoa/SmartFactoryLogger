@@ -13,7 +13,10 @@ class PersistenceTraceTests(unittest.TestCase):
     def test_csv_trace_parser_rejects_malformed_or_unbounded_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "parser-fixture")
-            writer.append({"kind": "admission_summary"})
+            writer.append({"kind": "admission_summary", "produced_count": 1, "accounted_count": 1,
+                           "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 0, "rejected_count": 0,
+                           "after_producer_seq": 0, "last_producer_seq": 1, "outcome_counts": {"ACCEPTED": 1},
+                           "details_incomplete": False})
             self.assertTrue(writer.flush(force=True))
             path = next(Path(folder).glob("*.trace.jsonl"))
             original = path.read_bytes()
@@ -23,6 +26,28 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertEqual(result["issues"], [])
             self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
             self.assertEqual(path.read_bytes(), original)
+            valid_summary = json.loads(summary)
+            total_cases = [
+                ({"accepted_count": True}, "invalid_admission_totals"),
+                ({"excluded_count": -1}, "invalid_admission_totals"),
+                ({"accounted_count": "1"}, "invalid_admission_totals"),
+                ({"outcome_counts": {"ACCEPTED": True}}, "invalid_admission_status_counts"),
+                ({"outcome_counts": {"UNKNOWN": 1}}, "invalid_admission_status_counts"),
+                ({"outcome_counts": {}}, "admission_status_totals_mismatch"),
+                ({"produced_count": 2, "last_producer_seq": 2, "unaccounted_count": 1}, "unaccounted_producer_ids"),
+                ({"last_producer_seq": 2}, "admission_totals_mismatch"),
+                ({"details_incomplete": True}, "reported_admission_detail_loss"),
+            ]
+            for changes, issue in total_cases:
+                with self.subTest(summary_changes=changes):
+                    amended = dict(valid_summary, **changes)
+                    contents = header + (json.dumps(amended) + "\n").encode("utf-8")
+                    path.write_bytes(contents)
+                    result = validate_csv_persistence_trace([path])
+                    self.assertEqual(result["status"], "INCOMPLETE")
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+                    self.assertEqual(path.read_bytes(), contents)
             cases = [
                 (original[:-1], "INCOMPLETE", "incomplete_segment"),
                 (header + summary + summary, "INCOMPLETE", "multiple_admission_summaries"),
