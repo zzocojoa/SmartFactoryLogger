@@ -1,15 +1,18 @@
 """Independent, read-only validation of CSV persistence evidence."""
 from collections import Counter
 from contextlib import closing
+import csv
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import sqlite3
 import stat
 import tempfile
-from typing import Any, Sequence
+from typing import Any, BinaryIO, Sequence
 
+from backend.FacilityData.persistence_payload import csv_parser_field_limit
 from backend.FacilityData.persistence_trace import TRACE_SEGMENT_BYTE_LIMIT, TRACE_SEGMENT_RECORD_LIMIT
 
 # The r4 CSV pending-payload contract is 64 MiB; the trace's 1 MiB limit
@@ -203,49 +206,110 @@ def _file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
-def _csv_row_byte_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> set[str]:
+class _CsvReadWindow(io.RawIOBase):
+    """Feed the text/CSV parser a bounded region without owning the file."""
+
+    def __init__(self, handle: BinaryIO, length: int) -> None:
+        self.handle = handle
+        self.remaining = length
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, target: Any) -> int:
+        count = min(len(target), self.remaining, CSV_READ_CHUNK_BYTES)
+        if count == 0:
+            return 0
+        chunk = self.handle.read(count)
+        target[:len(chunk)] = chunk
+        self.remaining -= len(chunk)
+        return len(chunk)
+
+
+def _read_csv_record(handle: BinaryIO, length: int, *, header: bool = False) -> list[str]:
+    # At most one admitted row is decoded, not the entire file. The trace's
+    # 1 MiB segment cap must not be applied to legitimate larger CSV fields.
+    window = _CsvReadWindow(handle, length)
+    with csv_parser_field_limit(CSV_ROW_READ_LIMIT), io.TextIOWrapper(
+            io.BufferedReader(window), encoding="utf-8-sig" if header else "utf-8", newline="") as text:
+        reader = csv.reader(text, strict=True)
+        row = next(reader, None)
+        if not row or (not header and next(reader, None) is not None):
+            raise ValueError("Expected one nonempty CSV record")
+        return row
+
+
+def _csv_output_content_issues(handle: BinaryIO, record: dict[str, Any]) -> set[str]:
+    if record.get("output_contract_version") != "CSV_ROW_CONTENT_V1":
+        return {"unsupported_csv_output_contract"}
+    expected = record.get("output_payload_hash")
+    if (not isinstance(expected, str) or len(expected) != 64
+            or any(char not in "0123456789abcdef" for char in expected)):
+        return {"invalid_csv_output_hash"}
+    try:
+        handle.seek(0)
+        columns = _read_csv_record(handle, min(record["row_byte_offset"], CSV_ROW_READ_LIMIT), header=True)
+        handle.seek(record["row_byte_offset"])
+        values = _read_csv_record(handle, record["row_byte_length"])
+        if len(columns) != len(values):
+            return {"invalid_csv_output_record"}
+        content = {"contract_version": "CSV_ROW_CONTENT_V1", "columns": columns, "values": values}
+        encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256()
+        for piece in encoder.iterencode(content):
+            for start in range(0, len(piece), CSV_READ_CHUNK_BYTES):
+                digest.update(piece[start:start + CSV_READ_CHUNK_BYTES].encode("utf-8"))
+        return set() if digest.hexdigest() == expected else {"csv_output_content_hash_mismatch"}
+    except (UnicodeError, ValueError, csv.Error):
+        return {"invalid_csv_output_record"}
+
+
+def _csv_row_issues(record: dict[str, Any], roots: Sequence[tuple[Path, Path]]) -> tuple[set[str], set[str]]:
+    content_issues: set[str] = set()
     integer_fields = ("row_byte_offset", "row_byte_length", "file_device", "file_id")
     if any(type(record.get(field)) is not int or record[field] < 0 for field in integer_fields):
-        return {"invalid_csv_row_location"}
+        return {"invalid_csv_row_location"}, content_issues
     offset, length = record["row_byte_offset"], record["row_byte_length"]
     digest = record.get("output_bytes_sha256")
     if (length < 1 or length > CSV_ROW_READ_LIMIT or not isinstance(digest, str) or len(digest) != 64
             or any(char not in "0123456789abcdef" for char in digest) or not isinstance(record.get("file_path"), str)):
-        return {"invalid_csv_row_location"}
+        return {"invalid_csv_row_location"}, content_issues
     path = Path(record["file_path"])
     if (not path.is_absolute() or path.suffix.lower() != ".csv"
             or not any(path.is_relative_to(raw) or path.is_relative_to(resolved) for raw, resolved in roots)):
-        return {"csv_path_outside_allowed_roots"}
+        return {"csv_path_outside_allowed_roots"}, content_issues
     try:
         resolved_path = path.resolve(strict=True)
         if not any(resolved_path.is_relative_to(resolved) for _, resolved in roots):
-            return {"csv_path_outside_allowed_roots"}
+            return {"csv_path_outside_allowed_roots"}, content_issues
         if not stat.S_ISREG(resolved_path.stat().st_mode):
-            return {"csv_path_not_regular_file"}
+            return {"csv_path_not_regular_file"}, content_issues
         with resolved_path.open("rb") as handle:
             before = os.fstat(handle.fileno())
             if (before.st_dev, before.st_ino) != (record["file_device"], record["file_id"]):
-                return {"csv_file_identity_mismatch"}
+                return {"csv_file_identity_mismatch"}, content_issues
             if offset + length > before.st_size:
-                return {"csv_row_truncated"}
+                return {"csv_row_truncated"}, content_issues
             handle.seek(offset)
             actual = hashlib.sha256()
             remaining = length
             while remaining:
                 chunk = handle.read(min(remaining, CSV_READ_CHUNK_BYTES))
                 if not chunk:
-                    return {"csv_row_truncated"}
+                    return {"csv_row_truncated"}, content_issues
                 actual.update(chunk)
                 remaining -= len(chunk)
+            if actual.hexdigest() == digest:
+                content_issues.update(_csv_output_content_issues(handle, record))
             after = os.fstat(handle.fileno())
             current = resolved_path.stat()
             if _file_signature(before) != _file_signature(after) or _file_signature(after) != _file_signature(current):
-                return {"csv_file_changed_during_validation"}
+                return {"csv_file_changed_during_validation"}, content_issues
             if actual.hexdigest() != digest:
-                return {"csv_row_bytes_mismatch"}
+                return {"csv_row_bytes_mismatch"}, content_issues
     except (OSError, ValueError, OverflowError, RuntimeError):
-        return {"csv_data_read_error"}
-    return set()
+        return {"csv_data_read_error"}, content_issues
+    return set(), content_issues
 
 
 def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, data_roots: Sequence[Path]) -> dict[str, Any]:
@@ -259,6 +323,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     identities: dict[str, str] = {}
     terminal_summary: dict[str, Any] | None = None
     byte_issues: set[str] = set()
+    content_issues: set[str] = set()
     checked_rows = 0
     roots: list[tuple[Path, Path]] = []
     for root in data_roots:
@@ -326,7 +391,9 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             issues.update(_index_sink_record(database, record, header.get("producer_instance_id")))
             if data_roots and record.get("kind") == "csv_row_data":
                 checked_rows += 1
-                byte_issues.update(_csv_row_byte_issues(record, roots))
+                row_byte_issues, row_content_issues = _csv_row_issues(record, roots)
+                byte_issues.update(row_byte_issues)
+                content_issues.update(row_content_issues)
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -368,6 +435,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             if observed[1] < observed[0] or (summary_bounds is not None and observed != summary_bounds):
                 issues.add("producer_boundary_mismatch")
     issues.update(byte_issues)
+    issues.update(content_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -377,7 +445,8 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED",
             "checked_csv_rows": checked_rows,
-            "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED"}
+            "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
+            "output_content_status": "INCOMPLETE" if byte_issues or content_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED"}
 
 
 def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequence[Path] = ()) -> dict[str, Any]:
@@ -399,4 +468,5 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
                 "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
-                "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED"}
+                "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",
+                "output_content_status": "NOT_EVALUATED"}

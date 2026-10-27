@@ -67,6 +67,87 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_canonical_output_mismatch(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+                data.Die_ID = '금형,"A"\n😀'
+                self.assertEqual(service.enqueue_detailed(data)["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths, data_roots=[tmp_dir])["issues"], [])
+            originals = {path: path.read_bytes() for path in paths}
+            data_files = {path: path.read_bytes() for path in tmp_dir.glob("*.csv")}
+            for path, contents in originals.items():
+                amended = []
+                for line in contents.splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record.get("kind") == "csv_row_data" and record["sink_id"] == "csv_v2":
+                        line = (json.dumps(dict(record, output_payload_hash="0" * 64)) + "\n").encode()
+                    amended.append(line)
+                path.write_bytes(b"".join(amended))
+            amended_traces = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["status"], "INCOMPLETE", "canonical output mismatch was not rejected")
+            self.assertIn("csv_output_content_hash_mismatch", result["issues"])
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["output_content_status"], "INCOMPLETE")
+            self.assertEqual({path: path.read_bytes() for path in paths}, amended_traces)
+            self.assertEqual({path: path.read_bytes() for path in data_files}, data_files)
+            records = (json.loads(line) for contents in originals.values() for line in contents.splitlines())
+            row = next(record for record in records
+                       if record.get("kind") == "csv_row_data" and record["sink_id"] == "csv_v2")
+
+            def amend_receipt(changes):
+                for path, contents in originals.items():
+                    lines = []
+                    for line in contents.splitlines(keepends=True):
+                        record = json.loads(line)
+                        if record == row:
+                            line = (json.dumps(dict(record, **changes)) + "\n").encode()
+                        lines.append(line)
+                    path.write_bytes(b"".join(lines))
+
+            for changes, issue in [({"output_contract_version": "future"}, "unsupported_csv_output_contract"),
+                                   ({"output_payload_hash": None}, "invalid_csv_output_hash"),
+                                   ({"output_payload_hash": "G" * 64}, "invalid_csv_output_hash")]:
+                with self.subTest(changes=changes):
+                    amend_receipt(changes)
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            amend_receipt({})
+            csv_path = Path(row["file_path"])
+            original = csv_path.read_bytes()
+            offset, length = row["row_byte_offset"], row["row_byte_length"]
+            changed_header = original[:offset].replace(b"sample_seq", b"sample_seQ", 1)
+            self.assertNotEqual(changed_header, original[:offset])
+            csv_path.write_bytes(changed_header + original[offset:])
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertIn("csv_output_content_hash_mismatch", result["issues"])
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            actual_row = original[offset:offset + length]
+            previous_field_limit = csv.field_size_limit()
+            for bad_row in (actual_row * 2, b"\xff\r\n", b'"unterminated\r\n', b"single-column\r\n"):
+                with self.subTest(row=bad_row[:20]):
+                    csv_path.write_bytes(original[:offset] + bad_row + original[offset + length:])
+                    amend_receipt({"row_byte_length": len(bad_row),
+                                   "output_bytes_sha256": hashlib.sha256(bad_row).hexdigest()})
+                    result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                    self.assertIn("invalid_csv_output_record", result["issues"])
+                    self.assertEqual(result["row_bytes_status"], "VERIFIED")
+                    self.assertEqual(csv.field_size_limit(), previous_field_limit)
+            csv_path.write_bytes(original)
+            amend_receipt({})
+            result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["output_content_status"], "VERIFIED")
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual(validate_csv_persistence_trace(paths)["output_content_status"], "NOT_EVALUATED")
+
     def test_validator_reads_large_csv_rows_in_bounded_chunks(self) -> None:
         previous_field_limit = csv.field_size_limit()
         with self.create_temp_dir() as tmp_dir:
