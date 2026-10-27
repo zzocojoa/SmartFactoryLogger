@@ -2,7 +2,7 @@
 
 - 작성·저장일: 2026-10-20
 - 개정: r4 — 2026-10-20 FR01–FR03·IC01 반영본에 IC02–IC04 구현 체크리스트와 기존 시험의 경계 조건을 보강; 시험 ID·명세 수는 17개 유지
-- 상태: PLAN r4 유지 / DO 1~5단계 일부 진행(2026-10-27); 5단계는 이미지 owner 초기화·재활성화·날짜별 폴더 probe/재시도·기존 접수 우선 처리를 구현했으나 이미지 BLOCKED 발송 gate·동일 센서 캐시/503·발송 계수·CORS·화면 헤더 parser도 구현했다. 전체 required sink 상태 제공·monitor 서비스 시작, PRESSURED/주기 진단·화면 timer 연결은 미완료다. CSV 생산 ID·설정/경로 고정, 합산 예산, 부분 쓰기 중복 방지·불확실 경로 차단, 행별 데이터/증거 분리 확정, 거절/제외 범위 영속 기록과 출력별 종료 집계를 연결했다. 독립 검증기는 생산 경계·producer/writer/segment·접수 ID/필수 출력 증거·종료 합계와 허용 루트의 실제 행 bytes·canonical 열/값 hash·행 위치 중복 및 접수 당시 경로·열/스키마·설정 적용 구간을 대조한다. 파일 열기/닫기 경계를 영속 기록하고, 현재 실행의 파일 소유 범위·첫/마지막 행·범위 공백/겹침·재개방과 최종 파일 크기도 대조한다. 기존 실행의 앞부분은 검증 범위에 포함하지 않는다. 큰 허용 CSV 필드의 종료 검산 오류도 수정했다. 종료 상태·실제 sidecar 전체 SHA256·스키마/마지막 행 대조와 현재 생산자 소유 CSV 범위의 독립 판정·명시적 QA CLI를 추가했다. 저장 거절·불완전·legacy 미평가는 CSV 통과로 바꾸지 않으며 전체 fact/image data_integrity_status는 NOT_EVALUATED다. 출시 전체 QA 연결·남은 fact/JPEG 복구·압력/API/화면 계약과7단계/17시나리오 전체는 미완료. 전체 구현·최종 빌드·성능 검증 미완료.
+- 상태: PLAN r4 유지 / DO 1~5단계 일부 진행(2026-10-27); 5단계는 이미지 owner 초기화·재활성화·날짜별 폴더 probe/재시도·기존 접수 우선 처리를 구현했으나 이미지 BLOCKED 발송 gate·동일 센서 캐시/503·발송 계수·CORS·화면 헤더 parser도 구현했다. 화면의 별도 압력 재확인 timer·표시 callback/URL 수명·설정 세대·실제 visibility/종료 정리를 연결했다. 전체 required sink 상태 제공·monitor 서비스 시작, PRESSURED/주기 진단·상태/관측 참조 계약과 실제 운영 통합은 미완료다. CSV 생산 ID·설정/경로 고정, 합산 예산, 부분 쓰기 중복 방지·불확실 경로 차단, 행별 데이터/증거 분리 확정, 거절/제외 범위 영속 기록과 출력별 종료 집계를 연결했다. 독립 검증기는 생산 경계·producer/writer/segment·접수 ID/필수 출력 증거·종료 합계와 허용 루트의 실제 행 bytes·canonical 열/값 hash·행 위치 중복 및 접수 당시 경로·열/스키마·설정 적용 구간을 대조한다. 파일 열기/닫기 경계를 영속 기록하고, 현재 실행의 파일 소유 범위·첫/마지막 행·범위 공백/겹침·재개방과 최종 파일 크기도 대조한다. 기존 실행의 앞부분은 검증 범위에 포함하지 않는다. 큰 허용 CSV 필드의 종료 검산 오류도 수정했다. 종료 상태·실제 sidecar 전체 SHA256·스키마/마지막 행 대조와 현재 생산자 소유 CSV 범위의 독립 판정·명시적 QA CLI를 추가했다. 저장 거절·불완전·legacy 미평가는 CSV 통과로 바꾸지 않으며 전체 fact/image data_integrity_status는 NOT_EVALUATED다. 출시 전체 QA 연결·남은 fact/JPEG 복구·압력/API/화면 계약과7단계/17시나리오 전체는 미완료. 전체 구현·최종 빌드·성능 검증 미완료.
 - 대상: SmartFactoryLogger `v2_next`
 - 최근 진행(2026-10-27): 동일 capture ID·원래 event·예약을 유지한 일시 I/O 복구와 단조 backoff, 종료 중 중지, 기존 JPEG 검산/재사용과 writer 교체 후 불확실 상태 보존을 구현했다. 재시작 시 불완전한 행·종결되지 않은 tail·알 수 없는 헤더를 수동 복구로 남기고 schema 자동 이관을 제거했다. 역사 ID 조회는 전체 사전 대신 요청한 한 행만 유지하며 최근 캐시도 한 행으로 제한했다. 12,001행 조회의 Python 할당4MiB 미만과 캐시에서 빠진 현재 기록 재조회 시 중복 없음, 잘못된 UTF-8/CSV·중복 요청 ID 차단 및 정상 multiline CSV를 검증했다. 이미지 기록의 저장 전 경로·실제 append handle·닫기 후 파일 식별을 대조하고 변경을 발견하면 수동 복구로 유지한다. 이미지 fact는 쓰기 전 행 크기를 검사하고 재시작 파서의 필드 허용 범위를 맞췄다. 논리 행은 UTF-8 1MiB로 제한하고 초기/추가 hash 읽기는 예약한 최대4KiB 버퍼로 처리한다. 전체 fact/JPEG 독립 대조·역사 의미/다른 ID 중복·남은 동시 파일 변경·메타데이터 복구·행별/전체 작업 공간 예산·목적지 probe·압력/API/화면 계약은 남아 있으며 RR-T03 전체 통과가 아니다.
 - 방법: 사용자 지정 `pdca-framework`
@@ -237,7 +237,7 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 **구현 체크리스트 — IC02–IC04**
 
-아래 체크박스는 모두 미수행 상태다. 해당 구현·회귀 결과를 확보한 뒤에만 완료 표시하며, 체크박스 수를 별도 시험 수로 합산하지 않는다.
+아래 체크박스는 해당 구현·회귀 결과를 확보한 항목만 완료 표시한다. 체크박스 수를 별도 시험 수로 합산하지 않으며, 부분 체크 완료가 17개 시나리오 전체 통과를 뜻하지 않는다.
 
 **IC02 — 진단 중도 억제 결과와 journal 종결**
 
@@ -248,10 +248,13 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 **IC03 — 표시 callback과 object URL·timer 수명**
 
-- [ ] onLoad와 onError 모두 상태 변경 전에 요청/표시 식별을 검사한다. 오래된 callback은 현재 오류·retry 예산·timer·suppression을 바꾸지 않는다.
-- [ ] 실제 표시가 확인된 정상 이미지와 표시 확인 전 pending을 구분한다. 새 응답이 pending을 대체할 때 불필요한 object URL을 해제하고 오류 시 복귀할 정상 이미지는 유지한다. 단일 이전 상태 슬롯을 덮으며 URL을 잃지 않게 하고, 동일 capture 재사용을 선택하면 검증 가능한 식별을 사용한다.
-- [ ] 압력 timer를 `useSpotViewModelEffects`의 visibility/config 변경 정리, 종료·unmount·drain과 연결한다. 현재 표시 실패는 기존 오류 분류로 처리하며 압력 timer와 일반 오류 timer를 동시에 남기지 않는다.
-- [ ] FR-T04/RR-T04에서 onLoad를 두 번 이상의 재확인 간격보다 늦추고 이전 onLoad/onError를 섞는다. 살아 있는 URL 집합이 반복마다 계속 늘지 않고 재확인 timer는 하나인지 확인한다. `useSpotViewModelEffects`를 mock하는 기존 hook 시험만으로 실제 visibility listener 연결을 통과 처리하지 말고, 같은 시험 명세 안에서 실제 effect 연결의 숨김·복귀·정리 경계를 확인한다.
+- [x] onLoad와 onError 모두 상태 변경 전에 요청/표시 식별을 검사한다. 오래된 callback은 현재 오류·retry 예산·timer·suppression을 바꾸지 않는다.
+- [x] 실제 표시가 확인된 정상 이미지와 표시 확인 전 pending을 구분한다. 새 응답이 pending을 대체할 때 불필요한 object URL을 해제하고 오류 시 복귀할 정상 이미지는 유지한다. 단일 이전 상태 슬롯을 덮으며 URL을 잃지 않게 하고, 동일 capture 재사용을 선택하면 검증 가능한 식별을 사용한다.
+- [x] 압력 timer를 `useSpotViewModelEffects`의 visibility/config 변경 정리, 종료·unmount·drain과 연결한다. 현재 표시 실패는 기존 오류 분류로 처리하며 압력 timer와 일반 오류 timer를 동시에 남기지 않는다.
+- [x] FR-T04/RR-T04에서 onLoad를 두 번 이상의 재확인 간격보다 늦추고 이전 onLoad/onError를 섞는다. 살아 있는 URL 집합이 반복마다 계속 늘지 않고 재확인 timer는 하나인지 확인한다. `useSpotViewModelEffects`를 mock하는 기존 hook 시험만으로 실제 visibility listener 연결을 통과 처리하지 말고, 같은 시험 명세 안에서 실제 effect 연결의 숨김·복귀·정리 경계를 확인한다.
+
+
+2026-10-27 구현·검증: `useSpotViewModelEffects.test.ts`는 실제 hook/effect·visibility listener와 설정 leader를 사용한다. 6초 지연 onLoad, 이전 onError, pending/확정 URL 집합, 설정 변경·숨김·해제·본문 drain을 검증했다. 이는 화면 단위 계약 검사이며 RR-T04/FR-T04 전체와 실제 서버 monitor 통합의 완료 판정은 아니다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-ui/verification.json`.
 
 **IC04 — gate 불통과 원인과 계측 분리**
 

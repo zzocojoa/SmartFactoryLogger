@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV/이미지 저장·복구/독립 검산과 압력 구성요소, 이미지 gate·API/CORS·화면 헤더 parser 구현. 필수 writer 입력·monitor 서비스 시작, 주기 진단·PRESSURED·화면 timer, 전체 fact/JPEG/작업 공간·7단계/17명세는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend는 `3e89f937`의 1,108중1,107통과·F01미제공1skip·exit0. 최신 관련265시험(`dc66f6d0`,91.049초), frontend Node9/Vitest443, Ruff/mypy·화면 타입/린트 exit0. 최신 전체 health·새 설치본은 미검증 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV/이미지 저장·복구/독립 검산과 압력 구성요소, 이미지 gate·API/CORS·화면 헤더 parser 구현. 화면 재확인 timer·실제 effect/표시 소유권도 연결했다. 필수 writer 입력·monitor 서비스 시작, 주기 진단·PRESSURED·상태/관측 참조, 전체 fact/JPEG/작업 공간·7단계/17명세는 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend는 `3e89f937`의 1,108중1,107통과·F01미제공1skip·exit0. 최신 관련265시험(`dc66f6d0`,91.049초), frontend는 `f8da5043` Node9/Vitest460·관련43시험·타입/린트 exit0. 기존 backend Ruff/mypy 결과는 해당 backend 소스 범위로 유지. 최신 전체 health·새 설치본은 미검증 |
 
 ## 보존과 통합
 
@@ -1062,3 +1062,22 @@ off→on·목적지/날짜 변경·probe backoff와 설정 세대별 결합, CSV
 범위 제한: 시험은 실제 pressure monitor·driver·API에 제어된 메모리 저장 상태와 외부 transport fixture를 공급했다. 운영 lifecycle은 아직 monitor를 생성·시작하지 않으며 `_storage_pressure_monitor`는 기본 None이다. 따라서 실제 운영의 저장 장애 억제 전체 완료를 주장하지 않는다. 필수 writer 상태 제공/예정 시각, 초기화 실패 재기동, PRESSURED 감속과 주기 진단/journal, 화면 압력 timer·visibility·callback 소유권, 전체 fact/JPEG/작업 공간, r4 17시나리오와 최종 전체 health·설치본·master가 남는다. 기존 임계값·전체 목표를 줄이지 않았다.
 
 직전 턴은 코드/검증/원격 반영을 마친 PROGRESS다. 이번에도 위 구성요소를 구현·검증했으며 원래 목표1~4 완료·5~7 부분 완료를 유지한다. 서버·설치본·설정·백업은 변경하지 않았다. 별도 보안 검토 도구는 없어 새 응답에 경로/인증정보를 넣지 않는지, 캐시 센서 일치·양수 retry·발송 전 잠금 경계·기존 오류 분류 보존을 직접 검토했다. 원격 동기화 결과는 같은 증거 폴더에 별도로 기록한다.
+
+
+## 2026-10-27 화면 저장 장애 재확인과 표시 수명 계약
+
+최종 소스 `f8da5043133e50aff229775c4d4bfe672880d724`. 별도 재확인 timer가 명시적 storage-pressure 캐시200/무캐시503을 처리한다. 일반500/1000/2000ms 재시도 예산은 소비하거나 초기화하지 않고 실제 통신·payload·표시 오류는 기존 오류 경로로 처리한다. 현재 이미지의 정상 표시가 확인된 경우에만 일반 성공 복귀를 허용한다.
+
+- `b2aa7ebf`, `d43959be`: 응답 본문 처리와 in-flight 해제 뒤 재확인을 예약한다. 압력 캐시 onLoad를 기다리지 않으며 늦은 알림으로 정상 timer를 추가하지 않는다.
+- `581a2b17`, `fc415da7`: 마지막으로 표시된 fallback과 pending을 구분하고 교체된 pending URL을 즉시 해제한다. 이전 onLoad/onError는 현재 상태·오류 수·timer를 바꾸지 않는다.
+- `830c078e`, `e2fdcd5f`: 실제 visibility listener와 설정 변경·종료·unmount에 timer/URL 수명을 연결했다. 구 설정의 응답은 본문 완료 후 폐기하고 새 설정 요청을 이어간다. 진행 중 HTTP를 취소하지 않고 shutdown drain을 유지한다.
+- `6218d618`, `b03d4ece`, `8ce32f75`, `4d173ef4`, `6fb2d410`: 503에서도 기존 취득 식별을 보존하고, 잘못된 Retry-After는 현재 간격의 양수 fallback을 사용한다. 간격 변경만 deadline을 갱신하고 표시 설정 변경은 유지한다. 큰 양수 지연은 브라우저 정수 범위 안에서 단조 시각으로 나눠 기다린다. 숨김 뒤 실제 오류가 도착해도 새 timer/예산 소비는 없다.
+- `e7b5685a`, `f8da5043`: 실제 오류·본문 drain·누락/음수/소수/문자열 fallback 회귀와 3회 재확인 간격(6초)보다 늦은 표시 callback을 추가 검사했다. 이 회귀는 새로운 RED로 집계하지 않는다.
+
+11개 행동 RED→GREEN을 확인했다. 주소 정리 시험의 finally assertion이 최초 실패를 가린 기록과 환경 timer 전체 개수 가정이 어긋난 기록은 별도 보존하고 제품 코드 변경 전에 시험 범위를 수정했다. TypeScript 대상 버전에서 Set 순회가 거부된 exit2는 forEach로 수정한 뒤 타입/관련 검사를 다시 통과했다.
+
+최종 관련43시험, 프런트엔드 전체 Node9/Vitest460(42파일), 타입·lint 모두 exit0. 각 실행의 명령·전체 출력·종료 코드·SHA256, 소스3파일과 고정 원문4문서 검산은 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-ui/verification.json`에 보존한다. 실제 React hook/effect·configuration leader를 사용했고 네트워크 응답/JPEG는 시험 입력이다. 실제 화면 painting·센서/서버 현장 시험의 통과로 확대하지 않는다.
+
+전체 목표1~4 완료·5~7 일부 진행을 유지한다. required writer 상태/가용성·monitor 서비스 연결, 초기화 실패 재기동, PRESSURED 감속·주기 진단/journal, 전체 상태/관측 참조·fact/JPEG/작업 공간과17시나리오, 최종 전체 health·새 설치본·master 병합은 남는다. 운영 monitor는 여전히 기본 None이며 이번에 서버·설치본·설정·백업을 변경하지 않았다. 별도 보안 검토 도구가 없어 새 권한/인증정보 노출 없음·명시적 억제 분기·실제 오류 보존·URL/정수 timer·설정 세대 경계를 직접 검토했다.
+
+직전 재점검은 HEAD/원격·109경로·원문·운영 설치본/승격 근거와32로그를 검산한 PROGRESS다. 이번 턴은 위 화면 코드·회귀의 구현과 검증을 진행했다. 목표를 축소하거나 완료로 표시하지 않는다.

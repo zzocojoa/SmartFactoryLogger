@@ -4,12 +4,18 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Recheck explicit storage pressure separately from image error retries. Preserve
+  capture metadata and displayed fallback images, release superseded pending
+  URLs, ignore stale callbacks/configuration responses, and clean up timers on
+  visibility changes, shutdown and unmount without cancelling response drains.
+  Runtime writer/monitor integration remains incomplete.
+
 - Add image dispatch suppression for BLOCKED storage decisions, preserving
   already-dispatched responses and same-sensor cached JPEGs. Separate
   dispatch from task counts, expose cache/503 pressure headers through
   CORS, and parse explicit flags and retry seconds in the frontend.
-  Required writer inputs, monitor startup, diagnostics and UI pressure
-  retry timers remain incomplete; this does not activate the monitor.
+  Required writer inputs, monitor startup and periodic diagnostics
+  remain incomplete; this does not activate the monitor.
 
 - Reactivate image storage checks on configuration/date changes and retry
   failed directory probes with bounded backoff. Discard old probe success
