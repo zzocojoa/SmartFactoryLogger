@@ -510,6 +510,43 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
+    def test_csv_shutdown_preserves_incomplete_admission_summary(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            invalid = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            invalid.Press = float("nan")
+            with patch("backend.FacilityData.persistence_trace.ADMISSION_REJECTION_RANGE_LIMIT", 1), \
+                 patch("backend.FacilityData.persistence_trace.TRACE_FLUSH_INTERVAL_SEC", 3600):
+                service.start()
+                try:
+                    receipts = []
+                    for _ in range(3):
+                        service.apply_config(auto_save=True)
+                        receipts.append(service.enqueue_detailed(invalid))
+                finally:
+                    closed = service.stop(timeout_sec=5)
+            records = [json.loads(line) for path in sorted(tmp_dir.rglob("*.trace.jsonl"))
+                       for line in path.read_text(encoding="utf-8").splitlines()]
+            summaries = [record for record in records if record.get("kind") == "admission_summary"]
+            self.assertEqual(len(summaries), 1, "CSV shutdown did not persist its incomplete admission summary")
+            summary = summaries[0]
+            self.assertFalse(closed)
+            self.assertEqual(summary["contract_version"], "CSV_ADMISSION_SUMMARY_V1")
+            self.assertEqual(summary["coverage"], "PRODUCER_ADMISSION_COUNTS_ONLY")
+            self.assertEqual(summary["admission_evidence_status"], "INCOMPLETE")
+            self.assertEqual(summary["produced_count"], 3)
+            self.assertEqual(summary["rejected_count"], 3)
+            self.assertEqual(summary["accepted_count"], 0)
+            self.assertEqual(summary["excluded_count"], 0)
+            self.assertEqual(summary["pending_rejection_count"], 0)
+            self.assertEqual(summary["committed_rejection_count"], 1)
+            self.assertEqual(summary["omitted_rejection_count"], 2)
+            self.assertEqual(summary["first_omitted_producer_seq"], receipts[1]["producer_seq"])
+            self.assertEqual(summary["last_omitted_producer_seq"], receipts[2]["producer_seq"])
+            self.assertTrue(summary["details_incomplete"])
+            self.assertEqual(records[-1]["kind"], "admission_summary")
+            self.assertEqual(len([record for record in records if record.get("kind") == "admission_rejection_range"]), 1)
+
     def test_rejected_csv_admissions_survive_trace_failure_and_commit_once(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)

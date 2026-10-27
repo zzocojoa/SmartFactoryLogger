@@ -3571,8 +3571,24 @@ class CSVLoggerService:
         state = trace.snapshot()
         with self._runtime_lock:
             admission = self._admission_ledger.snapshot()
+        if state["pending_records"] or admission["pending_rejection_count"]:
+            return False  # A terminal summary must not precede its retained ranges.
+        summary = dict(admission, kind="admission_summary", contract_version="CSV_ADMISSION_SUMMARY_V1",
+                       after_producer_seq=self._trace_start_seq, coverage="PRODUCER_ADMISSION_COUNTS_ONLY",
+                       admission_evidence_status="INCOMPLETE" if admission["details_incomplete"] else "RECORDED",
+                       data_integrity_status="NOT_EVALUATED", trace_failure_count=state["failure_count"],
+                       trace_incomplete=state["incomplete"], trace_boundary_failed=self._trace_boundary_failed)
+        summary_token = trace.append(summary)
+        if summary_token is None:
+            self._trace_boundary_failed = True
+            return False
+        while trace.snapshot()["pending_records"]:
+            if not trace.flush(force=True):
+                break
+        state = trace.snapshot()
         return not (self._trace_boundary_failed or state["pending_records"]
                     or state["failure_count"] or state["incomplete"]
+                    or state["committed_segment_seq"] < summary_token
                     or admission["pending_rejection_count"] or admission["details_incomplete"])
 
     def get_runtime_state(self) -> dict[str, Any]:
