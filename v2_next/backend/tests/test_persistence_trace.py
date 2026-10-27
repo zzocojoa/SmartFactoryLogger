@@ -9,6 +9,32 @@ from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_unusable_workspace_is_not_transient_pressure(self):
+        wide = "x" * 300_000 + "😀"
+        for location in ("record", "header"):
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                writer = PersistenceTraceWriter(root, wide if location == "header" else "wide-record")
+                record = {"event_id": 1, "detail": wide if location == "record" else "small"}
+                self.assertIsNone(writer.append(record))
+                state = writer.snapshot()
+                self.assertTrue(state["incomplete"], "unusable workspace was treated as recoverable pressure")
+                self.assertEqual(state["last_error"], f"{location}_workspace_too_large")
+                self.assertIsNone(state["admission_blocked_reason"])
+                self.assertEqual(state["pending_records"], 0)
+                self.assertEqual(state["pending_bytes"], 0)
+                self.assertEqual(state["refused_count"], 1)
+                self.assertTrue(writer.flush(force=True))
+                self.assertEqual(list(root.iterdir()), [])
+                if location == "record":
+                    self.assertIsNotNone(writer.append({"event_id": 2, "detail": "valid"}))
+                    self.assertTrue(writer.flush(force=True))
+                    files = list(root.glob("*.trace.jsonl"))
+                    self.assertEqual(len(files), 1)
+                    stored = [json.loads(line) for line in files[0].read_text(encoding="utf-8").splitlines()[1:]]
+                    self.assertEqual(stored, [{"event_id": 2, "detail": "valid"}])
+                    self.assertTrue(writer.snapshot()["incomplete"])
+
     def test_workspace_pressure_blocks_admission_until_budget_returns(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

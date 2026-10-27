@@ -64,6 +64,9 @@ class PersistenceTraceWriter:
             if byte_bound > TRACE_SEGMENT_BYTE_LIMIT:
                 self._refuse("record_too_large", incomplete=True)
                 return None
+            if workspace > TRACE_PENDING_BYTE_LIMIT - TRACE_READBACK_BYTES:
+                self._refuse("record_workspace_too_large", incomplete=True)
+                return None
             pending_bytes = sum(segment.size for segment in self._segments)
             # Keep readback possible even when the producer fills both slots.
             available = TRACE_PENDING_BYTE_LIMIT - pending_bytes - max(self._processing_bytes, TRACE_READBACK_BYTES)
@@ -92,6 +95,9 @@ class PersistenceTraceWriter:
                     return None
                 if header_bound + byte_bound > TRACE_SEGMENT_BYTE_LIMIT:
                     self._refuse("record_too_large", incomplete=True)
+                    return None
+                if max(header_workspace, header_bound + workspace) > TRACE_PENDING_BYTE_LIMIT - TRACE_READBACK_BYTES:
+                    self._refuse("header_workspace_too_large", incomplete=True)
                     return None
                 if max(header_workspace, header_bound + workspace) > available:
                     self._blocked_workspace_bytes = max(
