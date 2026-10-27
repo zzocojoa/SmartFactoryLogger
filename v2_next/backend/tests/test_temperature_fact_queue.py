@@ -885,8 +885,16 @@ class FactQueueTests(unittest.TestCase):
             with self.subTest(mutation=mutation):
                 self._assert_changed_spool_requires_manual_recovery(mutation)
 
+    def test_spool_replacement_at_read_open_requires_manual_recovery(self):
+        self._assert_changed_spool_requires_manual_recovery('replaced_at_read')
+
+    def test_spool_replacement_after_read_requires_manual_recovery(self):
+        self._assert_changed_spool_requires_manual_recovery('replaced_after_read')
+
     def _assert_changed_spool_requires_manual_recovery(self, mutation):
         clock, blocked = [100.0], [True]
+        replacement_done = [False]
+        spool = None
         original_open = Path.open
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'facts.csv'
@@ -896,6 +904,32 @@ class FactQueueTests(unittest.TestCase):
             def failing_append(target, mode='r', *args, **kwargs):
                 if target == path and mode == 'a' and blocked[0]:
                     raise PermissionError('fact append unavailable')
+                if (mutation == 'replaced_at_read' and not blocked[0] and target == spool
+                        and mode == 'rb' and not replacement_done[0]):
+                    replacement = Path(tmp) / 'replacement.jsonl'
+                    replacement.write_bytes(original)
+                    replacement.replace(target)
+                    replacement_done[0] = True
+                if (mutation == 'replaced_after_read' and not blocked[0] and target == spool
+                        and mode == 'rb' and not replacement_done[0]):
+                    handle = original_open(target, mode, *args, **kwargs)
+
+                    class ReplaceAfterClose:
+                        def __enter__(self):
+                            return self
+
+                        def __getattr__(self, name):
+                            return getattr(handle, name)
+
+                        def __exit__(self, *exc):
+                            result = handle.__exit__(*exc)
+                            replacement = Path(tmp) / 'replacement.jsonl'
+                            replacement.write_bytes(original)
+                            replacement.replace(target)
+                            replacement_done[0] = True
+                            return result
+
+                    return ReplaceAfterClose()
                 return original_open(target, mode, *args, **kwargs)
 
             with patch.object(Path, 'open', failing_append), \
@@ -928,6 +962,8 @@ class FactQueueTests(unittest.TestCase):
                     elif mutation == 'directory_missing':
                         spool.unlink()
                         spool.parent.rmdir()
+                    elif mutation in ('replaced_at_read', 'replaced_after_read'):
+                        pass  # The file operation boundary above triggers the mutation.
                     else:
                         self.fail(f'Unknown fixture mutation: {mutation}')
                     blocked[0], clock[0] = False, 101.0
@@ -935,6 +971,8 @@ class FactQueueTests(unittest.TestCase):
                     while owner.snapshot()['spool_next_recovery_monotonic'] == 101.0 and time.perf_counter() < deadline:
                         threading.Event().wait(.01)
                     state = owner.snapshot()
+                    if mutation in ('replaced_at_read', 'replaced_after_read'):
+                        self.assertTrue(replacement_done[0])
                     self.assertTrue(state['spool_manual_recovery'], 'changed accepted spool was silently accepted')
                     self.assertEqual(state['spool_pending_count'], 1)
                     self.assertEqual(state['spool_pending_bytes'], len(original))

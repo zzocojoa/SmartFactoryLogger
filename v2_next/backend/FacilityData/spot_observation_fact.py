@@ -419,6 +419,9 @@ class SpotObservationFactWriter:
     def _read_spool_batch(
         self, spool_path: Path, recovered_payloads: ExitStack,
     ) -> tuple[list[tuple[dict[str, str], int]], int]:
+        expected = self._spool_file_stamps.get(spool_path)
+        if expected is None:
+            expected = _spool_file_stamp(spool_path.stat())
         offset = self._spool_read_offsets.get(spool_path, 0)
         read_limit = min(FACT_SPOOL_RECOVERY_BYTE_LIMIT, max(0, spool_path.stat().st_size - offset))
         # The byte batch plus readline/strip copies and the file buffer. Freeze
@@ -431,6 +434,7 @@ class SpotObservationFactWriter:
             completed = False
             try:
                 with spool_path.open("rb") as handle:
+                    self._require_spool_stamp(spool_path, expected, os.fstat(handle.fileno()))
                     handle.seek(offset)
                     end_offset = handle.tell()
                     remaining_bytes = read_limit
@@ -450,6 +454,8 @@ class SpotObservationFactWriter:
                         remaining_bytes -= len(line)
                         spool_lines.append((line, handle.tell()))
                         end_offset = handle.tell()
+                    self._require_spool_stamp(spool_path, expected, os.fstat(handle.fileno()))
+                self._require_spool_stamp(spool_path, expected, spool_path.stat())
                 for line, row_end in spool_lines:
                     line = line.strip()
                     if not line:
@@ -494,6 +500,13 @@ class SpotObservationFactWriter:
                 raw = None
                 if not completed:
                     pending.clear()
+
+    def _require_spool_stamp(
+        self, path: Path, expected: tuple[int, int, int, int], actual: os.stat_result,
+    ) -> None:
+        if _spool_file_stamp(actual) != expected:
+            self._uncertain_spool_path = path
+            self._reject_invalid_spool(path, "changed-file")
 
     def _reject_invalid_spool(
         self,
