@@ -246,6 +246,37 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     } finally { unmount(); vi.unstubAllGlobals(); }
   });
 
+  it('preserves the displayed capture metadata when a later pressure response has no image', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:preserved');
+      static revokeObjectURL = vi.fn();
+    });
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementationOnce(async () => imageResponse(true))
+      .mockImplementation(async () => new Response('', { status: 503, headers: {
+        'X-Spot-Image-Upstream-Suppressed': '1',
+        'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+        'Retry-After': '2',
+      } }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      const capturedAt = Date.now() - 30000;
+      act(() => { result.current.handleImageLoad(result.current.imageUrl); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(result.current.metadata?.captured_at).toBe(capturedAt);
+      expect(result.current.metadata?.source).toBe('cache');
+      expect(result.current.lastSuccessAt).toBe(capturedAt);
+      expect(result.current.imageUrl).toBe('blob:preserved');
+      expect(result.current.metadata?.image_upstream_suppressed).toBe(true);
+      expect(result.current.diagnostics.error_count).toBe(0);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(service.image).toHaveBeenCalledTimes(3);
+    } finally { unmount(); vi.unstubAllGlobals(); }
+  });
+
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);

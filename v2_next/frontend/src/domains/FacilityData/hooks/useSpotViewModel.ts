@@ -556,7 +556,12 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           if (requestGeneration !== imageRequestGenerationRef.current || shutdownRef.current) return;
           pressureRecheck = responseMetadata;
           cancelPendingImageRetry();
-          const nextMetadata = { ...imageStateRef.current.metadata, ...responseMetadata };
+          const nextMetadata = {
+            ...(imageStateRef.current.metadata ?? responseMetadata),
+            image_upstream_suppressed: true,
+            suppression_reason: responseMetadata.suppression_reason,
+            retry_after_sec: responseMetadata.retry_after_sec,
+          };
           imageStateRef.current = { ...imageStateRef.current, metadata: nextMetadata };
           setMetadata(nextMetadata);
           syncDashboardSpotImageState(currentImageState.imageUrl, false, currentImageState.imageError,
