@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1·2·3단계 일부 진행. 접수·작업 공간 경계와 CSV 생산/설정 구간 추적, 실제 CSV 7/20행 실패 후 중복 방지·close 실패 처리를 연결했다. 개별 데이터/증거 대조·전체 복구·압력 제어 등 전체 범위는 계속 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 최신 `c3646c96` 전체 backend1,036시험 중1,035통과·1skip, backend Ruff·기본 mypy12파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 2026-10-27 1·2·3단계 일부 진행. CSV 부분 쓰기·불확실 파일 차단에 이어 행별 데이터/증거 분리 확정과 canonical 출력 hash를 연결했다. 전체 접수/거절 대조·복구·압력/화면 계약은 계속 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 최신 `170fd985` 전체 backend1,039시험 중1,038통과·1skip, backend Ruff·기본 mypy12파일 통과. frontend442통과의 기존 전체 health는 `f8ad11d8` 시점이다. 전체 구현 완료 후 새 설치본 빌드·최종 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -689,3 +689,24 @@ CSV의 기존 EMA 계산을 canonical bytes 생성 전에 끝내 같은 예약 �
 - 7/20행 중복, 이미 쓰인 행 제거, v1/v2 close 실패의 RED를 보존했다. close 핸들 잔존 조건 보강 재현과 기존 종료 기대의 회귀 실패까지 실패 실행5개를 모두 보존했다. 새 guard 시험은 기존 readback 구현의 회귀 확인이며 별도 RED/GREEN 성과로 세지 않는다.
 - 보존된 설계·분석·comparator-readiness·PDCA 원문4문서의 SHA256이 기존 값과 일치한다. 실제 저장 경로와 접수한 행에만 쓰며, 불확실한 자료의 자동 절단·삭제·복제 백업을 추가하지 않았다.
 - 전체7단계·17명세, 압력/복구/화면 계약, master 통합, 최종 통합 health·새 설치본은 미완료다. 운영 서버에 설치·설정 변경·앱 조작은 하지 않았다. 승인 운영본과 다음 변경의 복귀 기준은 계속 `cd46692a`/installer SHA256 `558658cf02d59cb6b66468e4e191c447efdc7cc24518b5a69647cc2409eb232f`이다.
+
+## 2026-10-27 CSV 행별 데이터·증거 확정과 출력 내용 결합
+
+- `82005f62`: CSV close 또는 행 확인이 불확실해지면 같은 owner가 날짜/목적지 전환으로 새 파일을 열어 우회하지 못하게 했다. 신규 접수는 `REJECTED_UNAVAILABLE/csv_owner_requires_manual_recovery`이며 이미 접수한 다음 행은 보존한다. v1/v2·날짜/경로·실제 핸들 닫힘/잔존의8경계 RED를 확인했고 관련127시험이 통과했다.
+- 작업 폴더 재감사 당시 미커밋 행 증거 구현은 `committed_sequence`/실제 `committed_segment_seq` 불일치와 타입 오류3건이 있었다. 관련127시험에서23본시험·하위 사례 포함31실패였으며 이 원문과 감사 기록은 유지한다. 이름을 바로잡은 뒤에도 종료 경계 전에 증거를 확정하려는 순서 때문에 기존 producer-stop 검사1개가 실패했다. 이 실패도 보존했다.
+- `92e4db9b`: 실제 CSV 데이터가 존재해도 행 증거 segment가 확정되기 전에는 원래 이벤트·행·예약을 완료 처리하지 않는다. 파일 ID·행 바이트 범위·원본 hash·설정 세대와 증거 segment 번호를 결합한다. runtime의 `csv_data_written_evidence_pending_count`와 `csv_evidence_pending_by_sink`로 대기를 구분한다. 정상 운전은 기존1초 증거 예정 시각을 따르고, 종료에서는 생산 경계를 기록한 뒤 강제 flush한다. 종료 경계의 미완료 수는 `pending_event_count_at_stop`이며 최종 완료 수로 해석하지 않는다. 관련127시험·mypy12파일·Ruff가 exit0이다.
+- `535bfb60`: 증거 파일 교체만 실제 실패시키고 복구한 회귀 검사에서 v1 단독과 v1/v2 동시 출력 모두 CSV 원래 두 행이 한 번씩 유지됐다. 파일 bytes가 전후 동일하고 원래 producer/sink·설정·원본 hash·파일 ID/바이트 범위가 증거와 일치한다. 복구 후 pending/예약은0이지만 과거 trace failure는 남고 무오류 정상 종료로 표시하지 않는다. 이 추가 검사는 이미 구현된 경계의 회귀 보강이며 별도 RED 성과로 세지 않는다.
+- `920aa91e`: 새 출력 내용 계약 `CSV_ROW_CONTENT_V1`의 canonical JSON은 `contract_version`, 순서가 있는 `columns`, 최종 문자열 `values`로 구성한다. 정렬된 키·compact 구분자·UTF-8/ensure_ascii=False로 SHA256을 계산한다. 실제 파일 bytes hash와 별도인 `output_payload_hash`를 기록하고 원본 `source_payload_hash`도 유지한다. 한글·따옴표·줄바꿈·비BMP 문자열을 포함한 실제 v1/v2 CSV로 해시 누락 RED와 수정 후 일치를 확인했다. JSON 작업 공간은 생성 전에 예약하고 pending 행의 두 digest64bytes와 hex 변환 공간도 집계한다. 관련129시험과 정적 검사가 통과했다.
+
+## 2026-10-27 행 증거 변경 후 전체 회귀와 범위
+
+첫 전체 backend는1,039시험 중2하위 사례 실패·1skip,354.475초,exit1이었다. `test_logger_loop_daily_rollover_and_stop_propagate_deferred_failure`의 내부 flush 감시기가 처리 후 비워지는 목록에 행이 남아 있어야 완료 신호를 보내는 가정이었다. 단독 재현에서도 같은2실패를 확인했다.
+
+`170fd985`에서 해당 감시를 실제 CSV 행과 확정된 trace의 바이트 범위/hash 대조로 바꿨다. 기존3초 fixture 기한·정상/손상 sidecar 종료 판정은 유지하고 두 날짜 파일·producer1/2·sample_seq1/2를 추가 확인했다. 같은 감시를 쓰던 private F01 경로도 이 파일 대조를 사용하며 새 계측 이름은 `csv_evidence_observed`다. 실제 F01 자료는 제공되지 않아 그 경로의 실행은 여전히 skip이고 통과로 세지 않는다. 온도 fact 모듈26시험 중25통과·1skip,exit0이다.
+
+최종 clean commit `170fd98592ac302f7ec19eacc96f05dfd2064b06`에서
+`python -m unittest discover -s backend/tests -v`는 **1,039시험 중1,038통과·private F01자료 미제공1skip**,348.332초,exit0이다. 실행 중 소스·시험·문서를 변경하지 않았다.
+
+- 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/csv-row-evidence/verification.json`.27실행의 명령/종료 코드·전체 stdout/stderr hash, 실패 실행9개, 최종3소스 파일과 커밋 바이트, 원문4문서 불변을 검산했다.
+- 새 trace는 별도 파일이며 기존 CSV 열을 추가/삭제하지 않는다. 새 기록은 내용 전체 대신 source/output/실제 bytes hash와 원래 경로·파일/행 식별자를 연결한다. 상태 조회는 메모리만 읽고 서버·설치본·운영 설정은 변경하지 않았다.
+- 이번 범위는 같은 프로세스의 행/증거 확인이다. 전체 생산/접수/거절 및 출력 상태 보존식, 거절 범위4,096개 제한, 증거 포화 시 접수 차단, 모든 동일ID/목적지/자원 경계, JPEG/fact 복구, 압력 제어·화면·계약 버전의7단계/17시나리오 전체는 미완료다. master 통합·최종 통합 health·새 설치본 검증도 남는다. 현재 운영/복귀 기준은 계속 `cd46692a`다.
