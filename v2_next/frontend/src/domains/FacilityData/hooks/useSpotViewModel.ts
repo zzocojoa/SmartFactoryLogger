@@ -667,6 +667,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       !configRef.current?.image_url ||
       inFlightRef.current ||
       automaticRetryTimerRef.current !== null ||
+      storagePressureTimerRef.current !== null ||
       normalRefreshTimerRef.current !== null
     ) {
       return;
@@ -766,6 +767,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     prevUrlRef,
     cancelPendingImageRetry,
     cancelNormalImageRefresh,
+    cancelStoragePressureRecheck,
     resumeImageRefreshWhenVisible,
   });
 

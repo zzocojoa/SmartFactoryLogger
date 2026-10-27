@@ -190,6 +190,39 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     expect(alive.size).toBe(0);
   });
 
+  it('clears pressure timers on hide and resumes once through the real visibility effect', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    const schedule = vi.spyOn(window, 'setTimeout');
+    const cancel = vi.spyOn(window, 'clearTimeout');
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementation(async () => new Response('', { status: 503, headers: {
+      'X-Spot-Image-Upstream-Suppressed': '1',
+      'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+      'Retry-After': '2',
+    } }));
+    const { unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      expect(service.image).toHaveBeenCalledTimes(1);
+      const pressureTimerIndex = schedule.mock.calls.findIndex((call) => call[1] === 2000);
+      expect(pressureTimerIndex).toBeGreaterThanOrEqual(0);
+      const pressureTimer = schedule.mock.results[pressureTimerIndex].value;
+      act(() => { setVisibilityState('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
+      expect(cancel).toHaveBeenCalledWith(pressureTimer);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+      await act(async () => { setVisibilityState('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+      expect(service.image).toHaveBeenCalledTimes(2);
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(service.image).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(service.image).toHaveBeenCalledTimes(3);
+    } finally { unmount(); }
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(service.image).toHaveBeenCalledTimes(3);
+  });
+
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);
@@ -197,6 +230,7 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     const applySpotConfig = vi.fn();
     const cancelPendingImageRetry = vi.fn();
     const cancelNormalImageRefresh = vi.fn();
+    const cancelStoragePressureRecheck = vi.fn();
     const resumeImageRefreshWhenVisible = vi.fn();
 
     const { unmount } = renderHook(() => {
@@ -209,6 +243,7 @@ describe('useSpotViewModelEffects image lifecycle', () => {
         prevUrlRef,
         cancelPendingImageRetry,
         cancelNormalImageRefresh,
+        cancelStoragePressureRecheck,
         resumeImageRefreshWhenVisible,
       });
     });

@@ -29,6 +29,7 @@ interface UseSpotViewModelEffectsParams {
   prevUrlRef: MutableRefObject<string | null>;
   cancelPendingImageRetry: () => void;
   cancelNormalImageRefresh: () => void;
+  cancelStoragePressureRecheck: () => void;
   resumeImageRefreshWhenVisible: () => void;
 }
 
@@ -55,6 +56,7 @@ export const useSpotViewModelEffects = ({
   prevUrlRef,
   cancelPendingImageRetry,
   cancelNormalImageRefresh,
+  cancelStoragePressureRecheck,
   resumeImageRefreshWhenVisible,
 }: UseSpotViewModelEffectsParams) => {
   useEffect(() => {
@@ -66,6 +68,7 @@ export const useSpotViewModelEffects = ({
     return () => {
       cancelPendingImageRetry();
       cancelNormalImageRefresh();
+      cancelStoragePressureRecheck();
       if (prevUrlRef.current) {
         URL.revokeObjectURL(prevUrlRef.current);
         prevUrlRef.current = null;
@@ -77,6 +80,7 @@ export const useSpotViewModelEffects = ({
     prevUrlRef,
     cancelPendingImageRetry,
     cancelNormalImageRefresh,
+    cancelStoragePressureRecheck,
   ]);
 
   useEffect(() => {
@@ -88,6 +92,7 @@ export const useSpotViewModelEffects = ({
       if (document.visibilityState === 'hidden') {
         cancelPendingImageRetry();
         cancelNormalImageRefresh();
+        cancelStoragePressureRecheck();
         return;
       }
       resumeImageRefreshWhenVisible();
@@ -100,6 +105,7 @@ export const useSpotViewModelEffects = ({
   }, [
     cancelPendingImageRetry,
     cancelNormalImageRefresh,
+    cancelStoragePressureRecheck,
     resumeImageRefreshWhenVisible,
   ]);
 
