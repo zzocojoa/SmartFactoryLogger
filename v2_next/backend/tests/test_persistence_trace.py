@@ -9,6 +9,59 @@ from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_partial_trace_write_is_preserved_without_publication(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "short-write-producer")
+            for sequence in range(20):
+                self.assertIsNotNone(writer.append({"event_id": sequence}))
+            original_open = Path.open
+            written = []
+
+            class ShortWriteFile:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.handle.close()
+
+                def write(self, payload):
+                    count = self.handle.write(payload[:len(payload)//2] if len(written) == 8 else payload)
+                    written.append(count)
+                    return count
+
+                def flush(self):
+                    self.handle.flush()
+
+                def fileno(self):
+                    return self.handle.fileno()
+
+            def short_open(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                return ShortWriteFile(handle) if path.suffix == ".pending" and mode == "xb" else handle
+
+            with patch.object(Path, "open", short_open):
+                self.assertFalse(writer.flush(force=True))
+            self.assertEqual(list(root.glob("*.trace.jsonl")), [], "partially written trace was published")
+            pending = list(root.glob("*.pending"))
+            self.assertEqual(len(pending), 1)
+            original = pending[0].read_bytes()
+            complete_lines = original.splitlines()[:8]
+            self.assertEqual([json.loads(line)["event_id"] for line in complete_lines[1:]], list(range(7)))
+            self.assertEqual(len(written), 9, "writing continued after a short write")
+            state = writer.snapshot()
+            self.assertTrue(state["incomplete"])
+            self.assertEqual(state["last_error"], "trace_short_write")
+            self.assertEqual(state["committed_segment_seq"], 0)
+            self.assertEqual(state["pending_records"], 20)
+            self.assertFalse(writer.flush(force=True))
+            self.assertEqual(pending[0].read_bytes(), original)
+            self.assertEqual(list(root.glob("*.trace.jsonl")), [])
+            self.assertTrue(writer.snapshot()["incomplete"])
+
     def test_first_record_deadline_is_not_postponed_by_later_records(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

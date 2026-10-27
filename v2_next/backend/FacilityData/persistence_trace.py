@@ -19,6 +19,10 @@ TRACE_READBACK_BYTES = 4096
 TRACE_FLUSH_INTERVAL_SEC = 1.0
 
 
+class _TraceContentUncertain(OSError):
+    """Keep existing bytes and prevent a false complete evidence result."""
+
+
 @dataclass
 class _TraceSegment:
     sequence: int
@@ -132,21 +136,25 @@ class PersistenceTraceWriter:
         pending = self.root / f".{stem}.pending"
         if final.exists():
             if not self._matches(final, segment):
-                raise OSError("trace_final_content_conflict")
+                raise _TraceContentUncertain("trace_final_content_conflict")
             return  # Publication succeeded before an earlier error was observed.
         if pending.exists():
             if not self._matches(pending, segment):
-                raise OSError("trace_pending_content_uncertain")
+                raise _TraceContentUncertain("trace_pending_content_uncertain")
         else:
             with pending.open("xb", buffering=0) as handle:
-                handle.write(segment.header)
+                if handle.write(segment.header) != len(segment.header):
+                    raise _TraceContentUncertain("trace_short_write")
                 for record in segment.records:
-                    handle.write(record)
+                    if handle.write(record) != len(record):
+                        raise _TraceContentUncertain("trace_short_write")
                 handle.flush()
                 os.fsync(handle.fileno())
+            if not self._matches(pending, segment):
+                raise _TraceContentUncertain("trace_pending_content_uncertain")
         pending.replace(final)
         if not self._matches(final, segment):
-            raise OSError("trace_published_content_mismatch")
+            raise _TraceContentUncertain("trace_published_content_mismatch")
 
     def flush(self, *, force: bool = False) -> bool:
         with self._writer_lock:
@@ -161,9 +169,12 @@ class PersistenceTraceWriter:
                 self._processing_bytes = TRACE_READBACK_BYTES
             try:
                 self._publish(segment)
-            except OSError:
+            except OSError as exc:
                 with self._lock:
                     self._failure_count += 1
+                    uncertain = isinstance(exc, _TraceContentUncertain)
+                    self._incomplete |= uncertain
+                    self._last_error = str(exc) if uncertain else "trace_io_failed"
                 return False
             finally:
                 with self._lock:
