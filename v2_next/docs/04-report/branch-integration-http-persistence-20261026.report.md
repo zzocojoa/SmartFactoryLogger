@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV/이미지 저장·복구/독립 검산과 압력 구성요소, 이미지 gate·API/CORS·화면 헤더 parser 구현. 화면 재확인 timer·실제 effect/표시 소유권도 연결했다. 필수 writer 입력·monitor 서비스 시작, 주기 진단·PRESSURED·상태/관측 참조, 전체 fact/JPEG/작업 공간·7단계/17명세는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend는 `3e89f937`의 1,108중1,107통과·F01미제공1skip·exit0. 최신 관련265시험(`dc66f6d0`,91.049초), frontend는 `f8da5043` Node9/Vitest460·관련43시험·타입/린트 exit0. 기존 backend Ruff/mypy 결과는 해당 backend 소스 범위로 유지. 최신 전체 health·새 설치본은 미검증 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부 진행. CSV/이미지 저장·복구/검산, 압력 구성요소·이미지/진단 gate·API/화면 재확인, 이미지 owner 재시작과 fact 단계 시각·본 파일 접근 재확인 구현. required sink 전체 제공·monitor 서비스 연결·감속/온도 우선·전체 사실 대조/작업 공간·7단계/17명세는 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 전체 backend `7aa74ecb`의 1156중1155통과·F01미제공1skip·exit0. 변경4파일 Ruff·기본 mypy12파일 exit0. 마지막 전체 health는 `9f7e1dbf`이며 현재 소스 전체 health·빌드·새 설치본은 미완료 |
 
 ## 보존과 통합
 
@@ -1113,3 +1113,18 @@ IC02의 로컬 구현/기록 계약만 완료 표시했다. 운영 monitor 시�
 명령·종료 코드·전체 출력20개와 backend 로그, 소스2개·고정 원문4개·109경로 검산은 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/required-file-state/verification.json`에 보존했다. 파일 접근은 확인 시점의 제한된 증거이며 전체 과거 원장 의미/JPEG 무결성이나 전원 장애 내구성 증거가 아니다. 전용 보안 검토 도구가 없어 원본 비변경·파일 식별·불확실 상태 유지·임시 파일 소유권·권한/인증정보 비추가를 직접 검토했다.
 
 CSV/관측 fact/trace/spool 가용성·예정 시각·세대별 pending, 생성자 중단 초기화의 종료 확인 후 재시작, monitor 운영 연결·PRESSURED/NORMAL 요청 정책·전체 17시나리오·최종 health/build/installer/master 통합은 계속 미완료다. 기존 운영본·서버·설정·백업은 변경하지 않았다. 직전 목표 턴은 기존 남은 항목을 재보고한 NO_PROGRESS이며, 이번 턴은 위 구현과 검증을 진행했다. 일곱 목표와 전체 완료 조건을 유지한다.
+
+
+## 2026-10-28 초기화 owner 복구와 온도 원장 상태 제공
+
+- `db193c57`, `df079275`: 이미지 생성자 중단 후 이전 worker 종료·backoff를 확인해 재시작한다. 접수 event·예약·원래 경로를 유지하며 저장 OFF 뒤에도 기존 pending을 버리지 않는다.
+- `fbd40411`, `e63cabfd`: 초기화 재시도 상한·종료 중 억제·이전 정리 완료·실제 poll 기동을 검증했다. 자원 정리 미확정이면 새 owner/force 시작을 차단하고 종료·manifest 검산도 미완료로 남긴다. 초기화 실패 이력을 지우지 않는다.
+- `fd2b8614`: 온도 fact의 queue/inflight 최초 접수 시각·즉시 처리 예정 시각·clock domain을 제공한다. 새 접수·dequeue가 이전 기한을 미루지 않으며 snapshot은 파일을 열지 않는다.
+- `38fce813`, `74475830`: 단일 fact owner가 기존 파일을 생성·절단·추가 쓰기 없이 확인한다. 잠금 실패는 새 관측/UI 없이 단조 backoff로 재확인하며 실제 회복과 실패 이력을 분리한다. 재시도 중 동일 bytes 파일 교체도 수동 복구로 남겨 새 접수·정상 종료·manifest 확정을 막는다.
+- `7aa74ecb`: fact 재시도 30초 상한·종료 후 중단·원본 삭제와 close 미확정 후 자동 복구 금지를 후속 회귀로 검증했다. 생성자 중단 자동 재시작은 이미지 owner에 대한 완료이며 온도 fact 초기화 실패 재시작 전체를 대신하지 않는다.
+
+최초 관련 회귀는 경로 stat과 handle fstat의 생성 시각 차이를 정상 파일 교체로 오판해 일부 시험이 대기했다. 실제 실행 중인 로컬 시험 child PID/명령을 확인해 중단하고 로그·종료 코드4294967295를 보존했다. 동일 현상의 결정적 RED를 추가한 뒤 기존 이미지 원장과 같은 device/inode/size/mtime 비교로 수정했다. 수정 후 관련39시험 및 최종122시험은 각각1skip을 제외하고 통과했다. 이는 제어기 조건 완화가 아니며 파일 교체 차단 시험도 유지된다.
+
+최종 소스 `7aa74ecb3767c1d377860b5e3126b3aa3f49769d`의 `npm.cmd run health:backend:test`: **1156중 1155통과·1skip**, 474.131초, exit0. skip은 기존 private F01자료 미제공이다. 변경4파일 Ruff·기본 mypy12파일·diff 검사 exit0. 전체 frontend/Electron/health와 새 설치본은 재검증하지 않았다. 25실행의 원 명령·종료 코드·50로그·backend 전체 로그·소스4개·고정 원문4개·109경로를 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-recovery-state/verification.json`에 결합했다. fixture capture ID 누락 실패도 제품 RED와 구분해 보존한다.
+
+남은 범위: 새 fact 쓰기 실패 시 현재 접근 상태 무효화/재예약, CSV/fact/spool/trace required sink 전체 가용성·세대/복구 시각·owner 교체 후 이력, monitor 서비스 연결, PRESSURED/NORMAL 정책, 상태/관측 참조·전체 fact/JPEG·작업 공간 상한·7단계/17시나리오, 최종 health/build/installer와 master 통합. 온도 fact 접근 성공을 전체 저장 가용성이나 과거 무결성 PASS로 확대하지 않는다. 직전 턴은 점검 보고의 NO_PROGRESS였고 이번에는 구현·검증·커밋을 진행했다. 서버·승인 운영본·설정·백업은 변경하지 않았고 전체 목표는 유지한다.

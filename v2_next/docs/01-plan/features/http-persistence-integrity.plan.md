@@ -190,6 +190,8 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 2026-10-28 필수 이미지 원장 접근 보완: 폴더 `probe_status`와 별도의 `current_storage_availability`·파일 확인 범위/오류·수동 복구 상태를 게시한다. 기존 원장을 생성·절단·추가 기록하지 않고 읽기/쓰기 접근과 파일 식별을 확인하며, 파일 접근 실패도 기존 owner의 단조 backoff 대상이다. 초기 원장 digest/행 읽기의 일시 실패는 같은 파일을 다시 검산한 뒤 회복하고, 실패 사이 교체·삭제는 수동 복구로 남긴다. 캡처/UI 요청 없이 같은 owner가 회복하는 회귀를 확인했다. 이는 이미지 원장 확인의 일부이며 CSV/관측 fact/추적/스풀 전체 상태 제공, 생성자를 중단시킨 초기화 실패의 worker 재시작과 monitor 서비스 연결·FR01/RR02 전체 완료가 아니다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/required-file-state/verification.json`.
 
+2026-10-28 owner 복구·온도 fact 상태 제공 보완: 이미지 생성자 중단은 이전 worker 종료와 자원 정리를 확인한 뒤 1→2→4→8→16→30초 상한으로 재시작하며 기존 접수 event·예약·경로를 유지한다. 정리 실패는 재시작·정상 종료·manifest 확정을 차단한다. 온도 fact의 queue/inflight 접수 시각과 즉시 처리 단계 예정 시각을 메모리로 제공하고, 새 항목으로 기한을 미루지 않는다. 단일 fact owner가 기존 본 파일 접근을 새 관측 없이 재확인하며 실패 이력을 유지한다. 재시도 중 교체·삭제·닫기 실패는 수동 복구로 남긴다. 이는 초기 본 파일 접근·그 실패의 재시도 범위이며 새 쓰기 실패 시 상태 무효화/재예약, fact/spool 폴더·CSV/trace의 전체 가용성, spool 복구 시각/세대 결합, writer 교체 후 이력 및 monitor 실제 서비스 연결·FR01/RR02 전체 완료가 아니다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-recovery-state/verification.json`.
+
 **R06 — 실제 HTTP 취득 억제**
 
 - `_img_fetch_lock` 안에서 새 upstream refresh task를 생성하기 직전에 압력 상태와 양수 요청 간격을 검사한다. 이 검사는 FR02의 발송 직전 검사를 대체하지 않는다. 기존 최소 요청률 계산의 입력을 0으로 바꾸는 방식은 사용하지 않는다. single-flight waiter와 이미 dispatch한 공유 요청은 압력 변화만으로 강제 취소하지 않는다.
