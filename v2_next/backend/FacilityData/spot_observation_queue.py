@@ -94,8 +94,9 @@ class SpotObservationQueue:
         self._required_file_probe_delay = 1.0
         self._spool_recovery_at: float | None = None
         self._spool_recovery_delay = 1.0
-        self._storage_directories: dict[str, Path] = {}
+        self._storage_directories: dict[Literal["temperature_fact", "temperature_spool"], Path] = {}
         self._storage_probes: dict[str, dict[str, Any]] = {}
+        self._processing_stages: dict[str, dict[str, Any]] = {}
         self._state: dict[str, Any] = {
             "config_generation": config_generation,
             "queue_capacity": capacity, "accepted_count": 0, "completed_count": 0,
@@ -206,6 +207,7 @@ class SpotObservationQueue:
         with self._lock:
             state = dict(self._state)
             state["storage_destinations"] = [dict(probe) for probe in self._storage_probes.values()]
+            state["processing_stages"] = {sink: dict(stage) for sink, stage in self._processing_stages.items()}
             oldest = self._pending_enqueued_at[0] if self._pending_enqueued_at else None
             state["memory_oldest_pending_monotonic"] = oldest
             if state['spool_pending_count'] or state['spool_pending_bytes']:
@@ -250,11 +252,20 @@ class SpotObservationQueue:
                             "available" if all(value == "available" for value in statuses) else "unknown")
             oldest = (state["memory_oldest_pending_monotonic"] if fact else
                       state["spool_oldest_pending_monotonic"] if state["spool_timing_status"] == "known" else None)
+            stage = state["processing_stages"].get(sink_id, {})
+            unknown_spool_clock = (not fact and (state["spool_pending_count"] or state["spool_pending_bytes"])
+                                   and state["spool_timing_status"] != "known")
+            if stage and not unknown_spool_clock:
+                started = stage["oldest_monotonic"]
+                oldest = started if oldest is None else min(oldest, started)
+            pending_bytes = (state["pending_payload_bytes"] - sum(
+                item["bytes"] for sink, item in state["processing_stages"].items() if sink != sink_id)
+                if fact else stage.get("bytes", 0))
             samples.append(StoragePressureSample(
                 sink_id=sink_id, config_generation=state["config_generation"],
                 destination_key=probe.get("destination_key", ""), enabled=enabled, availability=availability,
                 pending_count=state["pending_write_count"] if fact else 0,
-                pending_bytes=state["pending_payload_bytes"] if fact else 0,
+                pending_bytes=pending_bytes,
                 count_limit=state["queue_capacity"], byte_limit=state["pending_payload_byte_limit"],
                 spool_bytes=0 if fact else (state["spool_retained_bytes"] or 0),
                 spool_limit=state["spool_pending_byte_limit"],
@@ -292,18 +303,28 @@ class SpotObservationQueue:
         self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
 
     @contextmanager
-    def _reserve_writer_payload(self, size: int, reason: str) -> Iterator[None]:
+    def _reserve_writer_payload(self, size: int, reason: str, *,
+                                sink_id: Literal["temperature_fact", "temperature_spool"] = "temperature_fact"
+                                ) -> Iterator[None]:
         with self._lock:
             if self._state["pending_payload_bytes"] + size > FACT_PENDING_PAYLOAD_BYTE_LIMIT:
                 raise FactPayloadBudgetExceeded(reason)
             self._state["pending_payload_bytes"] += size
             self._state["processing_payload_bytes"] += size
+            stage = self._processing_stages.setdefault(
+                sink_id, {"bytes": 0, "depth": 0, "oldest_monotonic": time.monotonic()})
+            stage["bytes"] += size
+            stage["depth"] += 1
         try:
             yield
         finally:
             with self._lock:
                 self._state["pending_payload_bytes"] -= size
                 self._state["processing_payload_bytes"] -= size
+                stage["bytes"] -= size
+                stage["depth"] -= 1
+                if stage["depth"] == 0:
+                    del self._processing_stages[sink_id]
 
     def manifest_summary(self, *, realtime_rows=None) -> dict[str, Any]:
         before = self.snapshot()
@@ -455,7 +476,7 @@ class SpotObservationQueue:
             error_type = None
             manual = False
             try:
-                with self._reserve_writer_payload(128, "storage_probe_byte_limit"):
+                with self._reserve_writer_payload(128, "storage_probe_byte_limit", sink_id=sink_id):
                     _probe_storage_directory(directory)
             except (OSError, FactPayloadBudgetExceeded) as exc:
                 error_type = type(exc).__name__

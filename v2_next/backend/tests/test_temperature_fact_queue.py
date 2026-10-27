@@ -1295,6 +1295,66 @@ class FactQueueTests(unittest.TestCase):
                     closed = owner.close(3)
             self.assertTrue(closed)
 
+    def test_idle_probe_pressure_ages_at_its_actual_destination(self):
+        for sink_id in ('temperature_fact', 'temperature_spool'):
+            with self.subTest(sink_id=sink_id), tempfile.TemporaryDirectory() as tmp:
+                clock, hold = [100.0], [False]
+                started, release = threading.Event(), threading.Event()
+                path = Path(tmp) / 'log' / 'facts.csv'
+                spool = Path(tmp) / 'recovery' / 'failed.jsonl'
+                writer = SpotObservationFactWriter(path, spool_path=spool)
+                self.assertTrue(writer.ensure_initialized())
+                directory = path.parent if sink_id == 'temperature_fact' else writer.spool_write_directory
+                original_open = Path.open
+
+                def delayed_probe(target, mode='r', *args, **kwargs):
+                    if (hold[0] and target.parent == directory and target.name.startswith('.sfl-storage-probe-')
+                            and mode == 'rb'):
+                        started.set()
+                        if not release.wait(10):
+                            raise TimeoutError('test did not release idle probe')
+                    return original_open(target, mode, *args, **kwargs)
+
+                with patch.object(Path, 'open', delayed_probe), \
+                        patch('backend.FacilityData.spot_observation_queue.time.monotonic',
+                              side_effect=lambda: clock[0]):
+                    owner = SpotObservationQueue(lambda: writer, config_generation=9)
+                    try:
+                        for _ in range(200):
+                            if owner.snapshot()['required_file_availability'] == 'available':
+                                break
+                            threading.Event().wait(.01)
+                        self.assertEqual(owner.snapshot()['required_file_availability'], 'available')
+                        hold[0], clock[0] = True, 101.0
+                        self.assertTrue(started.wait(2))
+                        with patch.object(Path, 'open', side_effect=AssertionError('sample opened file')), \
+                                patch.object(Path, 'stat', side_effect=AssertionError('sample statted file')):
+                            samples = owner.storage_pressure_samples(enabled=False)
+                        selected = next(sample for sample in samples if sample.sink_id == sink_id)
+                        self.assertEqual(selected.oldest_pending_monotonic, 101.0,
+                                         'active probe lost its original destination stage clock')
+                        self.assertEqual(selected.stage_due_monotonic, 101.0)
+                        self.assertEqual(selected.pending_bytes, 128)
+                        self.assertEqual(sum(sample.pending_bytes for sample in samples), 128)
+                        self.assertEqual(owner.snapshot()['pending_write_count'], 0)
+                        controller = StoragePressureController()
+                        self.assertEqual(controller.evaluate(samples, now_monotonic=101.25).state, 'NORMAL')
+                        delayed = controller.evaluate(owner.storage_pressure_samples(enabled=False),
+                                                      now_monotonic=103.25)
+                        self.assertEqual(delayed.state, 'PRESSURED')
+                        self.assertEqual(delayed.max_stage_overdue_seconds, 2.25)
+                        self.assertAlmostEqual(delayed.max_occupancy_ratio, 128 / (16 * 1024**2))
+                        self.assertNotIn('pending_clock_unavailable', delayed.reasons)
+                    finally:
+                        hold[0] = False
+                        release.set()
+                        self.assertTrue(owner.close(3))
+                    final_samples = owner.storage_pressure_samples(enabled=False)
+                    self.assertTrue(all(sample.pending_bytes == 0 for sample in final_samples))
+                    self.assertEqual(StoragePressureController().evaluate(final_samples,
+                                     now_monotonic=104.0).state, 'NORMAL')
+                self.assertEqual(list(Path(tmp).rglob('.sfl-storage-probe-*')), [])
+
     def test_fact_destinations_recheck_after_idle_storage_loss(self):
         clock, blocked, attempts = [100.0], [False], []
         original_mkstemp = tempfile.mkstemp
