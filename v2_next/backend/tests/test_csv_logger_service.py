@@ -135,14 +135,15 @@ class CSVLoggerServiceTests(unittest.TestCase):
             Billet_Cycle_ID="C1",
         )
 
-    def capture_partial_csv_batch(self, change_file=None):
+    def capture_partial_csv_batch(self, change_file=None, *, v2=False):
         with self.create_temp_dir() as tmp_dir:
-            service = self.create_service(tmp_dir, auto_save=True)
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=not v2, csv_v2_enabled=v2)
             original_open = Path.open
             entered, release = threading.Event(), threading.Event()
             failed = False
             writes = 0
             rows_at_failure = []
+            header_at_failure = []
             failure_bytes = b""
 
             class PartialBatchFile:
@@ -159,7 +160,9 @@ class CSVLoggerServiceTests(unittest.TestCase):
                         failed = True
                         self.handle.flush()
                         with original_open(self.path, "r", newline="", encoding="utf-8-sig") as reader:
-                            rows_at_failure.extend(list(csv.reader(reader))[1:])
+                            records = list(csv.reader(reader))
+                            header_at_failure.extend(records[0])
+                            rows_at_failure.extend(records[1:])
                         if change_file is not None:
                             change_file(self.path)
                         failure_bytes = self.path.read_bytes()
@@ -168,7 +171,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
 
             def partial_open(path, mode="r", *args, **kwargs):
                 handle = original_open(path, mode, *args, **kwargs)
-                if path.suffix == ".csv" and mode == "a":
+                if path.suffix == ".csv" and mode == "a" and path.name.startswith("Factory_Integrated_Log"):
                     entered.set()
                     if not release.wait(5):
                         handle.close()
@@ -187,25 +190,52 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     release.set()
                     closed = service.stop(timeout_sec=10)
             self.assertTrue(all(receipt["status"] == "ACCEPTED" for receipt in receipts))
-            self.assertEqual([float(row[3]) for row in rows_at_failure], list(range(7)))
-            files = self.list_v1_files(tmp_dir)
+            press_index = header_at_failure.index("MainPress")
+            self.assertEqual([float(row[press_index]) for row in rows_at_failure], list(range(7)))
+            files = list(tmp_dir.glob("Factory_Integrated_Log*.csv"))
             self.assertEqual(len(files), 1)
             rows = self.read_rows(files[0])[1:]
-            return {"rows": rows, "prefix": rows_at_failure, "closed": closed,
+            return {"rows": rows, "header": header_at_failure, "prefix": rows_at_failure, "closed": closed,
                     "state": service.get_runtime_state(), "before_retry": failure_bytes,
                     "after_retry": files[0].read_bytes()}
 
     def test_partial_csv_batch_retry_preserves_each_row_once(self) -> None:
-        result = self.capture_partial_csv_batch()
-        self.assertEqual([float(row[3]) for row in result["rows"]], list(range(20)),
-                         "partial CSV batch retry duplicated persisted rows")
-        self.assertEqual(result["rows"][:7], result["prefix"])
-        self.assertFalse(result["closed"], "recovery must not erase the write failure")
-        state = result["state"]
-        self.assertEqual(state["pending_event_count"], 0)
-        self.assertEqual(state["pending_payload_bytes"], 0)
-        self.assertEqual(state["csv_write_failure_count"], 1)
-        self.assertEqual(state["last_csv_write_failure_reason"], "csv_write_or_readback_failed")
+        for v2 in (False, True):
+            with self.subTest(v2=v2):
+                result = self.capture_partial_csv_batch(v2=v2)
+                press_index = result["header"].index("MainPress")
+                self.assertEqual([float(row[press_index]) for row in result["rows"]], list(range(20)),
+                                 "partial CSV batch retry duplicated persisted rows")
+                self.assertEqual(result["rows"][:7], result["prefix"])
+                if v2:
+                    sequence_index = result["header"].index("sample_seq")
+                    self.assertEqual([int(row[sequence_index]) for row in result["rows"]], list(range(1, 21)))
+                self.assertFalse(result["closed"], "recovery must not erase the write failure")
+                state = result["state"]
+                self.assertEqual(state["pending_event_count"], 0)
+                self.assertEqual(state["pending_payload_bytes"], 0)
+                self.assertEqual(state["csv_write_failure_count"], 1)
+                self.assertEqual(state["last_csv_write_failure_reason"], "csv_write_or_readback_failed")
+
+    def test_csv_retry_preserves_uncertain_file_bytes(self) -> None:
+        # Regression guards for the readback checks introduced by the real
+        # 7/20-row failure; these are not separate claimed RED/GREEN changes.
+        def damage_file(path, mode):
+            with path.open("r+b") as handle:
+                if mode == "partial_tail":
+                    handle.seek(0, 2)
+                    handle.write(b"2026-03-09,INCOMPLETE")
+                else:
+                    handle.readline()
+                    handle.write(b"X")
+
+        for mode in ("partial_tail", "changed_record"):
+            with self.subTest(mode=mode):
+                result = self.capture_partial_csv_batch(lambda path: damage_file(path, mode))
+                self.assertEqual(result["after_retry"], result["before_retry"])
+                self.assertFalse(result["closed"])
+                self.assertEqual(result["state"]["pending_event_count"], 20)
+                self.assertEqual(result["state"]["uncertain_csv_file_count"], 1)
 
     def test_csv_retry_does_not_restore_unexpectedly_removed_rows(self) -> None:
         def remove_written_rows(path):
