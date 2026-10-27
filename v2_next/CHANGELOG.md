@@ -4,6 +4,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Start enabled image persistence before the first capture without blocking
+  temperature startup. The owner probes fact and dated JPEG directories
+  separately and publishes memory-only results while preserving file
+  uncertainty. Pressure dispatch and reconfiguration/retry integration remain pending.
+
 - Add a memory-only storage pressure controller and independent monitor with
   spaced recovery, unknown-clock, sampling-failure and stop guards. Production
   writer, API and frontend integration is still pending.

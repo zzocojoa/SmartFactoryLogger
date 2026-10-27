@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T21:28:07.014190+09:00",
+  "lastUpdated": "2026-10-27T21:52:16.580561+09:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,7 +48293,7 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "e6a592847f0dbac0e6db4004ec57380335cd0ed6",
+      "currentDevelopmentCommit": "388602e21ea5e62d1949169a9c8121083fbc0de1",
       "lastBackendVerification": {
         "commit": "3e89f937a465c094ead94d57598580130d35f9b8",
         "total": 1108,
@@ -48310,11 +48310,12 @@
         "Image fact path identity is checked before capture, actual handle identity before append and file ID/size after close; detected changes stay uncertain",
         "Image fact history uses a 1 MiB logical UTF-8 row bound; initial/append digest scratch is reserved before reads and capped at 4 KiB",
         "Preflight image fact row bytes before JPEG/fact writes and recover admitted long fields under a restored, serialized CSV parser limit",
-        "Memory-only storage pressure decisions, spaced recovery and one independent monitor with sampling/stop failure guards; not connected to production"
+        "Memory-only storage pressure decisions, spaced recovery and one independent monitor with sampling/stop failure guards; not connected to production",
+        "Enabled image owner starts before capture/UI; actual fact/JPEG directories are independently probed and results published in memory without clearing file uncertainty"
       ],
       "remainingScope": [
         "Independent complete fact/JPEG evidence reconciliation, historical semantic/duplicate validation and remaining concurrent I/O recovery; parser/output/cache and other workspace reservations remain",
-        "Connect pressure monitor to owner-published availability/deadlines, lifecycle, destination probes, dispatch/API/UI; complete bounded recovery and stale sampler handling",
+        "Complete image off/on, destination/date and retry lifecycle; bind all owner availability/deadlines and required sink probes to pressure controller, dispatch/API/UI and stale sampler handling",
         "API dispatch suppression and frontend timer/observation-reference contracts",
         "All r4 RV/RR-T/FR-T scenarios and final installer verification",
         "Work-branch/master integration and final whole-state verification"
@@ -48324,7 +48325,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_RECHECK_20261027_63a52959/health-result.json"
       },
-      "updatedAt": "2026-10-27T21:28:07.014190+09:00",
+      "updatedAt": "2026-10-27T21:52:16.580561+09:00",
       "lastRelatedBackendVerification": {
         "commit": "66635d0f528894c69eb5edd72071415b58bf7913",
         "total": 156,
@@ -48342,6 +48343,15 @@
         "exitCode": 0,
         "scope": "isolated pressure controller/monitor and existing clock tests; production integration not performed",
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-controller/verification.json"
+      },
+      "lastImageOwnerVerification": {
+        "commit": "388602e21ea5e62d1949169a9c8121083fbc0de1",
+        "total": 246,
+        "passed": 246,
+        "skipped": 0,
+        "exitCode": 0,
+        "scope": "CSV/image startup, SPOT API, image shutdown evidence, temperature terminal integration",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-owner-probes/verification.json"
       }
     }
   },
@@ -50432,5 +50442,5 @@
       "scope": "approved_ui_s1_logic_review_package_server_application_collection_preservation_and_next_rollback"
     }
   ],
-  "updatedAt": "2026-10-27T21:28:07.014190+09:00"
+  "updatedAt": "2026-10-27T21:52:16.580561+09:00"
 }
