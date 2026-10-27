@@ -84,6 +84,21 @@ class StoragePressureTests(unittest.TestCase):
                 self.assertEqual(decision.state, expected)
                 self.assertEqual(decision.normal_confirmations, count)
 
+    def test_foreign_clock_or_missing_deadline_blocks_recovery(self):
+        valid = self.sample(pending_count=1, oldest_pending_monotonic=99.0, stage_due_monotonic=100.0)
+        for changes in ({"clock_domain": "other-process"}, {"stage_due_monotonic": None},
+                        {"oldest_pending_monotonic": None}, {"stage_due_monotonic": float("nan")}):
+            with self.subTest(changes=changes):
+                decision = StoragePressureController().evaluate([replace(valid, **changes)], now_monotonic=100.0)
+                self.assertEqual(decision.state, "PERSISTENCE_BLOCKED")
+                self.assertIsNone(decision.max_stage_overdue_seconds)
+                self.assertIsNone(decision.oldest_pending_age_seconds)
+                self.assertIn("pending_clock_unavailable", decision.reasons)
+        normal = StoragePressureController().evaluate([valid], now_monotonic=100.0)
+        self.assertEqual(normal.state, "NORMAL")
+        self.assertEqual(normal.max_stage_overdue_seconds, 0.0)
+        self.assertEqual(normal.oldest_pending_age_seconds, 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
