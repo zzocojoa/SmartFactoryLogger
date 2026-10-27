@@ -7,8 +7,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Add per-generation in-memory CSV admission counts and rejection ranges capped
   at 4,096 entries. Compact only adjacent outcomes with matching reason/settings,
   retain aggregate counts after detail overflow, and expose missing producer
-  sequences separately through the shutdown boundary. Durable rejection-range
-  publication, retry and final outcome reconciliation remain in development.
+  sequences separately through the shutdown boundary. Retain claimed/staged
+  ranges until their trace segments commit, retry publication with the same IDs,
+  and persist terminal admission counts including omitted detail and prior failures.
+  Pin the first rejection's trace settings across save OFF/ON/OFF transitions.
+  Per-sink final outcome reconciliation and the remaining pressure/UI contracts
+  are still in development; recorded admission counts do not imply data integrity PASS.
 - Reject new CSV admission while persistence evidence has two full segments or
   cannot reserve the workspace needed by a pending trace record. Reopen admission
   after actual evidence commits release enough capacity, preserving prior failures.
