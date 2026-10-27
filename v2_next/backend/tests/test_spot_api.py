@@ -4866,6 +4866,59 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(diagnostics["request_budget_within_target"])
 
+    async def test_storage_blocked_poll_skips_diagnostic_task_and_resumes(self) -> None:
+        spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
+        blocked = threading.Event()
+        blocked.set()
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'temperature_fact', 1, 'fixture', True,
+            'blocked' if blocked.is_set() else 'available')])
+        transport = FakeSpotHttpTransport()
+        context = spot_api.SpotPollContext(
+            service_instance_id=spot_api._spot_service_instance_id, poll_seq=1,
+            started_at_epoch=time.time(), started_monotonic=time.monotonic())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            spot_api.config.LOG_PATH = Path(temp_dir)
+            try:
+                self.assertTrue(monitor.start())
+                self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                        patch.object(spot_api, '_spot_http_transport', transport):
+                    async with httpx.AsyncClient() as client:
+                        self.assertFalse(spot_api._schedule_spot_diagnostics_for_poll(client, context),
+                                         'blocked poll created a diagnostic sweep')
+                        self.assertIsNone(spot_api._spot_diagnostics_task)
+                        self.assertIsNone(spot_api._spot_diagnostics_snapshot)
+                        self.assertIsNone(spot_api._spot_diagnostic_journal)
+                        self.assertFalse((Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME).exists())
+                        self.assertEqual(transport.requests, [])
+                        diagnostics = spot_api.get_spot_diagnostics()
+                        self.assertEqual(diagnostics['diagnostics_sweep_started_count'], 0)
+                        self.assertEqual(diagnostics['diagnostics_suppressed_poll_count'], 0)
+                        self.assertEqual(diagnostics.get('diagnostics_storage_suppressed_poll_count'), 1)
+                        self.assertEqual(diagnostics.get('diagnostics_storage_suppressed_request_count'), 0)
+                        blocked.clear()
+                        deadline = time.monotonic() + 5
+                        while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                            await asyncio.sleep(.01)
+                        self.assertEqual(monitor.snapshot().state, 'NORMAL')
+                        self.assertTrue(spot_api._schedule_spot_diagnostics_for_poll(client, context))
+                        self.assertFalse(spot_api._schedule_spot_diagnostics_for_poll(client, context))
+                        await asyncio.wait_for(spot_api._spot_diagnostics_task, 2)
+                        self.assertEqual(len(transport.requests), 8)
+                        diagnostics = spot_api.get_spot_diagnostics()
+                        self.assertEqual(diagnostics['diagnostics_sweep_started_count'], 1)
+                        self.assertEqual(diagnostics['diagnostics_inflight_suppressed_count'], 1)
+                        self.assertEqual(diagnostics.get('diagnostics_storage_suppressed_poll_count'), 1)
+                        self.assertEqual(diagnostics['diagnostic_request_journal']['failure_count_total'], 0)
+            finally:
+                task = spot_api._spot_diagnostics_task
+                if task is not None and not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                monitor.stop()
+                spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
+
     async def test_diagnostics_blocked_after_device_lock_wait_do_not_dispatch(self) -> None:
         spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
         blocked = threading.Event()

@@ -193,6 +193,7 @@ _spot_diagnostics_last_completed_at = 0.0
 _spot_diagnostics_sweep_started_count = 0
 _spot_diagnostics_upstream_request_count = 0
 _spot_diagnostics_storage_suppressed_request_count = 0
+_spot_diagnostics_storage_suppressed_poll_count = 0
 _spot_diagnostics_suppressed_poll_count = 0
 _spot_diagnostics_inflight_suppressed_count = 0
 _spot_diagnostic_journal_lock = threading.RLock()
@@ -1158,6 +1159,7 @@ def _reset_spot_diagnostics_request_state_for_tests() -> None:
     global _spot_diagnostics_last_completed_at, _spot_diagnostics_sweep_started_count
     global _spot_diagnostics_upstream_request_count, _spot_diagnostics_suppressed_poll_count
     global _spot_diagnostics_storage_suppressed_request_count
+    global _spot_diagnostics_storage_suppressed_poll_count
     global _spot_diagnostics_inflight_suppressed_count
     global _spot_diagnostic_journal_shutdown_started
     global _spot_diagnostic_journal_closed_snapshot
@@ -1173,6 +1175,7 @@ def _reset_spot_diagnostics_request_state_for_tests() -> None:
     _spot_diagnostics_sweep_started_count = 0
     _spot_diagnostics_upstream_request_count = 0
     _spot_diagnostics_storage_suppressed_request_count = 0
+    _spot_diagnostics_storage_suppressed_poll_count = 0
     _spot_diagnostics_suppressed_poll_count = 0
     _spot_diagnostics_inflight_suppressed_count = 0
     _close_spot_diagnostic_request_journal(timeout_sec=0.5)
@@ -3162,9 +3165,14 @@ def _schedule_spot_diagnostics_for_poll(
     global _spot_diagnostics_last_started_at, _spot_diagnostics_last_started_monotonic
     global _spot_diagnostics_sweep_started_count, _spot_diagnostics_suppressed_poll_count
     global _spot_diagnostics_inflight_suppressed_count
+    global _spot_diagnostics_storage_suppressed_poll_count
 
     if _spot_diagnostics_task is not None and not _spot_diagnostics_task.done():
         _spot_diagnostics_inflight_suppressed_count += 1
+        return False
+
+    if _spot_auxiliary_dispatch_storage_blocked():
+        _spot_diagnostics_storage_suppressed_poll_count += 1
         return False
 
     now_monotonic = time.monotonic()
@@ -3367,6 +3375,9 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         "diagnostics_http_dispatch_count": int(_spot_diagnostics_upstream_request_count),
         "diagnostics_storage_suppressed_request_count": int(
             _spot_diagnostics_storage_suppressed_request_count
+        ),
+        "diagnostics_storage_suppressed_poll_count": int(
+            _spot_diagnostics_storage_suppressed_poll_count
         ),
         "diagnostics_suppressed_poll_count": int(_spot_diagnostics_suppressed_poll_count),
         "diagnostics_inflight_suppressed_count": int(
