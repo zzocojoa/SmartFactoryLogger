@@ -53,7 +53,8 @@ class PersistenceTraceTests(unittest.TestCase):
             records = [
                 {"kind": "producer_start", "after_producer_seq": 0},
                 {"kind": "csv_admission", "contract_version": "CSV_ADMISSION_EVENT_V1",
-                 "producer_instance_id": "range-run", "producer_seq": 1, "status": "ACCEPTED"},
+                 "producer_instance_id": "range-run", "producer_seq": 1, "status": "ACCEPTED",
+                 "config_generation": 1, "source_payload_hash": "0" * 64, "required_sinks": ["csv_v1"]},
                 {"kind": "admission_exclusion_range", "contract_version": "CSV_ADMISSION_EXCLUSIONS_V1",
                  "first_producer_seq": 2, "last_producer_seq": 1000001, "status": "DISABLED"},
                 {"kind": "admission_rejection_range", "contract_version": "CSV_ADMISSION_REJECTIONS_V1",
@@ -63,7 +64,10 @@ class PersistenceTraceTests(unittest.TestCase):
                  "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 1000000, "rejected_count": 1,
                  "after_producer_seq": 0, "last_producer_seq": 1000002,
                  "outcome_counts": {"ACCEPTED": 1, "DISABLED": 1000000, "INVALID": 1}, "details_incomplete": False},
+                {"kind": "csv_row_data", "producer_seq": 1, "sink_id": "csv_v1", "record_version": 1,
+                 "config_generation": 1, "source_payload_hash": "0" * 64},
             ]
+            records.insert(4, records.pop())
             for record in records:
                 self.assertIsNotNone(writer.append(record))
             self.assertTrue(writer.flush(force=True))
@@ -152,7 +156,10 @@ class PersistenceTraceTests(unittest.TestCase):
             writer = PersistenceTraceWriter(Path(folder), "parser-fixture")
             writer.append({"kind": "producer_start", "after_producer_seq": 0})
             writer.append({"kind": "csv_admission", "contract_version": "CSV_ADMISSION_EVENT_V1",
-                           "producer_instance_id": "parser-fixture", "producer_seq": 1, "status": "ACCEPTED"})
+                           "producer_instance_id": "parser-fixture", "producer_seq": 1, "status": "ACCEPTED",
+                           "config_generation": 1, "source_payload_hash": "0" * 64, "required_sinks": ["csv_v1"]})
+            writer.append({"kind": "csv_row_data", "producer_seq": 1, "sink_id": "csv_v1", "record_version": 1,
+                           "config_generation": 1, "source_payload_hash": "0" * 64})
             writer.append({"kind": "producer_stop", "final_producer_seq": 1})
             writer.append({"kind": "admission_summary", "produced_count": 1, "accounted_count": 1,
                            "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 0, "rejected_count": 0,
@@ -161,8 +168,8 @@ class PersistenceTraceTests(unittest.TestCase):
             self.assertTrue(writer.flush(force=True))
             path = next(Path(folder).glob("*.trace.jsonl"))
             original = path.read_bytes()
-            header, start, admission, stop, summary = original.splitlines(keepends=True)
-            prefix = header + start + admission + stop
+            header, start, admission, data, stop, summary = original.splitlines(keepends=True)
+            prefix = header + start + admission + data + stop
             result = validate_csv_persistence_trace([path])
             self.assertEqual(result["status"], "NOT_EVALUATED")
             self.assertEqual(result["issues"], [])

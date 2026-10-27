@@ -67,6 +67,71 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_requires_each_admitted_sink_result(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                self.assertEqual(service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))["status"],
+                                 "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths)["issues"], [])
+            original = {path: path.read_bytes() for path in paths}
+            removed = 0
+            for path in paths:
+                retained = []
+                for line in path.read_bytes().splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record.get("kind") == "csv_row_data" and record["sink_id"] == "csv_v2":
+                        removed += 1
+                    else:
+                        retained.append(line)
+                path.write_bytes(b"".join(retained))
+            self.assertEqual(removed, 1)
+            before = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "missing required sink evidence was not rejected")
+            self.assertIn("missing_required_sink_evidence", result["issues"])
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+            for changes, issue in [({"source_payload_hash": "f" * 64}, "sink_evidence_contract_mismatch"),
+                                   ({"config_generation": 999}, "sink_evidence_contract_mismatch"),
+                                   ({"producer_seq": 999}, "unadmitted_sink_evidence"),
+                                   ({"record_version": True}, "unsupported_csv_row_evidence")]:
+                with self.subTest(changes=changes):
+                    for path, contents in original.items():
+                        lines = []
+                        for line in contents.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record.get("kind") == "csv_row_data" and record["sink_id"] == "csv_v2":
+                                line = (json.dumps(dict(record, **changes)) + "\n").encode()
+                            lines.append(line)
+                        path.write_bytes(b"".join(lines))
+                    result = validate_csv_persistence_trace(paths)
+                    self.assertEqual(result["status"], "INCOMPLETE")
+                    self.assertIn(issue, result["issues"])
+            for path, contents in original.items():
+                path.write_bytes(contents)
+            records = [json.loads(line) for path in paths for line in path.read_bytes().splitlines()]
+            admission = next(record for record in records if record.get("kind") == "csv_admission")
+            failure = dict(admission, kind="csv_processing_failure", contract_version="CSV_PROCESSING_FAILURE_V1",
+                           sink_id="csv_v2", status="FAILED", reason="fixture_decode_failure")
+            for path, contents in original.items():
+                path.write_bytes(b"".join((json.dumps(failure) + "\n").encode()
+                                          if json.loads(line).get("kind") == "csv_row_data"
+                                          and json.loads(line).get("sink_id") == "csv_v2" else line
+                                          for line in contents.splitlines(keepends=True)))
+            result = validate_csv_persistence_trace(paths)
+            self.assertIn("recorded_csv_processing_failure", result["issues"])
+            self.assertNotIn("missing_required_sink_evidence", result["issues"])
+            for path, contents in original.items():
+                path.write_bytes(contents)
+            row = next(record for record in records if record.get("kind") == "csv_row_data")
+            with paths[-1].open("ab") as handle:
+                handle.write((json.dumps(row) + "\n").encode())
+            self.assertIn("multiple_sink_outcomes", validate_csv_persistence_trace(paths)["issues"])
+
     def test_validator_rejects_missing_admission_identity(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)

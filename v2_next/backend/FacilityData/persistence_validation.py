@@ -99,6 +99,50 @@ def _admission_identity_issues(database: sqlite3.Connection, summary: dict[str, 
     return issues
 
 
+def _index_sink_record(database: sqlite3.Connection, record: dict[str, Any], producer: Any) -> set[str]:
+    kind = record.get("kind")
+    if not isinstance(kind, str) or kind not in {"csv_admission", "csv_row_data", "csv_processing_failure"}:
+        return set()
+    sequence, generation, digest = record.get("producer_seq"), record.get("config_generation"), record.get("source_payload_hash")
+    if (type(sequence) is not int or sequence < 1 or type(generation) is not int or generation < 0
+            or not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
+        return {"invalid_sink_record_identity"}
+    if kind != "csv_row_data" and record.get("producer_instance_id") != producer:
+        return {"output_producer_identity_mismatch"}
+    sinks = record.get("required_sinks") if kind == "csv_admission" else [record.get("sink_id")]
+    if (not isinstance(sinks, list) or not sinks
+            or any(not isinstance(sink, str) or sink not in {"csv_v1", "csv_v2"} for sink in sinks)
+            or len(set(sinks)) != len(sinks)):
+        return {"invalid_required_sink_contract"}
+    if kind == "csv_row_data" and (type(record.get("record_version")) is not int or record["record_version"] != 1):
+        return {"unsupported_csv_row_evidence"}
+    if kind == "csv_processing_failure" and (record.get("contract_version") != "CSV_PROCESSING_FAILURE_V1"
+                                             or record.get("status") != "FAILED"
+                                             or not isinstance(record.get("reason"), str) or not record["reason"]):
+        return {"invalid_processing_failure_evidence"}
+    for sink in sinks:
+        values = (str(sequence), sink, digest, str(generation))
+        if kind == "csv_admission":
+            database.execute("INSERT INTO required_outputs VALUES (?, ?, ?, ?)", values)
+        else:
+            database.execute("INSERT INTO sink_receipts VALUES (?, ?, ?, ?, ?)", (*values, kind))
+    return {"recorded_csv_processing_failure"} if kind == "csv_processing_failure" else set()
+
+
+def _required_sink_issues(database: sqlite3.Connection) -> set[str]:
+    checks = {
+        "missing_required_sink_evidence": """SELECT 1 FROM required_outputs AS e LEFT JOIN sink_receipts AS r
+            ON e.sequence=r.sequence AND e.sink=r.sink WHERE r.sequence IS NULL LIMIT 1""",
+        "unadmitted_sink_evidence": """SELECT 1 FROM sink_receipts AS r LEFT JOIN required_outputs AS e
+            ON e.sequence=r.sequence AND e.sink=r.sink WHERE e.sequence IS NULL LIMIT 1""",
+        "sink_evidence_contract_mismatch": """SELECT 1 FROM required_outputs AS e JOIN sink_receipts AS r
+            ON e.sequence=r.sequence AND e.sink=r.sink
+            WHERE e.source_hash!=r.source_hash OR e.generation!=r.generation LIMIT 1""",
+        "multiple_sink_outcomes": "SELECT 1 FROM sink_receipts GROUP BY sequence, sink HAVING count(*)>1 LIMIT 1",
+    }
+    return {issue for issue, query in checks.items() if database.execute(query).fetchone() is not None}
+
+
 def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
@@ -162,6 +206,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
                 continue
             records += 1
             issues.update(_index_admission(database, record, header.get("producer_instance_id")))
+            issues.update(_index_sink_record(database, record, header.get("producer_instance_id")))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -190,6 +235,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
             issues.add("noncontiguous_trace_segments")
     if terminal_summary is not None:
         issues.update(_admission_identity_issues(database, terminal_summary))
+    issues.update(_required_sink_issues(database))
     if paths and not unsupported:
         for kind, values in boundaries.items():
             if not values:
@@ -204,7 +250,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
     if unsupported:
         issues.add("unsupported_trace_schema")
     return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1",
-            "coverage": "CSV_PRODUCER_ADMISSION_IDENTITIES",
+            "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED"}
@@ -220,9 +266,13 @@ def validate_csv_persistence_trace(paths: Sequence[Path]) -> dict[str, Any]:
                 database.execute("CREATE TABLE outcomes (first_seq TEXT, last_seq TEXT, status TEXT)")
                 database.execute("CREATE INDEX outcome_order ON outcomes(length(first_seq), first_seq)")
                 database.execute("CREATE TABLE segments (segment_id TEXT PRIMARY KEY)")
+                database.execute("CREATE TABLE required_outputs (sequence TEXT, sink TEXT, source_hash TEXT, generation TEXT)")
+                database.execute("CREATE INDEX required_output_identity ON required_outputs(sequence, sink)")
+                database.execute("CREATE TABLE sink_receipts (sequence TEXT, sink TEXT, source_hash TEXT, generation TEXT, kind TEXT)")
+                database.execute("CREATE INDEX sink_receipt_identity ON sink_receipts(sequence, sink)")
                 return _validate_csv_trace(paths, database)
     except (OSError, sqlite3.Error):
-        return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_PRODUCER_ADMISSION_IDENTITIES",
+        return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
                 "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
                 "data_integrity_status": "NOT_EVALUATED"}
