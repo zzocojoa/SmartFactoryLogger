@@ -1199,6 +1199,14 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertTrue(outcomes["counts_reconciled"])
             self.assertEqual(state["pending_event_count"], 0)
             self.assertEqual(state["pending_payload_bytes"], 0)
+            records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                       for line in path.read_text(encoding="utf-8").splitlines()]
+            summary = next(record for record in records if record.get("kind") == "admission_summary")
+            saved_outcomes = summary.get("required_sink_outcomes")
+            self.assertIsNotNone(saved_outcomes, "terminal trace omitted required-sink outcomes")
+            expected_outcomes = dict(outcomes, coverage="TERMINAL_REQUIRED_SINK_COUNTS")
+            self.assertEqual(saved_outcomes, expected_outcomes)
+            self.assertEqual(saved_outcomes["data_integrity_status"], "NOT_EVALUATED")
             failures = [record for record in captured.records if record.getMessage() == "CSV processing failed"]
             self.assertEqual({record.sink_id for record in failures}, {"csv_v1", "csv_v2"})
             for record in failures:
