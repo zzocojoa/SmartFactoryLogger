@@ -43,7 +43,15 @@ class StoragePressureDecision:
 
 
 class StoragePressureController:
+    def __init__(self) -> None:
+        self._last_checked: float | None = None
+        self._last_decision: StoragePressureDecision | None = None
+        self._normal_confirmations = 0
+
     def evaluate(self, samples: Iterable[StoragePressureSample], *, now_monotonic: float) -> StoragePressureDecision:
+        if self._last_checked is not None and now_monotonic - self._last_checked < 1.0:
+            assert self._last_decision is not None
+            return self._last_decision
         active = [sample for sample in samples if sample.enabled or sample.has_pending]
         availability = ("blocked" if any(sample.availability == "blocked" for sample in active)
                         else "unknown" if any(sample.availability != "available" for sample in active)
@@ -66,6 +74,23 @@ class StoragePressureController:
             reasons.add("occupancy_high")
         if overdue >= 2.0:
             reasons.add("stage_overdue")
-        state = "PERSISTENCE_BLOCKED" if blocked else "PRESSURED" if reasons else "NORMAL"
-        return StoragePressureDecision(state, availability, occupancy, overdue, oldest_age,
-                                       sum(sample.pending_recovery for sample in active), 0, tuple(sorted(reasons)))
+        pending_recovery = sum(sample.pending_recovery for sample in active)
+        if blocked:
+            state = "PERSISTENCE_BLOCKED"
+            self._normal_confirmations = 0
+        elif reasons:
+            state = "PRESSURED"
+            self._normal_confirmations = 0
+        elif self._last_decision is not None and self._last_decision.state != "NORMAL":
+            recovering = occupancy <= 0.5 and overdue < 1.0 and pending_recovery == 0
+            self._normal_confirmations = self._normal_confirmations + 1 if recovering else 0
+            state = "NORMAL" if self._normal_confirmations >= 3 else "PRESSURED"
+            if state == "PRESSURED":
+                reasons.add("normal_recovery_confirmation")
+        else:
+            state = "NORMAL"
+            self._normal_confirmations = 0
+        self._last_checked = now_monotonic
+        self._last_decision = StoragePressureDecision(state, availability, occupancy, overdue, oldest_age,
+                                                      pending_recovery, self._normal_confirmations, tuple(sorted(reasons)))
+        return self._last_decision
