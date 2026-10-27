@@ -13,6 +13,61 @@ from backend.FacilityData.freshness import clock_domain_id
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_trace_probe_close_failure_blocks_reuse(self):
+        clock, handles = [100.0], []
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "close-uncertain", clock=lambda: clock[0])
+            writer.append({"kind": "first"})
+            self.assertTrue(writer.flush(force=True))
+            final, = root.glob("*.trace.jsonl")
+            original = final.read_bytes()
+
+            class UnclosedRead:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def fileno(self):
+                    return self.handle.fileno()
+
+                def close(self):
+                    raise OSError("injected read handle close uncertainty")
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    self.close()
+
+            def open_file(path, *args, **kwargs):
+                handle = original_open(path, *args, **kwargs)
+                if path == final:
+                    handles.append(handle)
+                    return UnclosedRead(handle)
+                return handle
+
+            try:
+                with patch.object(Path, "open", open_file):
+                    clock[0] = 101.0
+                    writer.probe_storage()
+                    state = writer.snapshot()
+                    self.assertTrue(state["manual_recovery_required"],
+                                    "unclosed trace access handle did not block automatic reuse")
+                    self.assertEqual(state["unresolved_access_handle_count"], 1)
+                    self.assertTrue(state["incomplete"])
+                    self.assertIsNone(state["next_probe_monotonic"])
+                    self.assertIsNone(writer.append({"kind": "later"}))
+                    self.assertFalse(writer.flush(force=True))
+                    clock[0] = 1000.0
+                    writer.probe_storage()
+                    self.assertEqual(len(handles), 1)
+                    self.assertFalse(handles[0].closed)
+            finally:
+                for handle in handles:
+                    handle.close()
+            self.assertEqual(final.read_bytes(), original)
+
     def test_new_trace_records_cannot_bypass_failed_required_file(self):
         clock, denied, attempts = [100.0], [True], []
         original_open = Path.open

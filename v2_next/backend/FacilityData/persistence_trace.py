@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, BinaryIO, Callable, Mapping
 from uuid import uuid4
 from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, encode_json_payload, prepare_json_payload
 from backend.FacilityData.freshness import clock_domain_id
@@ -188,6 +188,7 @@ class PersistenceTraceWriter:
         self._last_probe_success_monotonic: float | None = None
         self._last_probe_error: str | None = None
         self._latest_publication: tuple[Path, tuple[int, int, int, int]] | None = None
+        self._uncertain_access_handle: BinaryIO | None = None
         self._processing_bytes = 0
         self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
@@ -303,10 +304,18 @@ class PersistenceTraceWriter:
         path, expected = self._latest_publication
         if self._file_identity(path) != expected:
             raise _TraceContentUncertain("trace_publication_changed")
-        with path.open("rb", buffering=0) as handle:
+        handle = path.open("rb", buffering=0)
+        try:
             info = os.fstat(handle.fileno())
             if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != expected:
                 raise _TraceContentUncertain("trace_publication_handle_changed")
+        finally:
+            try:
+                handle.close()
+            except OSError as exc:
+                with self._lock:
+                    self._uncertain_access_handle = handle
+                raise _TraceContentUncertain("trace_access_close_uncertain") from exc
         if self._file_identity(path) != expected:
             raise _TraceContentUncertain("trace_publication_changed_after_access")
 
@@ -469,6 +478,7 @@ class PersistenceTraceWriter:
                     "pending_segments": len(self._segments),
                     "admission_blocked_reason": admission_blocked_reason,
                     "manual_recovery_required": self._manual_recovery_required,
+                    "unresolved_access_handle_count": int(self._uncertain_access_handle is not None),
                     "current_storage_availability": self._current_storage_availability,
                     "availability_scope": self._availability_scope,
                     "availability_checked_monotonic": self._availability_checked_monotonic,
