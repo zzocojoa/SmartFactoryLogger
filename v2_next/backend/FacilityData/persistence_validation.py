@@ -888,8 +888,18 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
+    csv_integrity_issues = set(issues)
+    if terminal_summary is not None and type(terminal_summary.get("rejected_count")) is int and terminal_summary["rejected_count"]:
+        csv_integrity_issues.add("csv_admissions_rejected")
+    csv_integrity_status = "NOT_EVALUATED"
+    if paths and csv_integrity_issues:
+        csv_integrity_status = "INCOMPLETE"
+    elif (paths and data_roots and checked_rows and checked_files and closeout_evaluated and summaries == 1):
+        csv_integrity_status = "VERIFIED"
     return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1",
             "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
+            "csv_integrity_scope": "CSV_CURRENT_PRODUCER_OWNED_RANGES",
+            "csv_integrity_status": csv_integrity_status, "csv_integrity_issues": sorted(csv_integrity_issues),
             "status": "INCOMPLETE" if incomplete else "NOT_EVALUATED",
             "issues": sorted(issues), "segment_count": len(paths), "record_count": records,
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED",
@@ -945,6 +955,8 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 return _validate_csv_trace(paths, database, data_roots)
     except (OSError, sqlite3.Error):
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
+                "csv_integrity_scope": "CSV_CURRENT_PRODUCER_OWNED_RANGES", "csv_integrity_status": "INCOMPLETE",
+                "csv_integrity_issues": ["validator_workspace_unavailable"],
                 "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
                 "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",

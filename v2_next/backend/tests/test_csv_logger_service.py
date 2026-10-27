@@ -67,6 +67,31 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_csv_integrity_does_not_hide_accounted_rejections(self) -> None:
+        for reject_input in (True, False):
+            with self.subTest(reject_input=reject_input), self.create_temp_dir() as tmp_dir:
+                service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+                service.apply_config(csv_v2_sidecar_enabled=True)
+                service.start()
+                try:
+                    if reject_input:
+                        invalid = self.create_data("2026-03-09T07:20:25.000", 30.0)
+                        invalid.Press = float("nan")
+                        self.assertEqual(service.enqueue_detailed(invalid)["status"], "INVALID")
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:26.000", 31.0))["status"], "ACCEPTED")
+                finally:
+                    self.assertTrue(service.stop(timeout_sec=5))
+                paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+                result = validate_csv_persistence_trace(paths, data_roots=[tmp_dir])
+                self.assertEqual(result["issues"], [], "accounting evidence itself is complete in both runs")
+                self.assertEqual(result.get("csv_integrity_status"), "INCOMPLETE" if reject_input else "VERIFIED",
+                                 "accounted rejection is still an unsaved producer observation")
+                self.assertEqual(result["csv_integrity_issues"], ["csv_admissions_rejected"] if reject_input else [])
+                self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+                if not reject_input:
+                    self.assertEqual(validate_csv_persistence_trace(paths)["csv_integrity_status"], "NOT_EVALUATED")
+
     def test_validator_rejects_metadata_bytes_changed_after_close(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=False, csv_v2_enabled=True)
