@@ -5003,6 +5003,54 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.assertTrue(monitor.stop())
 
+    async def test_dispatched_image_finishes_after_storage_becomes_blocked(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        blocked = threading.Event()
+        dispatched, release = asyncio.Event(), asyncio.Event()
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'blocked' if blocked.is_set() else 'available')])
+
+        class HeldTransport(FakeSpotHttpTransport):
+            async def request(self, request):
+                dispatched.set()
+                await release.wait()
+                return self.request_sync(request)
+
+        transport = HeldTransport()
+        task = None
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2
+            while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, 'NORMAL')
+            with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                    patch.object(spot_api, '_spot_http_transport', transport):
+                task = asyncio.create_task(spot_api.fetch_image_async(profile='operator_live'))
+                await asyncio.wait_for(dispatched.wait(), 2)
+                blocked.set()
+                deadline = time.monotonic() + 2
+                while monitor.snapshot().state != 'PERSISTENCE_BLOCKED' and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                release.set()
+                data, metadata = await asyncio.wait_for(task, 2)
+                self.assertEqual(data, _jpeg_bytes('guarded-image'))
+                self.assertEqual(metadata['source'], 'upstream')
+                self.assertFalse(metadata['image_upstream_suppressed'])
+                self.assertIsNone(metadata['retry_after_sec'])
+                diagnostics = spot_api.get_spot_diagnostics()
+                self.assertEqual(diagnostics['image_http_dispatch_count'], 1)
+                self.assertEqual(diagnostics['image_storage_suppressed_task_count'], 0)
+                self.assertEqual(spot_api._img_refresh_success_count, 1)
+                self.assertEqual(spot_api._img_failure_count, 0)
+        finally:
+            release.set()
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+            self.assertTrue(monitor.stop())
+
     async def test_snapshot_and_live_callers_share_one_upstream_refresh(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
         image_bytes = _jpeg_bytes("shared-profiles")
