@@ -4,10 +4,16 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Reactivate image storage checks on configuration/date changes and retry
+  failed directory probes with bounded backoff. Discard old probe success
+  after reactivation and drain admitted captures before a new destination
+  initializes. Expire stale pressure snapshots without blocking callers;
+  complete runtime pressure integration remains pending.
+
 - Start enabled image persistence before the first capture without blocking
   temperature startup. The owner probes fact and dated JPEG directories
   separately and publishes memory-only results while preserving file
-  uncertainty. Pressure dispatch and reconfiguration/retry integration remain pending.
+  uncertainty. Complete pressure dispatch integration remains pending.
 
 - Add a memory-only storage pressure controller and independent monitor with
   spaced recovery, unknown-clock, sampling-failure and stop guards. Production
