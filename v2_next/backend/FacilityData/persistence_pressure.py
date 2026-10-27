@@ -27,6 +27,10 @@ class StoragePressureSample:
     writer_alive: bool = True
     manual_recovery_required: bool = False
     admission_blocked_reason: str | None = None
+    # A shared owner budget is not a separate data stage. In particular,
+    # retained row receipts must not restart the completed data-stage clock.
+    budget_pending_count: int = 0
+    budget_pending_bytes: int = 0
 
     @property
     def has_pending(self) -> bool:
@@ -64,7 +68,8 @@ class StoragePressureController:
             assert self._last_decision is not None
             return self._last_decision
         active = [sample for sample in samples
-                  if sample.enabled or sample.has_pending or sample.manual_recovery_required]
+                  if (sample.enabled or sample.has_pending or sample.manual_recovery_required
+                      or sample.budget_pending_count or sample.budget_pending_bytes)]
         binding_unknown = any(
             not sample.sink_id or not sample.destination_key
             or not isinstance(sample.config_generation, int) or isinstance(sample.config_generation, bool)
@@ -76,7 +81,8 @@ class StoragePressureController:
         reasons = set() if availability == "available" else {"storage_" + availability}
         if binding_unknown:
             reasons.add("destination_binding_unavailable")
-        occupancy = max((max(sample.pending_count / sample.count_limit, sample.pending_bytes / sample.byte_limit,
+        occupancy = max((max(max(sample.pending_count, sample.budget_pending_count) / sample.count_limit,
+                             max(sample.pending_bytes, sample.budget_pending_bytes) / sample.byte_limit,
                              sample.spool_bytes / sample.spool_limit) for sample in active), default=0.0)
         pending_times = []
         for sample in active:

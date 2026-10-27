@@ -2846,6 +2846,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
             old_dir.mkdir()
             new_dir.mkdir()
             service = self.create_service(old_dir, True)
+            service.queue.maxsize = 3
 
             def blocked_open(path, mode="r", *args, **kwargs):
                 if path.parent == old_dir and path.suffix == ".csv" and mode == "a":
@@ -2880,6 +2881,24 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     self.assertNotEqual(old["configured_destination_key"], new["configured_destination_key"])
                     self.assertEqual(old["sink_id"], "csv_v1")
                     self.assertTrue(old["clock_domain"])
+                    samples = service.get_storage_pressure_samples()
+                    decision = StoragePressureController().evaluate(samples, now_monotonic=100.75)
+                    self.assertEqual(decision.max_occupancy_ratio, 1.0,
+                                     "CSV shared capacity was split across destination generations")
+                    self.assertIn("budget_exhausted", decision.reasons)
+                    csv_samples = sorted((s for s in samples if s.sink_id == "csv_v1"),
+                                         key=lambda s: s.config_generation)
+                    self.assertEqual(len(csv_samples), 2)
+                    self.assertEqual([s.pending_count for s in csv_samples], [2, 1])
+                    self.assertEqual([s.oldest_pending_monotonic for s in csv_samples], [100.0, 100.75])
+                    self.assertEqual([s.stage_due_monotonic for s in csv_samples], [101.0, 101.0])
+                    self.assertEqual([s.enabled for s in csv_samples], [False, True])
+                    destinations = service.get_runtime_state()["csv_storage_destinations"]
+                    by_generation = {d["config_generation"]: d["destination_key"] for d in destinations}
+                    self.assertEqual([s.destination_key for s in csv_samples],
+                                     [by_generation[s.config_generation] for s in csv_samples])
+                    fourth = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.300", 33.0))
+                    self.assertEqual(fourth["status"], "REJECTED_LIMIT")
                     clock[0] = 110.0
                     self.assertEqual(service.get_runtime_state()["csv_pending_data_stages"], stages,
                                      "observation or new configuration postponed an existing deadline")

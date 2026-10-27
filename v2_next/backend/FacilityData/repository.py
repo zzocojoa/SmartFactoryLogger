@@ -30,6 +30,7 @@ from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, csv_parser_field_limit, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
+from backend.FacilityData.persistence_pressure import StoragePressureSample
 from backend.FacilityData.persistence_trace import (
     AdmissionRejectionLedger, PersistenceTraceWriter, TRACE_SEGMENT_BYTE_LIMIT, TRACE_SEGMENT_RECORD_LIMIT,
 )
@@ -4079,6 +4080,39 @@ class CSVLoggerService:
                 stage["stage_due_monotonic"] = min(stage["stage_due_monotonic"], envelope.data_due_monotonic)
         return list(stages.values())
 
+    def get_storage_pressure_samples(self) -> tuple[StoragePressureSample, ...]:
+        """Join owner-published destinations and data stages without file I/O.
+
+        Destination stages retain their own admitted deadlines. The shared
+        CSV budget is repeated for max-occupancy evaluation, never summed.
+        Evidence-only records consume that budget but age in the trace stage.
+        """
+        state = self.get_runtime_state()
+        stages = {(s["config_generation"], s["sink_id"]): s for s in state["csv_pending_data_stages"]}
+        thread = self.thread
+        alive = thread is not None and thread.is_alive()
+        limit = min(state["queue_maxsize"], CSV_PENDING_EVENT_LIMIT) if state["queue_maxsize"] > 0 else CSV_PENDING_EVENT_LIMIT
+        samples = []
+        for destination in state["csv_storage_destinations"]:
+            key = destination["config_generation"], destination["sink_id"]
+            stage = stages.get(key, {})
+            enabled = (key[0] == state["csv_config_generation"] and key[1] in state["csv_required_sinks"])
+            samples.append(StoragePressureSample(
+                key[1], key[0], destination["destination_key"], enabled,
+                destination["current_storage_availability"], pending_count=stage.get("pending_count", 0),
+                count_limit=limit, byte_limit=CSV_PENDING_PAYLOAD_BYTE_LIMIT,
+                budget_pending_count=state["pending_event_count"], budget_pending_bytes=state["pending_payload_bytes"],
+                pending_recovery=destination["pending_recovery_count"],
+                oldest_pending_monotonic=stage.get("oldest_pending_monotonic"),
+                stage_due_monotonic=stage.get("stage_due_monotonic"),
+                clock_domain=stage.get("clock_domain", destination["clock_domain"]), writer_alive=alive,
+                manual_recovery_required=destination["manual_recovery_required"],
+            ))
+        trace = self._persistence_trace
+        if trace is not None:
+            samples.append(trace.storage_pressure_sample(enabled=bool(state["csv_required_sinks"]), writer_alive=alive))
+        return tuple(samples)
+
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
             current_settings = self._capture_write_config_locked()
@@ -4141,6 +4175,8 @@ class CSVLoggerService:
             "estimated_queue_bytes": estimated_queue_bytes,
             "pending_event_count": pending_event_count,
             "csv_storage_destinations": csv_storage_destinations,
+            "csv_config_generation": current_settings.generation,
+            "csv_required_sinks": current_settings.required_sinks,
             "csv_probe_failure_count": csv_probe_failure_count,
             "csv_probe_workspace_bytes": csv_probe_workspace_bytes,
             "csv_pending_data_stages": csv_pending_data_stages,
