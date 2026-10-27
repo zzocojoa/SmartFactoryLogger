@@ -20,6 +20,36 @@ class StoragePressureTests(unittest.TestCase):
         self.assertEqual(excluded.state, "NORMAL")
         self.assertEqual(excluded.current_storage_availability, "available")
 
+    def test_pressure_uses_capacity_and_stage_overdue(self):
+        baseline = self.sample(count_limit=100, byte_limit=100, spool_limit=100,
+                               pending_count=1, oldest_pending_monotonic=0.0, stage_due_monotonic=101.0)
+        cases = (
+            ({"pending_count": 80}, "PRESSURED", "occupancy_high"),
+            ({"pending_count": 79}, "NORMAL", None),
+            ({"pending_count": 100}, "PERSISTENCE_BLOCKED", "budget_exhausted"),
+            ({"pending_bytes": 80}, "PRESSURED", "occupancy_high"),
+            ({"pending_bytes": 101}, "PERSISTENCE_BLOCKED", "budget_exhausted"),
+            ({"spool_bytes": 80}, "PRESSURED", "occupancy_high"),
+            ({"spool_bytes": 100}, "PERSISTENCE_BLOCKED", "budget_exhausted"),
+            ({"stage_due_monotonic": 98.0}, "PRESSURED", "stage_overdue"),
+            ({"stage_due_monotonic": 98.01}, "NORMAL", None),
+            ({"manual_recovery_required": True}, "PERSISTENCE_BLOCKED", "manual_recovery"),
+            ({"writer_alive": False}, "PERSISTENCE_BLOCKED", "writer_stopped"),
+        )
+        for changes, expected, reason in cases:
+            with self.subTest(changes=changes):
+                decision = StoragePressureController().evaluate([replace(baseline, **changes)], now_monotonic=100.0)
+                self.assertEqual(decision.state, expected)
+                self.assertEqual(decision.oldest_pending_age_seconds, 100.0)
+                self.assertEqual(decision.max_stage_overdue_seconds,
+                                 max(0.0, 100.0 - changes.get("stage_due_monotonic", 101.0)))
+                if reason:
+                    self.assertIn(reason, decision.reasons)
+        scheduled = StoragePressureController().evaluate([baseline], now_monotonic=100.0)
+        self.assertEqual(scheduled.state, "NORMAL")
+        self.assertEqual(scheduled.max_stage_overdue_seconds, 0.0)
+        self.assertEqual(scheduled.max_occupancy_ratio, 0.01)
+
 
 if __name__ == "__main__":
     unittest.main()
