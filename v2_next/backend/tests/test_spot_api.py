@@ -5036,6 +5036,10 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIsNone(spot_api._spot_diagnostics_last_error_code)
                         diagnostics = spot_api.get_spot_diagnostics()
                         self.assertEqual(diagnostics.get('diagnostics_http_dispatch_count'), 0)
+                        self.assertEqual(diagnostics.get('diagnostic_dispatch_attempt_count'), 0,
+                                         'planned diagnostic dispatch counter is missing')
+                        self.assertEqual(diagnostics.get('image_dispatch_attempt_count'), 0)
+                        self.assertEqual(diagnostics.get('pre_dispatch_suppressed_count'), 1)
                         self.assertEqual(diagnostics.get('diagnostics_storage_suppressed_request_count'), 1)
                         journal = diagnostics['diagnostic_request_journal']
                         self.assertEqual(journal['active_request_count'], 0)
@@ -5053,6 +5057,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(spot_api._spot_diagnostics_snapshot['diagnostics_capture_status'],
                                          'async_complete')
                         self.assertEqual(spot_api.get_spot_diagnostics().get('diagnostics_http_dispatch_count'), 8)
+                        self.assertEqual(spot_api.get_spot_diagnostics().get('diagnostic_dispatch_attempt_count'), 8)
+                        self.assertEqual(spot_api.get_spot_diagnostics().get('pre_dispatch_suppressed_count'), 1)
             finally:
                 if spot_api._spot_device_request_lock.locked():
                     spot_api._spot_device_request_lock.release()

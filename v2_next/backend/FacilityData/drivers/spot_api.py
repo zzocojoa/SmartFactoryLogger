@@ -3373,6 +3373,13 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         "diagnostics_sweep_started_count": int(_spot_diagnostics_sweep_started_count),
         "diagnostics_upstream_request_count": int(_spot_diagnostics_upstream_request_count),
         "diagnostics_http_dispatch_count": int(_spot_diagnostics_upstream_request_count),
+        "diagnostic_dispatch_attempt_count": int(_spot_diagnostics_upstream_request_count),
+        "image_dispatch_attempt_count": int(_img_http_dispatch_count),
+        # Current-process requests stopped at the dispatch gate, not polls,
+        # coalesced waiters or downstream responses served without a task.
+        "pre_dispatch_suppressed_count": int(
+            _img_storage_suppressed_task_count + _spot_diagnostics_storage_suppressed_request_count
+        ),
         "diagnostics_storage_suppressed_request_count": int(
             _spot_diagnostics_storage_suppressed_request_count
         ),
