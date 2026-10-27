@@ -73,6 +73,8 @@ class SpotObservationQueue:
         self._worker_failure_count = 0
         self._summary: dict[str, Any] | None = None
         self._file_stamp: tuple[int, int] | None = None
+        self._required_file_probe_at: float | None = 0.0
+        self._required_file_probe_delay = 1.0
         self._state: dict[str, Any] = {
             "queue_capacity": capacity, "accepted_count": 0, "completed_count": 0,
             "rejected_count": 0, "write_failure_count": 0, "spool_failure_count": 0,
@@ -84,6 +86,10 @@ class SpotObservationQueue:
             "pending_payload_bytes": 0, "pending_source_payload_bytes": 0,
             "processing_payload_bytes": 0, "last_failed_observation_key": None,
             "pending_payload_byte_limit": FACT_PENDING_PAYLOAD_BYTE_LIMIT,
+            "required_file_availability": "unknown", "required_file_scope": "read_write_open",
+            "required_file_error_type": None, "required_file_failure_count": 0,
+            "required_file_checked_monotonic": None, "required_file_last_success_monotonic": None,
+            "required_file_next_probe_monotonic": None,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
         self._thread.start()
@@ -254,6 +260,33 @@ class SpotObservationQueue:
             self._state["existing_fact_hash_ms"] = writer.existing_fact_hash_ms
             self._state["existing_fact_index_ms"] = writer.existing_fact_index_ms
 
+    def _probe_required_file_access(self, writer: SpotObservationFactWriter) -> None:
+        # The owner alone opens the existing file. This does not append, create,
+        # repair history, or claim that other required destinations are ready.
+        if (self._stop.is_set() or self._required_file_probe_at is None
+                or time.monotonic() < self._required_file_probe_at):
+            return
+        error_type = None
+        try:
+            with writer.output_path.open("r+b"):
+                pass
+        except OSError as exc:
+            error_type = type(exc).__name__
+        checked = time.monotonic()
+        with self._lock:
+            self._state["required_file_availability"] = "blocked" if error_type else "available"
+            self._state["required_file_error_type"] = error_type
+            self._state["required_file_checked_monotonic"] = checked
+            if error_type:
+                self._state["required_file_failure_count"] += 1
+                self._required_file_probe_at = checked + self._required_file_probe_delay
+                self._required_file_probe_delay = min(30.0, 2 * self._required_file_probe_delay)
+            else:
+                self._state["required_file_last_success_monotonic"] = checked
+                self._required_file_probe_at = None
+                self._required_file_probe_delay = 1.0
+            self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
+
     def _run(self) -> None:
         started = time.monotonic()
         try:
@@ -267,6 +300,7 @@ class SpotObservationQueue:
             with self._lock:
                 self._state["initialization_state"] = "ready"
                 self._state["initialization_duration_ms"] = (time.monotonic()-started)*1000
+            self._probe_required_file_access(writer)
         except Exception:
             with self._lock:
                 self._state["initialization_state"] = "failed"
@@ -278,6 +312,7 @@ class SpotObservationQueue:
             try:
                 event = self._queue.get(timeout=.05)
             except queue.Empty:
+                self._probe_required_file_access(writer)
                 continue
             started = time.monotonic()
             decoded = None

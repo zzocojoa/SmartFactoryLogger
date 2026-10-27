@@ -333,6 +333,55 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_required_fact_access_recovers_without_new_observations(self):
+        original_open = Path.open
+        clock, attempts = [100.0], []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+            original = path.read_bytes()
+
+            def denied_access(target, mode="r", *args, **kwargs):
+                if target == path and mode == "r+b":
+                    attempts.append((clock[0], threading.current_thread()))
+                    if len(attempts) == 1:
+                        raise PermissionError("synthetic file lock; directory remains accessible")
+                return original_open(target, mode, *args, **kwargs)
+
+            def wait_state(owner, availability):
+                for _ in range(100):
+                    state = owner.snapshot()
+                    if state.get("required_file_availability") == availability:
+                        return state
+                    threading.Event().wait(.01)
+                self.fail(f"required file state did not become {availability}: {owner.snapshot()}")
+
+            with patch.object(Path, "open", denied_access), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    state = wait_state(owner, "blocked")
+                    self.assertEqual(state["required_file_error_type"], "PermissionError")
+                    self.assertEqual(state["required_file_next_probe_monotonic"], 101.0)
+                    self.assertEqual(state["required_file_failure_count"], 1)
+                    clock[0] = 100.99
+                    threading.Event().wait(.12)
+                    self.assertEqual(len(attempts), 1)
+                    clock[0] = 101.0
+                    state = wait_state(owner, "available")
+                    self.assertEqual(state["required_file_failure_count"], 1)
+                    self.assertEqual(state["required_file_last_success_monotonic"], 101.0)
+                    self.assertIsNone(state["required_file_next_probe_monotonic"])
+                    self.assertEqual(state["accepted_count"], 0)
+                    self.assertEqual(state["write_failure_count"], 0)
+                    self.assertEqual(attempts, [(100.0, owner._thread), (101.0, owner._thread)])
+                    with patch.object(Path, "stat", side_effect=AssertionError("snapshot performed file I/O")):
+                        self.assertEqual(owner.snapshot()["required_file_availability"], "available")
+                finally:
+                    owner.close(3)
+            self.assertEqual(path.read_bytes(), original)
+
     def test_pending_deadline_includes_inflight_without_sliding(self):
         opened = [threading.Event(), threading.Event()]
         release = [threading.Event(), threading.Event()]
