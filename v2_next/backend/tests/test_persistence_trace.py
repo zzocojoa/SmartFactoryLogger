@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
 import tracemalloc
 import unittest
 from unittest.mock import patch
@@ -10,9 +11,70 @@ from unittest.mock import patch
 from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, AdmissionRejectionRange, PersistenceTraceWriter
 from backend.FacilityData.persistence_validation import validate_csv_persistence_trace
 from backend.FacilityData.freshness import clock_domain_id
+from backend.FacilityData.persistence_pressure import StoragePressureController, StoragePressureSample
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_live_trace_probe_has_pressure_stage_clocks(self):
+        clock = [100.0]
+        entered, release = threading.Event(), threading.Event()
+        original_replace = os.replace
+        with tempfile.TemporaryDirectory() as folder:
+            writer = PersistenceTraceWriter(Path(folder), "probe-stage-clock", clock=lambda: clock[0])
+            writer.append({"kind": "first"})
+            self.assertTrue(writer.flush(force=True))
+
+            def held_replace(source, target, *args, **kwargs):
+                if Path(source).name.startswith(".sfl-storage-probe-"):
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test did not release trace directory check")
+                return original_replace(source, target, *args, **kwargs)
+
+            def sample(state):
+                return StoragePressureSample(
+                    "trace", 1, "probe-stage-clock", True, state["current_storage_availability"],
+                    pending_count=state["pending_records"], pending_bytes=state["pending_bytes"],
+                    count_limit=2000, byte_limit=2*1024**2,
+                    oldest_pending_monotonic=state.get("processing_oldest_monotonic"),
+                    stage_due_monotonic=state.get("processing_due_monotonic"),
+                    clock_domain=state["clock_domain"],
+                )
+
+            with patch.object(os, "replace", held_replace):
+                clock[0] = 101.0
+                worker = threading.Thread(target=writer.probe_storage)
+                worker.start()
+                try:
+                    self.assertTrue(entered.wait(3))
+                    state = writer.snapshot()
+                    self.assertEqual(state["pending_records"], 0)
+                    self.assertEqual(state["processing_bytes"], 128)
+                    controller = StoragePressureController()
+                    decision = controller.evaluate([sample(state)], now_monotonic=101.25)
+                    self.assertEqual(decision.state, "NORMAL",
+                                     "live probe workspace was treated as untimed pending data")
+                    self.assertEqual(decision.oldest_pending_age_seconds, .25)
+                    clock[0] = 103.0
+                    writer.append({"kind": "new_arrival"})
+                    during = writer.snapshot()
+                    self.assertEqual(during["oldest_pending_monotonic"], 103.0)
+                    self.assertEqual(during["stage_due_monotonic"], 104.0)
+                    self.assertEqual(during["processing_oldest_monotonic"], 101.0)
+                    self.assertEqual(during["processing_due_monotonic"], 101.0)
+                    self.assertEqual(controller.evaluate([sample(during)], now_monotonic=103.0).state,
+                                     "PRESSURED", "new admission postponed a stalled probe's deadline")
+                finally:
+                    release.set()
+                    worker.join(3)
+                self.assertFalse(worker.is_alive())
+            finished = writer.snapshot()
+            self.assertEqual(finished["processing_bytes"], 0)
+            self.assertIsNone(finished["processing_oldest_monotonic"])
+            self.assertIsNone(finished["processing_due_monotonic"])
+            self.assertTrue(writer.flush(force=True))
+            self.assertEqual(writer.snapshot()["pending_bytes"], 0)
+
     def test_trace_probe_close_failure_blocks_reuse(self):
         clock, handles = [100.0], []
         original_open = Path.open

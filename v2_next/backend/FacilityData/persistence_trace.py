@@ -190,6 +190,8 @@ class PersistenceTraceWriter:
         self._latest_publication: tuple[Path, tuple[int, int, int, int]] | None = None
         self._uncertain_access_handle: BinaryIO | None = None
         self._processing_bytes = 0
+        self._processing_oldest_monotonic: float | None = None
+        self._processing_due_monotonic: float | None = None
         self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
 
@@ -353,6 +355,8 @@ class PersistenceTraceWriter:
                         or self.clock() < self._next_probe_monotonic):
                     return
                 self._processing_bytes = TRACE_PROBE_WORKSPACE_BYTES
+                self._processing_oldest_monotonic = self.clock()
+                self._processing_due_monotonic = self._processing_oldest_monotonic
             error: OSError | RuntimeError | None = None
             try:
                 # Check the existing file before a directory probe can recreate
@@ -365,6 +369,8 @@ class PersistenceTraceWriter:
             finally:
                 with self._lock:
                     self._processing_bytes = 0
+                    self._processing_oldest_monotonic = None
+                    self._processing_due_monotonic = None
             with self._lock:
                 checked = self.clock()
                 self._availability_scope = "directory_probe"
@@ -410,6 +416,8 @@ class PersistenceTraceWriter:
                 # never postpone that first scheduled/attempted completion.
                 segment.flush_due_monotonic = min(segment.flush_due_monotonic, now)
                 self._processing_bytes = TRACE_READBACK_BYTES
+                self._processing_oldest_monotonic = segment.created_monotonic
+                self._processing_due_monotonic = segment.flush_due_monotonic
             try:
                 publication = self._publish(segment)
             except OSError as exc:
@@ -433,6 +441,8 @@ class PersistenceTraceWriter:
             finally:
                 with self._lock:
                     self._processing_bytes = 0
+                    self._processing_oldest_monotonic = None
+                    self._processing_due_monotonic = None
             with self._lock:
                 self._latest_publication = publication
                 self._current_storage_availability = "available"
@@ -475,6 +485,8 @@ class PersistenceTraceWriter:
                                             if segment.recovery_required),
                     "pending_bytes": sum(segment.size for segment in self._segments) + self._processing_bytes,
                     "processing_bytes": self._processing_bytes,
+                    "processing_oldest_monotonic": self._processing_oldest_monotonic,
+                    "processing_due_monotonic": self._processing_due_monotonic,
                     "pending_segments": len(self._segments),
                     "admission_blocked_reason": admission_blocked_reason,
                     "manual_recovery_required": self._manual_recovery_required,
