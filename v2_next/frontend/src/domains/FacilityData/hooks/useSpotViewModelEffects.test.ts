@@ -323,6 +323,34 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     } finally { unmount(); }
   });
 
+  it('records a late transport failure while hidden without scheduling or spending an automatic retry', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let reject!: (error: Error) => void;
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementationOnce(() => new Promise((_resolve, rejectResponse) => { reject = rejectResponse; }))
+      .mockImplementation(async () => new Response('', { status: 503, headers: {
+        'X-Spot-Image-Upstream-Suppressed': '1',
+        'X-Spot-Image-Suppression-Reason': 'storage_pressure',
+        'Retry-After': '2',
+      } }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      act(() => { setVisibilityState('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
+      await act(async () => { reject(new Error('actual network failure')); });
+      expect(result.current.diagnostics.error_count).toBe(1);
+      expect(result.current.diagnostics.automatic_retry_pending).toBe(false);
+      expect(result.current.diagnostics.consecutive_retry_attempt).toBe(0);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+      await act(async () => { setVisibilityState('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+      expect(service.image).toHaveBeenCalledTimes(2);
+      expect(result.current.diagnostics.error_count).toBe(1);
+    } finally { unmount(); }
+  });
+
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);

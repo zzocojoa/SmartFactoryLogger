@@ -338,7 +338,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   }, [cancelPendingImageRetry]);
 
   const scheduleAutomaticImageRetry = useCallback((): void => {
-    if (shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() || automaticRetryTimerRef.current !== null) {
+    if (shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() ||
+      document.visibilityState === 'hidden' || automaticRetryTimerRef.current !== null) {
       return;
     }
     cancelNormalImageRefresh();
