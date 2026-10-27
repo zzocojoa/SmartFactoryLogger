@@ -62,7 +62,8 @@ class StoragePressureController:
         if self._last_checked is not None and now_monotonic - self._last_checked < 1.0:
             assert self._last_decision is not None
             return self._last_decision
-        active = [sample for sample in samples if sample.enabled or sample.has_pending]
+        active = [sample for sample in samples
+                  if sample.enabled or sample.has_pending or sample.manual_recovery_required]
         availability = ("blocked" if any(sample.availability == "blocked" for sample in active)
                         else "unknown" if any(sample.availability != "available" for sample in active)
                         else "available")

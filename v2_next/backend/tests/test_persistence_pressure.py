@@ -24,6 +24,27 @@ class StoragePressureTests(unittest.TestCase):
         self.assertEqual(excluded.state, "NORMAL")
         self.assertEqual(excluded.current_storage_availability, "available")
 
+    def test_disabled_sink_retains_manual_recovery_without_pending_counts(self):
+        controller = StoragePressureController()
+        previous = self.sample(enabled=False, availability='blocked', manual_recovery_required=True,
+                               writer_alive=False)
+        current = self.sample(config_generation=2, destination_key='destination-B')
+        for now in (100.0, 101.0, 102.0, 103.0):
+            decision = controller.evaluate([previous, current], now_monotonic=now)
+            self.assertEqual(decision.state, 'PERSISTENCE_BLOCKED',
+                             'disabled unresolved destination was excluded from pressure control')
+            self.assertEqual(decision.current_storage_availability, 'blocked')
+            self.assertIn('manual_recovery', decision.reasons)
+            self.assertIn('writer_stopped', decision.reasons)
+            self.assertNotIn('pending_clock_unavailable', decision.reasons)
+            self.assertEqual(decision.normal_confirmations, 0)
+        resolved = replace(previous, manual_recovery_required=False, availability='unknown')
+        for now, expected in ((104.0, 'PRESSURED'), (105.0, 'PRESSURED'), (106.0, 'NORMAL')):
+            decision = controller.evaluate([resolved, current], now_monotonic=now)
+            self.assertEqual(decision.state, expected)
+            self.assertEqual(decision.current_storage_availability, 'available')
+            self.assertNotIn('manual_recovery', decision.reasons)
+
     def test_pressure_uses_capacity_and_stage_overdue(self):
         baseline = self.sample(count_limit=100, byte_limit=100, spool_limit=100,
                                pending_count=1, oldest_pending_monotonic=0.0, stage_due_monotonic=101.0)
