@@ -196,6 +196,8 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 2026-10-28 trace 보완: 최초 증거 기록의 단조 시각/예정 시각·clock domain과 실제 실패 segment의 pending_recovery를 제공한다. 내용 불확실은 수동 복구로 유지하고 CSV 접수를 UNAVAILABLE로 분류한다. 일시 공개 실패의 1→2→4→8→16→30초 재시도는 새 기록/force로 우회하지 못하며 성공 후 초기화한다. 파일 공개 범위의 현재 가용성과 과거 실패를 구분한다. 디렉터리/전체 파일 probe, spool·단계 간 나이/세대 결합·종료 수명, required sink/monitor·17명세 전체는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-recovery-state/verification.json`.
 
+2026-10-28 온도 초기 읽기 복구: 헤더 읽기 실패를 스키마 변경으로 처리하지 않고 원본을 보존한다. 초기 hash/행 읽기는 동일 원본 식별을 확인한 뒤 재색인하며 파일 교체·삭제·해석/닫기 불확실은 수동 복구로 유지한다. 같은 owner가 새 유입 없이 1→2→4→8→16→30초로 초기 읽기를 재시도하고 종료 시 예약을 중단한다. 기존 접수와 실패 이력을 보존한다. generic factory/헤더 쓰기/스풀 초기화, 전체 가용성/monitor/17명세는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-initialization-recovery/verification.json`.
+
 **R06 — 실제 HTTP 취득 억제**
 
 - `_img_fetch_lock` 안에서 새 upstream refresh task를 생성하기 직전에 압력 상태와 양수 요청 간격을 검사한다. 이 검사는 FR02의 발송 직전 검사를 대체하지 않는다. 기존 최소 요청률 계산의 입력을 0으로 바꾸는 방식은 사용하지 않는다. single-flight waiter와 이미 dispatch한 공유 요청은 압력 변화만으로 강제 취소하지 않는다.

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T17:50:55.698691+00:00",
+  "lastUpdated": "2026-10-27T18:17:32.472126+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "3edac6b51587688e738787bbe7aa91d04541a0d5",
+      "currentDevelopmentCommit": "82de3a6bb1de6f606bace11bd9092c1af9729462",
       "lastBackendVerification": {
-        "commit": "3edac6b51587688e738787bbe7aa91d04541a0d5",
-        "total": 1168,
-        "passed": 1167,
+        "commit": "82de3a6bb1de6f606bace11bd9092c1af9729462",
+        "total": 1173,
+        "passed": 1172,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-recovery-state/verification.json",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-initialization-recovery/verification.json",
         "binding": "tested-source-sha256-equals-commit"
       },
       "completedScope": [
@@ -48323,11 +48323,13 @@
         "Fact write failure invalidates current file access; bounded idle spool recovery and arrival backoff preserve history and damaged files.",
         "CSV data-stage monotonic admission/deadline clocks preserve configured generation; actual one-second flush ignores wall-clock rollback and excludes evidence-only waiting.",
         "Trace evidence has first-record monotonic clocks, non-postponed stage deadlines and actual failed-segment recovery counts.",
-        "Uncertain trace publication stays held with unavailable CSV admission; transient publication retry is capped at 30 seconds, cannot be bypassed by arrivals/force, and preserves failure history."
+        "Uncertain trace publication stays held with unavailable CSV admission; transient publication retry is capped at 30 seconds, cannot be bypassed by arrivals/force, and preserves failure history.",
+        "Observation header read failures preserve original files instead of schema rollover; deferred records recover under the same IDs.",
+        "Same-file initial history reads rebuild partial indexes under the existing owner with capped retry and shutdown cancellation; identity changes, decode errors and uncertain closes remain held, with original admissions and failure history retained."
       ],
       "remainingScope": [
         "Complete required CSV/fact/spool/trace destination probes/availability, spool and cross-stage oldest-age/generation joins, retry shutdown lifecycle and owner-replacement history.",
-        "Complete temperature fact initialization/recovery lifecycle and full required-file integrity; existing checks do not prove whole historical integrity.",
+        "Complete temperature factory/header-write/spool initialization recovery and full required-file integrity; initial read recovery does not prove whole historical integrity.",
         "Wire required writer state providers and monitor lifecycle; implement PRESSURED cadence, NORMAL interval/temperature priority, full status/observation-reference contracts and runtime integration.",
         "Complete fact/JPEG reconciliation, recovery and aggregate workspace reservations; all 17 r4 scenarios.",
         "Final whole-state health/build/installer verification and master integration."
@@ -48337,7 +48339,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/health-result.json"
       },
-      "updatedAt": "2026-10-27T17:50:55.698691+00:00",
+      "updatedAt": "2026-10-27T18:17:32.472126+00:00",
       "lastRelatedBackendVerification": {
         "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
         "total": 190,
@@ -48425,6 +48427,11 @@
         "commit": "3edac6b51587688e738787bbe7aa91d04541a0d5",
         "focusedRuns": 13,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-recovery-state/verification.json"
+      },
+      "lastFactInitializationVerification": {
+        "commit": "82de3a6bb1de6f606bace11bd9092c1af9729462",
+        "focusedRuns": 10,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/fact-initialization-recovery/verification.json"
       }
     }
   },
