@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~4단계 일부 진행. CSV 대조/QA CLI, 이미지 동일 작업 재시도·JPEG 재사용·손상 history 보존·한 행 조회/캐시와 저장 전/열기/닫기 파일 식별 검사를 구현했다. 전체 fact/JPEG 대조·남은 동시 변경/메타데이터 복구·완전한 작업 공간 예산·압력/API/화면 계약과17명세 전체는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 최신 코드 `4828260c` 전체 backend 1,104시험 중1,103통과·private F01 미제공1skip, 436.763초·exit0. backend Ruff·기본 mypy12파일 exit0. 전체 health는 이미지 후속 변경 전 `4d671d6c`에서 exit0이다. 전체 구현 뒤 최종 health·새 설치본 빌드/검증·master 통합은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | 최신 코드 `3e89f937` backend 1,108시험 중1,107통과·private F01 미제공1skip, 438.976초·exit0. backend Ruff·기본 mypy12파일 exit0. 전체 health는 이미지 후속 변경 전 `4d671d6c`의 결과다. 전체 구현 뒤 최종 health·새 설치본·master 통합은 미완료 |
 
 ## 보존과 통합
 
@@ -966,3 +966,16 @@ CSV의 기존 EMA 계산을 canonical bytes 생성 전에 끝내 같은 예약 �
 재점검에서 원래 109개 변경 경로의 HEAD blob 존재, 버전 5개, 보호 stash, 소스 3개·고정 문서 4개의 SHA256, 12실행의 전체 로그 24개와 종료 코드, 보존 운영 설치본의 크기·SHA256을 확인했다. 이번 점검에서 서버의 실시간 상태는 새로 조회하지 않았다.
 
 근거: [브랜치 재점검 결과](C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-file-identity/branch-audit-20261027-203229.json). 최신 코드의 backend 전체 검사와 정적 검사는 위 결과이며, 문서 정리 이후 제품 코드는 변경하지 않았다.
+
+
+## 2026-10-27 이미지 fact 복구 행·해시 읽기 예산
+
+- `cd2aee67`: 초기 이력 계수·capture ID 조회·헤더 읽기에 한 논리 CSV 행당 UTF-8 1MiB 상한을 적용했다. 여러 물리 줄의 quoted 행도 합산한다. 초과한 원본을 절단·삭제·재작성하지 않고 수동 복구 상태로 유지한다.
+- `70df5575`: 초기 파일/추가 append의 hash 읽기 전에 최대4KiB를 기존 이미지 payload 예산에서 예약하고 readinto로 같은 버퍼를 재사용한다. 저장 후 검산 예산을 확보하지 못하면 원래 행과 ID는 유지하고 manifest만 미확정으로 남긴다.
+- `3e89f937`: ASCII·UTF-8·multiline의 정확한1MiB/1바이트 초과6조건과 저장 후 검산 예약 거절 시 재시도 중복 없음·미확정 보존을 회귀 검사했다. 이 후속 검사는 새 행동 RED로 세지 않는다.
+
+두 행동 RED는 각각 oversized row가 ready인 실패와 초기 digest 예약 거절이 발생하지 않은 실패였다. 관련107/108시험 통과, 최종 backend **1,108중1,107통과·private F01자료 미제공1skip**, 438.976초·exit0. Ruff·기본 mypy12파일·diff 검사도 exit0이다. 8실행의 명령·전체 로그16개·종료 코드·SHA256과 소스2개/고정 원문4개 대조는 `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-recovery-budget/verification.json`에 보존한다.
+
+한 행의 상한과 digest 버퍼 예약을 전체 이미지 메모리 상한 완료로 확대하지 않는다. 파서·출력·보유 cache 사본의 예약, 전체 fact/JPEG 독립 대조·역사 의미/중복·남은 동시 I/O 복구, 저장 압력·목적지 probe·API/화면/관측 계약,7단계·17시나리오 전체 및 최종 health/새 설치본/master는 남아 있다. 기존 운영본·태그·stash·실패 증거를 유지하고 서버 조작·백업은 하지 않았다.
+
+직전 목표 턴은109경로·기존 증거·운영 설치본 검산, 최신 진행 기록 갱신과 원격 반영을 완료한 PROGRESS다. 전체 목표는 계속 active다.

@@ -4,6 +4,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Bound image fact recovery to 1 MiB per logical UTF-8 CSV row,
+  including quoted newlines, and reserve at most 4 KiB for digest
+  reads. A digest budget failure preserves the stored capture ID
+  and leaves its manifest unready without appending a duplicate.
+
 - Check image fact path identity before capture, the actual file handle
   before append, and file ID/expected size after close. Keep detected
   changes uncertain instead of adopting a replacement as the new
