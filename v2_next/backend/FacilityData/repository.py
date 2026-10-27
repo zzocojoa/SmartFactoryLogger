@@ -29,7 +29,7 @@ from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.persistence_payload import (
     PayloadBudgetExceeded, csv_record_sizes, decoded_string_bytes, encode_json_payload, prepare_json_payload,
 )
-from backend.FacilityData.persistence_trace import PersistenceTraceWriter
+from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
     SPOT_INVALID_SENTINEL_VALUES,
@@ -513,6 +513,7 @@ class CSVLoggerService:
         self._lifecycle_lock = threading.Lock()
         self._sample_seq = 0
         self._producer_seq = 0
+        self._admission_ledger = AdmissionRejectionLedger()
         self._trace_start_seq = 0
         self._trace_stop_seq: Optional[int] = None
         self._trace_stop_recorded = False
@@ -577,6 +578,7 @@ class CSVLoggerService:
                 if self._csv_manual_recovery_required or self._uncertain_csv_paths or self._unclosed_csv_handles:
                     raise RuntimeError("CSV file state requires manual recovery before restart.")
                 self._trace_start_seq = self._producer_seq
+                self._admission_ledger = AdmissionRejectionLedger()
             self._trace_stop_seq = None
             self._trace_stop_recorded = False
             self._trace_config_generation = None
@@ -648,113 +650,122 @@ class CSVLoggerService:
     def enqueue_detailed(self, data: FactoryData) -> dict[str, Any]:
         now = time.time()
         with self._lifecycle_lock, self._config_lock:
-            self._producer_seq += 1
-            write_config = self._capture_write_config_locked()
-            result: dict[str, Any] = {
-                "status": "ACCEPTED", "reason": None,
-                "producer_instance_id": self.logger_service_instance_id,
-                "producer_seq": self._producer_seq,
-                "source_payload_hash": None,
-                "config_generation": write_config.generation,
-                "required_sinks": write_config.required_sinks,
-            }
-            if not self.running:
-                return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
-            if not write_config.auto_save:
-                return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
+            result = self._admit_csv_locked(data, now)
+            if self.running:
+                with self._runtime_lock:
+                    self._admission_ledger.record(result["producer_seq"], result["status"],
+                                                  result["reason"], result["config_generation"])
+            return result
+
+    def _admit_csv_locked(self, data: FactoryData, now: float) -> dict[str, Any]:
+        # The public entry point holds lifecycle/config locks through accounting.
+        self._producer_seq += 1
+        write_config = self._capture_write_config_locked()
+        result: dict[str, Any] = {
+            "status": "ACCEPTED", "reason": None,
+            "producer_instance_id": self.logger_service_instance_id,
+            "producer_seq": self._producer_seq,
+            "source_payload_hash": None,
+            "config_generation": write_config.generation,
+            "required_sinks": write_config.required_sinks,
+        }
+        if not self.running:
+            return {**result, "status": "REJECTED_CLOSED", "reason": "persistence_closed"}
+        if not write_config.auto_save:
+            return {**result, "status": "DISABLED", "reason": "auto_save_disabled"}
+        with self._runtime_lock:
+            if self._csv_manual_recovery_required:
+                self._drop_count += 1
+                self._last_drop_at = now
+                return {**result, "status": "REJECTED_UNAVAILABLE",
+                        "reason": "csv_owner_requires_manual_recovery"}
+        trace = self._persistence_trace
+        blocked_reason = trace.snapshot()["admission_blocked_reason"] if trace is not None else None
+        if blocked_reason is not None:
             with self._runtime_lock:
-                if self._csv_manual_recovery_required:
-                    self._drop_count += 1
-                    self._last_drop_at = now
-                    return {**result, "status": "REJECTED_UNAVAILABLE",
-                            "reason": "csv_owner_requires_manual_recovery"}
-            trace = self._persistence_trace
-            blocked_reason = trace.snapshot()["admission_blocked_reason"] if trace is not None else None
-            if blocked_reason is not None:
-                with self._runtime_lock:
-                    self._drop_count += 1
-                    self._last_drop_at = now
-                return {**result, "status": "REJECTED_LIMIT", "reason": blocked_reason}
-            reserved_bytes = 0
-            payload = None
-            envelope = None
-            snapshot = None
+                self._drop_count += 1
+                self._last_drop_at = now
+            return {**result, "status": "REJECTED_LIMIT", "reason": blocked_reason}
+        reserved_bytes = 0
+        payload = None
+        envelope = None
+        snapshot = None
+        try:
             try:
-                try:
-                    header_workspace = write_config.header_workspace_bytes
-                    with self._runtime_lock:
-                        available = (CSV_PENDING_PAYLOAD_BYTE_LIMIT - self._pending_source_payload_bytes
-                                     - self._pending_processing_payload_bytes - header_workspace)
-                    # Include internal clock/provenance fields. Default JSON
-                    # separators give a conservative bound for compact output.
-                    snapshot, encoded_size, characters, width = prepare_json_payload(dict(data), available)
-                    text_bytes = characters * width
-                    # iterencode chunks and their joined text coexist, then
-                    # the joined text and UTF-8 output coexist. Reserve the
-                    # larger phase, including wide Unicode text storage.
-                    required_bytes = max(2 * text_bytes, encoded_size + text_bytes)
-                    with self._runtime_lock:
-                        if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
-                                + required_bytes + header_workspace > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
-                            raise PayloadBudgetExceeded
-                        self._pending_processing_payload_bytes += required_bytes
-                        reserved_bytes = required_bytes
-                    # EMA serializes to UTF-8 bytes and then Python text. Use
-                    # this reserved workspace before retaining canonical bytes,
-                    # and size the same detached input rather than the caller's
-                    # potentially mutable model. The temporary model and JSON
-                    # copies are released when the estimator returns.
-                    payload_bytes = self._estimate_factory_data_bytes(FactoryData.model_construct(**snapshot))
-                    payload = encode_json_payload(snapshot, sort_keys=True, compact=True)
-                except PayloadBudgetExceeded:
-                    with self._runtime_lock:
-                        self._drop_count += 1
-                        self._last_drop_at = now
-                    return {**result, "status": "REJECTED_LIMIT", "reason": "pending_byte_limit"}
-                except (TypeError, ValueError, OverflowError):
-                    return {**result, "status": "INVALID", "reason": "snapshot_serialization_failed"}
-                result["source_payload_hash"] = hashlib.sha256(payload).hexdigest()
-                envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
-                                            payload, result["source_payload_hash"], write_config, characters * width)
-                snapshot = None
+                header_workspace = write_config.header_workspace_bytes
                 with self._runtime_lock:
-                    queue_limit = self.queue.maxsize
-                    pending_limit = min(queue_limit, CSV_PENDING_EVENT_LIMIT) if queue_limit > 0 else CSV_PENDING_EVENT_LIMIT
-                    if self.queue.full():
-                        self._drop_count += 1
-                        self._last_drop_at = now
-                        return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
-                    if len(self._pending_events) >= pending_limit:
-                        self._drop_count += 1
-                        self._last_drop_at = now
-                        return {**result, "status": "REJECTED_LIMIT", "reason": "pending_item_limit"}
-                    # Serialization has finished. Release scratch before
-                    # publishing so the worker can reserve decoding space.
-                    self._pending_processing_payload_bytes -= reserved_bytes - len(payload)
-                    reserved_bytes = len(payload)
-                    try:
-                        self.queue.put_nowait(envelope)
-                    except queue.Full:
-                        self._drop_count += 1
-                        self._last_drop_at = now
-                        return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
-                    self._pending_events[envelope.producer_seq] = (envelope, set(write_config.required_sinks))
-                    # Transfer the retained bytes out of the serialization
-                    # reservation without briefly charging the payload twice.
-                    self._pending_source_payload_bytes += len(payload)
-                    self._pending_processing_payload_bytes -= len(payload)
-                    reserved_bytes -= len(payload)
-                    self._last_enqueue_at = now
-                    if self._payload_bytes_ema is None:
-                        self._payload_bytes_ema = float(payload_bytes)
-                    else:
-                        self._payload_bytes_ema = (self._payload_bytes_ema * 0.8) + (float(payload_bytes) * 0.2)
-                return result
-            finally:
-                payload = envelope = snapshot = None
-                if reserved_bytes:
-                    with self._runtime_lock:
-                        self._pending_processing_payload_bytes -= reserved_bytes
+                    available = (CSV_PENDING_PAYLOAD_BYTE_LIMIT - self._pending_source_payload_bytes
+                                 - self._pending_processing_payload_bytes - header_workspace)
+                # Include internal clock/provenance fields. Default JSON
+                # separators give a conservative bound for compact output.
+                snapshot, encoded_size, characters, width = prepare_json_payload(dict(data), available)
+                text_bytes = characters * width
+                # iterencode chunks and their joined text coexist, then
+                # the joined text and UTF-8 output coexist. Reserve the
+                # larger phase, including wide Unicode text storage.
+                required_bytes = max(2 * text_bytes, encoded_size + text_bytes)
+                with self._runtime_lock:
+                    if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
+                            + required_bytes + header_workspace > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                        raise PayloadBudgetExceeded
+                    self._pending_processing_payload_bytes += required_bytes
+                    reserved_bytes = required_bytes
+                # EMA serializes to UTF-8 bytes and then Python text. Use
+                # this reserved workspace before retaining canonical bytes,
+                # and size the same detached input rather than the caller's
+                # potentially mutable model. The temporary model and JSON
+                # copies are released when the estimator returns.
+                payload_bytes = self._estimate_factory_data_bytes(FactoryData.model_construct(**snapshot))
+                payload = encode_json_payload(snapshot, sort_keys=True, compact=True)
+            except PayloadBudgetExceeded:
+                with self._runtime_lock:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                return {**result, "status": "REJECTED_LIMIT", "reason": "pending_byte_limit"}
+            except (TypeError, ValueError, OverflowError):
+                return {**result, "status": "INVALID", "reason": "snapshot_serialization_failed"}
+            result["source_payload_hash"] = hashlib.sha256(payload).hexdigest()
+            envelope = CSVEventEnvelope(self.logger_service_instance_id, self._producer_seq,
+                                        payload, result["source_payload_hash"], write_config, characters * width)
+            snapshot = None
+            with self._runtime_lock:
+                queue_limit = self.queue.maxsize
+                pending_limit = min(queue_limit, CSV_PENDING_EVENT_LIMIT) if queue_limit > 0 else CSV_PENDING_EVENT_LIMIT
+                if self.queue.full():
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
+                if len(self._pending_events) >= pending_limit:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_LIMIT", "reason": "pending_item_limit"}
+                # Serialization has finished. Release scratch before
+                # publishing so the worker can reserve decoding space.
+                self._pending_processing_payload_bytes -= reserved_bytes - len(payload)
+                reserved_bytes = len(payload)
+                try:
+                    self.queue.put_nowait(envelope)
+                except queue.Full:
+                    self._drop_count += 1
+                    self._last_drop_at = now
+                    return {**result, "status": "REJECTED_FULL", "reason": "queue_full"}
+                self._pending_events[envelope.producer_seq] = (envelope, set(write_config.required_sinks))
+                # Transfer the retained bytes out of the serialization
+                # reservation without briefly charging the payload twice.
+                self._pending_source_payload_bytes += len(payload)
+                self._pending_processing_payload_bytes -= len(payload)
+                reserved_bytes -= len(payload)
+                self._last_enqueue_at = now
+                if self._payload_bytes_ema is None:
+                    self._payload_bytes_ema = float(payload_bytes)
+                else:
+                    self._payload_bytes_ema = (self._payload_bytes_ema * 0.8) + (float(payload_bytes) * 0.2)
+            return result
+        finally:
+            payload = envelope = snapshot = None
+            if reserved_bytes:
+                with self._runtime_lock:
+                    self._pending_processing_payload_bytes -= reserved_bytes
 
     def enqueue(self, data: FactoryData) -> None:
         """Compatibility entry point; production callers can inspect the receipt."""
@@ -3548,6 +3559,9 @@ class CSVLoggerService:
             unclosed_csv_handle_count = len(self._unclosed_csv_handles)
             csv_manual_recovery_required = self._csv_manual_recovery_required
             csv_evidence_pending_by_sink = {"csv_v1": 0, "csv_v2": 0}
+            admission_summary = self._admission_ledger.snapshot()
+            admission_summary.update(after_producer_seq=self._trace_start_seq,
+                                     contract_version="CSV_ADMISSION_SUMMARY_V1", coverage="IN_MEMORY_RECEIPTS")
             for location in self._pending_csv_locations.values():
                 if (location.data_reported and location.sink_id in csv_evidence_pending_by_sink
                         and location.path not in self._uncertain_csv_paths):
@@ -3571,6 +3585,7 @@ class CSVLoggerService:
             "payload_bytes_ema": payload_bytes_ema,
             "estimated_queue_bytes": estimated_queue_bytes,
             "pending_event_count": pending_event_count,
+            "admission_summary": admission_summary,
             "pending_source_payload_bytes": pending_source_payload_bytes,
             "pending_processing_payload_bytes": pending_processing_payload_bytes,
             "pending_payload_bytes": pending_source_payload_bytes + pending_processing_payload_bytes,

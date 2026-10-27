@@ -510,6 +510,51 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
                 self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
+    def test_admission_summary_tracks_only_active_producer_generation(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, False)
+            valid = self.create_data("2026-03-09T07:20:25.000", 33.0)
+            invalid = self.create_data("2026-03-09T07:20:25.000", 30.0)
+            invalid.Press = float("nan")
+            before = service.enqueue_detailed(valid)
+            self.assertEqual(before["status"], "REJECTED_CLOSED")
+            service.start()
+            try:
+                receipts = [service.enqueue_detailed(valid), service.enqueue_detailed(valid)]
+                service.apply_config(auto_save=True)
+                receipts.extend([service.enqueue_detailed(invalid), service.enqueue_detailed(invalid),
+                                 service.enqueue_detailed(valid), service.enqueue_detailed(invalid),
+                                 service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 34.0))])
+            finally:
+                service.stop(timeout_sec=5)
+            after = service.enqueue_detailed(valid)
+            self.assertEqual(after["status"], "REJECTED_CLOSED")
+            summary = service.get_runtime_state().get("admission_summary", {})
+            self.assertEqual(summary.get("produced_count"), 7,
+                             "active admission outcomes were not accounted by producer generation")
+            self.assertEqual(summary["accepted_count"], 2)
+            self.assertEqual(summary["excluded_count"], 2)
+            self.assertEqual(summary["rejected_count"], 3)
+            self.assertEqual(summary["outcome_counts"], {"DISABLED": 2, "INVALID": 3, "ACCEPTED": 2})
+            self.assertEqual(summary["after_producer_seq"], before["producer_seq"])
+            self.assertEqual(summary["last_producer_seq"], receipts[-1]["producer_seq"])
+            self.assertEqual(summary["rejection_range_count"], 2)
+            self.assertFalse(summary["details_incomplete"])
+            rows = [row for path in self.list_v1_files(tmp_dir) for row in self.read_rows(path)[1:]]
+            self.assertEqual([float(row[3]) for row in rows], [33., 34.])
+            service.start()
+            try:
+                resumed = service.enqueue_detailed(valid)
+            finally:
+                service.stop(timeout_sec=5)
+            current = service.get_runtime_state()["admission_summary"]
+            self.assertEqual(current["produced_count"], 1)
+            self.assertEqual(current["outcome_counts"], {"ACCEPTED": 1})
+            self.assertEqual(current["after_producer_seq"], after["producer_seq"])
+            self.assertEqual(current["last_producer_seq"], resumed["producer_seq"])
+            self.assertEqual(current["rejection_range_count"], 0)
+            self.assertEqual(summary["produced_count"], 7)
+
     def test_trace_capacity_blocks_new_csv_admission_until_recovered(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True)

@@ -38,8 +38,10 @@ class AdmissionRejectionLedger:
         self._omitted = 0
         self._first_omitted: int | None = None
         self._last_omitted: int | None = None
+        self._last_sequence: int | None = None
 
     def record(self, sequence: int, status: str, reason: str | None, generation: int) -> None:
+        self._last_sequence = sequence
         self._counts[status] += 1
         if status in ("ACCEPTED", "DISABLED"):
             return
@@ -60,7 +62,8 @@ class AdmissionRejectionLedger:
     def snapshot(self) -> dict[str, Any]:
         produced = sum(self._counts.values())
         accepted, excluded = self._counts["ACCEPTED"], self._counts["DISABLED"]
-        return {"produced_count": produced, "accepted_count": accepted, "excluded_count": excluded,
+        return {"produced_count": produced, "last_producer_seq": self._last_sequence,
+                "accepted_count": accepted, "excluded_count": excluded,
                 "rejected_count": produced - accepted - excluded, "outcome_counts": dict(self._counts),
                 "rejection_range_count": len(self._ranges), "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
                 "details_incomplete": self._omitted > 0, "omitted_rejection_count": self._omitted,
