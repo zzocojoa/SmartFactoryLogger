@@ -6,9 +6,55 @@ import unittest
 from unittest.mock import patch
 
 from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, AdmissionRejectionRange, PersistenceTraceWriter
+from backend.FacilityData.persistence_validation import validate_csv_persistence_trace
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_csv_trace_parser_rejects_malformed_or_unbounded_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            writer = PersistenceTraceWriter(Path(folder), "parser-fixture")
+            writer.append({"kind": "admission_summary"})
+            self.assertTrue(writer.flush(force=True))
+            path = next(Path(folder).glob("*.trace.jsonl"))
+            original = path.read_bytes()
+            header, summary = original.splitlines(keepends=True)
+            result = validate_csv_persistence_trace([path])
+            self.assertEqual(result["status"], "NOT_EVALUATED")
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual(path.read_bytes(), original)
+            cases = [
+                (original[:-1], "INCOMPLETE", "incomplete_segment"),
+                (header + summary + summary, "INCOMPLETE", "multiple_admission_summaries"),
+                (header + b'{"kind":"admission_summary","kind":"admission_summary"}\n', "INCOMPLETE", "invalid_trace_record"),
+                (b'{"schema_version":1,"schema_version":1}\n' + summary, "INCOMPLETE", "invalid_segment_header"),
+                (b'{"schema_version":2}\n' + summary, "NOT_EVALUATED", "unsupported_trace_schema"),
+                (b'{"schema_version":true}\n' + summary, "NOT_EVALUATED", "unsupported_trace_schema"),
+                (header + b'{}\n' * 1001, "INCOMPLETE", "segment_record_limit"),
+            ]
+            for contents, status, issue in cases:
+                with self.subTest(issue=issue, contents_prefix=contents[:45]):
+                    path.write_bytes(contents)
+                    result = validate_csv_persistence_trace([path])
+                    self.assertEqual(result["status"], status)
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+                    self.assertEqual(path.read_bytes(), contents)
+            path.write_bytes(b" " * (8 * 1024**2))
+            tracemalloc.start()
+            try:
+                result = validate_csv_persistence_trace([path])
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertIn("segment_byte_limit", result["issues"])
+            self.assertLess(peak, 2 * 1024**2, "trace validator read the entire oversized segment")
+            missing = validate_csv_persistence_trace([Path(folder) / "missing.trace.jsonl"])
+            self.assertEqual(missing["status"], "INCOMPLETE")
+            self.assertIn("trace_read_error", missing["issues"])
+            self.assertEqual(validate_csv_persistence_trace([])["status"], "NOT_EVALUATED")
+
     def test_exclusion_ranges_share_capacity_without_becoming_rejections(self):
         ledger = AdmissionRejectionLedger()
         with patch("backend.FacilityData.persistence_trace.ADMISSION_REJECTION_RANGE_LIMIT", 2):

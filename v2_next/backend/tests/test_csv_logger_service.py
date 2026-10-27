@@ -19,6 +19,7 @@ from uuid import uuid4
 from unittest.mock import patch
 from starlette.requests import Request
 from starlette.responses import Response
+from backend.FacilityData.persistence_validation import validate_csv_persistence_trace
 
 _TEST_ROOT = Path(__file__).resolve().parents[2]
 _TEST_APPDATA_ROOT = _TEST_ROOT / ".tmp_test_appdata"
@@ -66,6 +67,34 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_persistence_validation_rejects_missing_terminal_summary(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+            service.start()
+            try:
+                receipt = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                self.assertEqual(receipt["status"], "ACCEPTED")
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertTrue(paths)
+            removed = 0
+            for path in paths:
+                retained = []
+                for line in path.read_bytes().splitlines(keepends=True):
+                    if json.loads(line).get("kind") == "admission_summary":
+                        removed += 1
+                    else:
+                        retained.append(line)
+                path.write_bytes(b"".join(retained))
+            self.assertEqual(removed, 1)
+            before = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "missing terminal evidence was not classified incomplete")
+            self.assertIn("missing_admission_summary", result["issues"])
+            self.assertEqual(result["data_integrity_status"], "NOT_EVALUATED")
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
     VALID_GIT_COMMIT = "1234567890abcdef1234567890abcdef12345678"
 
     @contextmanager
