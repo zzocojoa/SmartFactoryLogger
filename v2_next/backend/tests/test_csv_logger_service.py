@@ -2545,6 +2545,63 @@ class CSVLoggerServiceTests(unittest.TestCase):
                         closed = service.stop(timeout_sec=5)
                 self.assertFalse(closed, "probe uncertainty was reported as a clean stop")
 
+    def test_csv_arrivals_do_not_bypass_failed_probe_deadline(self) -> None:
+        clock, attempts = [100.0], []
+        original_replace = os.replace
+        blocked = [True]
+        with self.create_temp_dir() as tmp_dir:
+            log_dir = tmp_dir / "csv"
+            log_dir.mkdir()
+            service = self.create_service(log_dir, True)
+
+            def replace(source, target, *args, **kwargs):
+                if Path(source).parent == log_dir and Path(source).name.startswith(".sfl-storage-probe-"):
+                    attempts.append(clock[0])
+                    if blocked[0]:
+                        raise PermissionError("CSV probe denied while ordinary writes remain possible")
+                return original_replace(source, target, *args, **kwargs)
+
+            def wait_for(predicate):
+                deadline = time.perf_counter() + 3
+                while time.perf_counter() < deadline:
+                    state = service.get_runtime_state()
+                    if predicate(state):
+                        return state
+                    time.sleep(.01)
+                self.fail(f"CSV state did not reach the expected boundary: {state}")
+
+            with patch.object(os, "replace", replace), \
+                    patch("backend.FacilityData.repository.time.monotonic", side_effect=lambda: clock[0]):
+                service.start()
+                try:
+                    wait_for(lambda state: state["csv_probe_failure_count"] == 1)
+                    for index in range(20):
+                        service.enqueue(self.create_data("2026-03-09T07:20:25.000", 30.0 + index))
+                    wait_for(lambda state: state["csv_persistence_outcomes"]["fully_committed_event_count"] == 20)
+                    time.sleep(.25)
+                    self.assertEqual(attempts, [100.0], "new CSV arrivals bypassed the failed probe deadline")
+                    state = service.get_runtime_state()["csv_storage_destinations"][0]
+                    self.assertEqual(state["next_probe_monotonic"], 101.0)
+                    self.assertEqual(state["current_storage_availability"], "blocked")
+                    clock[0] = 101.0
+                    wait_for(lambda state: state["csv_probe_failure_count"] == 2)
+                    state = service.get_runtime_state()["csv_storage_destinations"][0]
+                    self.assertEqual(state["next_probe_monotonic"], 103.0)
+                    blocked[0] = False
+                    clock[0] = 103.0
+                    final = wait_for(lambda state: state["csv_storage_destinations"][0]
+                                     ["current_storage_availability"] == "available")
+                    self.assertEqual(attempts, [100.0, 101.0, 103.0])
+                    self.assertEqual(final["csv_probe_failure_count"], 2)
+                    self.assertEqual(final["pending_event_count"], 0)
+                finally:
+                    blocked[0] = False
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            with next(log_dir.glob("Factory_Integrated_Log_*.csv")).open(encoding="utf-8-sig", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual(len(rows), 20)
+
     def test_csv_storage_probe_recovers_without_arrivals(self) -> None:
         clock = [100.0]
         attempts = []

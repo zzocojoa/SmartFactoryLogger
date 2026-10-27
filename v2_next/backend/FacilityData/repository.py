@@ -3903,7 +3903,13 @@ class CSVLoggerService:
         with self._runtime_lock:
             state = self._csv_storage_probes.get(key)
             if state is not None:
-                state.update(current_storage_availability="unknown", next_probe_monotonic=0.0)
+                if (state["probe_status"] == "blocked" or state["file_check_error"] is not None
+                        or state["manual_recovery_required"]):
+                    # Opening or confirming a file does not retry a failed
+                    # directory/file probe or shorten its existing backoff.
+                    state["current_storage_availability"] = "blocked"
+                else:
+                    state.update(current_storage_availability="unknown", next_probe_monotonic=0.0)
 
     def _check_csv_probe_file(self, key: tuple[int, str]) -> str:
         """Confirm access without appending, truncating or replacing the CSV."""
