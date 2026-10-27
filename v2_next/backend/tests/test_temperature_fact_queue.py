@@ -334,6 +334,91 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_required_fact_access_retry_is_bounded_and_stops_on_close(self):
+        original_open = Path.open
+        clock, attempts = [100.0], []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def locked_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "r+b":
+                    attempts.append(clock[0])
+                    raise PermissionError("persistent synthetic file lock")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", locked_open), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    for count, delay in enumerate([1, 2, 4, 8, 16, 30, 30], 1):
+                        for _ in range(100):
+                            if owner.snapshot()["required_file_failure_count"] == count:
+                                break
+                            threading.Event().wait(.01)
+                        state = owner.snapshot()
+                        self.assertEqual(state["required_file_failure_count"], count)
+                        due = clock[0] + delay
+                        self.assertEqual(state["required_file_next_probe_monotonic"], due)
+                        clock[0] = due - .01
+                        threading.Event().wait(.08)
+                        self.assertEqual(len(attempts), count)
+                        clock[0] = due
+                finally:
+                    owner.close(2)
+                before = len(attempts)
+                clock[0] += 60
+                threading.Event().wait(.08)
+                self.assertFalse(owner.snapshot()["writer_alive"])
+                self.assertEqual(len(attempts), before)
+
+    def test_required_fact_disappearance_and_close_failure_stay_manual(self):
+        original_open = Path.open
+        for failure in ("deleted_before_open", "close_unconfirmed"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "facts.csv"
+                writer = SpotObservationFactWriter(path)
+                self.assertTrue(writer.ensure_initialized())
+                original = path.read_bytes()
+
+                class FailedClose:
+                    def __init__(self, handle):
+                        self.handle = handle
+
+                    def __enter__(self):
+                        return self.handle
+
+                    def __exit__(self, *args):
+                        self.handle.close()
+                        raise OSError("synthetic unconfirmed close")
+
+                def changed_access(target, mode="r", *args, **kwargs):
+                    if target == path and mode == "r+b":
+                        if failure == "deleted_before_open":
+                            target.unlink()
+                        else:
+                            return FailedClose(original_open(target, mode, *args, **kwargs))
+                    return original_open(target, mode, *args, **kwargs)
+
+                with patch.object(Path, "open", changed_access):
+                    owner = SpotObservationQueue(lambda: writer)
+                    try:
+                        owner._thread.join(2)
+                        state = owner.snapshot()
+                        self.assertFalse(state["writer_alive"])
+                        self.assertTrue(state["required_file_manual_recovery"])
+                        self.assertEqual(state["required_file_availability"], "blocked")
+                        self.assertFalse(state["writes_drained"])
+                        self.assertEqual(owner.enqueue_detailed(observation()).status, "REJECTED_UNAVAILABLE")
+                        self.assertIsNone(state["required_file_next_probe_monotonic"])
+                    finally:
+                        owner.close(2)
+                if failure == "deleted_before_open":
+                    self.assertFalse(path.exists(), "probe recreated a removed original")
+                else:
+                    self.assertEqual(path.read_bytes(), original)
+
     def test_fact_handle_timestamp_difference_is_not_file_replacement(self):
         original_fstat = os.fstat
         with tempfile.TemporaryDirectory() as tmp:
