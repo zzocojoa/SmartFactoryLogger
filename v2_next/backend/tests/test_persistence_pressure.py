@@ -150,6 +150,43 @@ class StoragePressureTests(unittest.TestCase):
         with sample_lock:
             self.assertEqual(len(calls), stopped_count)
 
+    def test_monitor_failure_and_stop_do_not_retain_normal_decision(self):
+        fail = threading.Event()
+        failed = threading.Event()
+
+        def sample_provider():
+            if fail.is_set():
+                failed.set()
+                raise OSError("injected status sampling failure")
+            return [self.sample()]
+
+        def wait_for(monitor, state):
+            deadline = time.monotonic() + 5.0
+            while monitor.snapshot().state != state and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(monitor.snapshot().state, state)
+
+        monitor = StoragePressureMonitor(sample_provider)
+        try:
+            self.assertTrue(monitor.start())
+            wait_for(monitor, "NORMAL")
+            fail.set()
+            self.assertTrue(failed.wait(2.0))
+            wait_for(monitor, "PERSISTENCE_BLOCKED")
+            self.assertIn("sampling_failed", monitor.snapshot().reasons)
+            count = monitor.snapshot().sampling_failure_count
+            self.assertGreaterEqual(count, 1)
+            fail.clear()
+            restored = time.monotonic()
+            wait_for(monitor, "NORMAL")
+            self.assertGreaterEqual(time.monotonic() - restored, 2.0)
+            self.assertEqual(monitor.snapshot().sampling_failure_count, count)
+        finally:
+            self.assertTrue(monitor.stop(timeout=2.0))
+        self.assertEqual(monitor.snapshot().state, "PERSISTENCE_BLOCKED")
+        self.assertIn("monitor_stopped", monitor.snapshot().reasons)
+        self.assertGreaterEqual(monitor.snapshot().sampling_failure_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

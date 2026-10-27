@@ -1,5 +1,5 @@
 """Memory-only storage pressure decisions; owner I/O is deliberately separate."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import threading
 import time
 from typing import Callable, Iterable
@@ -42,6 +42,7 @@ class StoragePressureDecision:
     pending_recovery: int
     normal_confirmations: int
     reasons: tuple[str, ...]
+    sampling_failure_count: int = 0
 
 
 class StoragePressureController:
@@ -49,6 +50,13 @@ class StoragePressureController:
         self._last_checked: float | None = None
         self._last_decision: StoragePressureDecision | None = None
         self._normal_confirmations = 0
+
+    def mark_unavailable(self, *, now_monotonic: float, reason: str) -> StoragePressureDecision:
+        self._last_checked = now_monotonic
+        self._normal_confirmations = 0
+        self._last_decision = StoragePressureDecision("PERSISTENCE_BLOCKED", "unknown", 0.0, None, None,
+                                                      0, 0, (reason,))
+        return self._last_decision
 
     def evaluate(self, samples: Iterable[StoragePressureSample], *, now_monotonic: float) -> StoragePressureDecision:
         if self._last_checked is not None and now_monotonic - self._last_checked < 1.0:
@@ -116,8 +124,12 @@ class StoragePressureMonitor:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._controller = StoragePressureController()
-        self._decision = StoragePressureDecision("PERSISTENCE_BLOCKED", "unknown", 0.0, None, None,
-                                                 0, 0, ("not_started",))
+        self._sampling_failure_count = 0
+        self._decision = self._unavailable_decision("not_started")
+
+    def _unavailable_decision(self, reason: str) -> StoragePressureDecision:
+        return StoragePressureDecision("PERSISTENCE_BLOCKED", "unknown", 0.0, None, None,
+                                       0, 0, (reason,), self._sampling_failure_count)
 
     def start(self) -> bool:
         with self._lock:
@@ -125,17 +137,29 @@ class StoragePressureMonitor:
                 return False
             self._stop.clear()
             self._controller = StoragePressureController()
+            self._decision = self._unavailable_decision("starting")
             self._thread = threading.Thread(target=self._run, name="storage-pressure-controller", daemon=True)
             self._thread.start()
             return True
 
     def _run(self) -> None:
-        while not self._stop.is_set():
-            started = time.monotonic()
-            decision = self._controller.evaluate(self.sample_provider(), now_monotonic=started)
+        try:
+            while not self._stop.is_set():
+                started = time.monotonic()
+                try:
+                    decision = self._controller.evaluate(self.sample_provider(), now_monotonic=started)
+                except Exception:
+                    with self._lock:
+                        self._sampling_failure_count += 1
+                    decision = self._controller.mark_unavailable(now_monotonic=started, reason="sampling_failed")
+                with self._lock:
+                    self._decision = (self._unavailable_decision("monitor_stopping") if self._stop.is_set()
+                                      else replace(decision, sampling_failure_count=self._sampling_failure_count))
+                self._stop.wait(max(0.0, 1.0 - (time.monotonic() - started)))
+        finally:
             with self._lock:
-                self._decision = decision
-            self._stop.wait(max(0.0, 1.0 - (time.monotonic() - started)))
+                if self._thread is threading.current_thread():
+                    self._decision = self._unavailable_decision("monitor_stopped")
 
     def snapshot(self) -> StoragePressureDecision:
         with self._lock:
@@ -145,6 +169,7 @@ class StoragePressureMonitor:
         with self._lock:
             thread = self._thread
             self._stop.set()
+            self._decision = self._unavailable_decision("monitor_stopping" if thread else "monitor_stopped")
         if thread is None:
             return True
         thread.join(timeout=max(0.0, timeout))
