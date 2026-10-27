@@ -129,21 +129,21 @@ describe('useSpotViewModelEffects image lifecycle', () => {
       expect(firstUrl).toBe('blob:pressure-1');
       expect(result.current.metadata?.source).toBe('cache');
       expect(result.current.diagnostics.consecutive_retry_attempt).toBe(1);
-      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-      expect(service.image).toHaveBeenCalledTimes(3);
+      await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+      expect(service.image).toHaveBeenCalledTimes(5);
       const currentUrl = result.current.imageUrl;
       act(() => { result.current.handleImageLoad(firstUrl); result.current.handleImageLoad(currentUrl); });
       expect(result.current.diagnostics.consecutive_retry_attempt).toBe(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(250); });
-      expect(service.image).toHaveBeenCalledTimes(3);
+      expect(service.image).toHaveBeenCalledTimes(5);
       await act(async () => { await vi.advanceTimersByTimeAsync(1750); });
-      expect(service.image).toHaveBeenCalledTimes(4);
+      expect(service.image).toHaveBeenCalledTimes(6);
       service.image.mockImplementation(async () => imageResponse(false));
       await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
       act(() => { result.current.handleImageLoad(result.current.imageUrl); });
       expect(result.current.diagnostics.consecutive_retry_attempt).toBe(0);
       await act(async () => { await vi.advanceTimersByTimeAsync(250); });
-      expect(service.image).toHaveBeenCalledTimes(6);
+      expect(service.image).toHaveBeenCalledTimes(8);
     } finally { unmount(); vi.unstubAllGlobals(); }
   });
 
