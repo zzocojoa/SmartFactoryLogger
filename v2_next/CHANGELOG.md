@@ -4,6 +4,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Track required CSV v1/v2 outputs separately as accepted, committed, failed,
+  or outstanding counts. Complete each logical event only after all required
+  outputs settle, refuse restart with unresolved accepted output ownership, and
+  persist the reconciled counts in terminal admission evidence. These aggregate
+  counts do not replace per-ID validation or establish data integrity PASS.
 - Add per-generation in-memory CSV admission counts and rejection ranges capped
   at 4,096 entries. Compact only adjacent outcomes with matching reason/settings,
   retain aggregate counts after detail overflow, and expose missing producer
