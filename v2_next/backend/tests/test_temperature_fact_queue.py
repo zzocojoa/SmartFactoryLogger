@@ -26,6 +26,61 @@ from backend.FacilityData.drivers.real_plc import RealPLCDriver
 
 
 class FactPollingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_fact_owner_keeps_generation_and_path_after_config_change(self):
+        started, release = threading.Event(), threading.Event()
+        hold_append = [False]
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root, later = Path(tmp) / 'original', Path(tmp) / 'later'
+            path = root / 'spot_observation_fact.csv'
+
+            def delayed_open(target, mode='r', *args, **kwargs):
+                if target == path and mode == 'a' and hold_append[0]:
+                    started.set()
+                    if not release.wait(10):
+                        raise TimeoutError('test did not release original fact append')
+                return original_open(target, mode, *args, **kwargs)
+
+            stack.enter_context(patch.object(Path, 'open', delayed_open))
+            for name in ('_spot_observation_queue', '_spot_observation_queue_path',
+                         '_spot_observation_fact_writer'):
+                stack.enter_context(patch.object(spot_api, name, None))
+            stack.enter_context(patch.object(spot_api.config, 'LOG_PATH', str(root)))
+            stack.enter_context(patch.object(spot_api.config, 'SPOT_OBSERVATION_FACT_ENABLED', True))
+            owner = spot_api._get_spot_observation_queue()
+            try:
+                for _ in range(200):
+                    if owner.snapshot()['required_file_availability'] == 'available':
+                        break
+                    await asyncio.sleep(.01)
+                self.assertEqual(owner.snapshot()['required_file_availability'], 'available')
+                hold_append[0] = True
+                await spot_api._write_spot_observation_fact_async(observation(1))
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                samples = owner.storage_pressure_samples()
+                generation = samples[0].config_generation
+                self.assertIsInstance(generation, int, 'runtime fact owner has no bound configuration generation')
+                self.assertGreaterEqual(generation, 0)
+                destinations = {sample.sink_id: sample.destination_key for sample in samples}
+                admitted_at = owner.snapshot()['oldest_pending_monotonic']
+                spot_api.config.LOG_PATH = str(later)
+                spot_api.config.SPOT_OBSERVATION_FACT_ENABLED = False
+                self.assertIs(spot_api._get_spot_observation_queue(), owner)
+                with patch.object(Path, 'stat', side_effect=AssertionError('sample performed file I/O')):
+                    previous = owner.storage_pressure_samples(enabled=False)
+                self.assertEqual({sample.config_generation for sample in previous}, {generation})
+                self.assertEqual({sample.sink_id: sample.destination_key for sample in previous}, destinations)
+                decision = StoragePressureController().evaluate(previous, now_monotonic=admitted_at + 3.0)
+                self.assertEqual(decision.state, 'PRESSURED', f'{decision!r}; samples={previous!r}')
+                self.assertIn('stage_overdue', decision.reasons)
+                self.assertEqual(owner.snapshot()['pending_write_count'], 1)
+            finally:
+                release.set()
+                self.assertTrue(await asyncio.to_thread(owner.close, 3))
+            with path.open(encoding='utf-8', newline='') as handle:
+                self.assertEqual([row['spot_poll_seq'] for row in csv.DictReader(handle)], ['1'])
+            self.assertFalse(later.exists(), 'an admitted fact followed the later disabled configuration')
+
     @unittest.skipUnless(os.name == 'nt', 'Windows extended-length path alias')
     async def test_runtime_fact_manifest_accepts_windows_path_alias(self):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:

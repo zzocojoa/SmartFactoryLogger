@@ -219,6 +219,7 @@ from backend.FacilityData.spot_observation_queue import SpotObservationQueue, Fa
 _spot_observation_queue: Optional[SpotObservationQueue] = None
 _spot_observation_queue_path: Optional[Path] = None
 _spot_observation_queue_lock = threading.Lock()
+_spot_observation_storage_generation = 0
 
 
 def _observation_fact_path_matches(expected: Path | None, actual: Path) -> bool:
@@ -242,6 +243,7 @@ def _observation_fact_path_matches(expected: Path | None, actual: Path) -> bool:
 
 def _get_spot_observation_queue() -> SpotObservationQueue:
     global _spot_observation_queue, _spot_observation_queue_path
+    global _spot_observation_storage_generation
     with _spot_observation_queue_lock:
         if _spot_observation_queue is None:
             expected_path = _spot_observation_fact_path().resolve()
@@ -254,7 +256,11 @@ def _get_spot_observation_queue() -> SpotObservationQueue:
                     if not _observation_fact_path_matches(_spot_observation_fact_writer.output_path, expected_path):
                         raise RuntimeError("observation writer belongs to a different path")
                     return _spot_observation_fact_writer
-            _spot_observation_queue = SpotObservationQueue(create_writer)
+            # Bind the actual owner at creation; later settings cannot relabel
+            # pending work or give a replacement owner the previous generation.
+            _spot_observation_storage_generation += 1
+            _spot_observation_queue = SpotObservationQueue(
+                create_writer, config_generation=_spot_observation_storage_generation)
         return _spot_observation_queue
 
 
