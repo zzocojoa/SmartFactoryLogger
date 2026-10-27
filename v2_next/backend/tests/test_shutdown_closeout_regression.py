@@ -1411,6 +1411,30 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertEqual(recreated.fact_row_count, 1)
             self.assertEqual(recreated.fact_sha256, hashlib.sha256(writer.fact_path.read_bytes()).hexdigest())
 
+    def test_image_partial_history_blocks_restarted_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = dict(image_bytes=b"\xff\xd8history-capture\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+            fact = writer.write_capture(**args)
+            reopened = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+            self.assertEqual(reopened.write_capture(**args), fact)
+            self.assertEqual(reopened.fact_row_count, 1)
+            with writer.fact_path.open("ab") as handle:
+                handle.write(b"spotimg_20260701T120000000000Z_partial,")
+            originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+            restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "spot_images", retention_days=0)
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                restarted.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+            self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+            self.assertFalse(restarted.try_manifest_stats()[2])
+            again = SpotImageCaptureWriter(log_path=root, capture_root=root / "new_images", retention_days=0)
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                again.write_capture(**args)
+
     def test_image_uncertainty_survives_writer_recreation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

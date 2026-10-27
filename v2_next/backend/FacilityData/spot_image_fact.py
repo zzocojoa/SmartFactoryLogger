@@ -379,15 +379,22 @@ class SpotImageCaptureWriter:
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
                 with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = csv.reader(handle)
+                    reader = csv.reader(handle, strict=True)
                     header = next(reader, [])
                     if header == SPOT_IMAGE_FACT_COLUMNS:
-                        row_count = sum(1 for row in reader if row)
+                        for row in reader:
+                            if len(row) != len(SPOT_IMAGE_FACT_COLUMNS):
+                                raise csv.Error("SPOT image fact history contains an incomplete row")
+                            row_count += 1
                     else:
                         self._manifest_state_ready = False
-            except (OSError, UnicodeError, csv.Error):
+            except OSError:
                 row_count = 0
                 self._manifest_state_ready = False
+            except (UnicodeError, csv.Error):
+                row_count = 0
+                with _SPOT_IMAGE_FACT_FILE_LOCK:
+                    self._mark_fact_append_uncertain()
         self._fact_row_count = row_count
         return row_count
 
