@@ -171,12 +171,16 @@ class PersistenceTraceWriter:
         self._failure_count = 0
         self._refused_count = 0
         self._incomplete = False
+        self._manual_recovery_required = False
         self._processing_bytes = 0
         self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
 
     def append(self, record: Mapping[str, Any]) -> int | None:
         with self._lock:
+            if self._manual_recovery_required:
+                self._refuse("trace_manual_recovery")
+                return None
             try:
                 prepared, byte_bound, workspace = self._prepare(record)
             except (PayloadBudgetExceeded, TypeError, ValueError, OverflowError, RecursionError):
@@ -291,6 +295,8 @@ class PersistenceTraceWriter:
     def flush(self, *, force: bool = False) -> bool:
         with self._writer_lock:
             with self._lock:
+                if self._manual_recovery_required:
+                    return False
                 if not self._segments:
                     return True
                 segment = self._segments[0]
@@ -311,6 +317,7 @@ class PersistenceTraceWriter:
                     segment.recovery_required = True
                     uncertain = isinstance(exc, _TraceContentUncertain)
                     self._incomplete |= uncertain
+                    self._manual_recovery_required |= uncertain
                     self._last_error = str(exc) if uncertain else "trace_io_failed"
                 return False
             finally:
@@ -337,6 +344,8 @@ class PersistenceTraceWriter:
                 if (tail.sealed or len(tail.records) >= TRACE_SEGMENT_RECORD_LIMIT
                         or tail.size >= TRACE_SEGMENT_BYTE_LIMIT):
                     admission_blocked_reason = "trace_segments_full"
+            if self._manual_recovery_required:
+                admission_blocked_reason = "trace_manual_recovery"
             return {"pending_records": sum(len(segment.records) for segment in self._segments),
                     "oldest_pending_monotonic": self._segments[0].created_monotonic if self._segments else None,
                     "stage_due_monotonic": min((segment.flush_due_monotonic for segment in self._segments), default=None),
@@ -347,6 +356,7 @@ class PersistenceTraceWriter:
                     "processing_bytes": self._processing_bytes,
                     "pending_segments": len(self._segments),
                     "admission_blocked_reason": admission_blocked_reason,
+                    "manual_recovery_required": self._manual_recovery_required,
                     "committed_segment_seq": self._committed_sequence,
                     "failure_count": self._failure_count,
                     "refused_count": self._refused_count, "incomplete": self._incomplete,

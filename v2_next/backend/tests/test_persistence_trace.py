@@ -12,6 +12,34 @@ from backend.FacilityData.freshness import clock_domain_id
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_uncertain_trace_stays_held_after_external_repair(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "manual-recovery")
+            writer.append({"kind": "first"})
+            with patch.object(Path, "replace", side_effect=PermissionError("injected temporary outage")):
+                self.assertFalse(writer.flush(force=True))
+            pending = next(root.glob("*.pending"))
+            original = pending.read_bytes()
+            pending.write_bytes(b"uncertain partial bytes\n")
+            self.assertFalse(writer.flush(force=True))
+            self.assertTrue(writer.snapshot()["incomplete"])
+            # Matching bytes supplied externally do not authorize this owner
+            # to clear a previously observed uncertain-write condition.
+            pending.write_bytes(original)
+            self.assertFalse(writer.flush(force=True),
+                             "uncertain trace resumed automatically after external repair")
+            state = writer.snapshot()
+            self.assertTrue(state["manual_recovery_required"])
+            self.assertEqual(state["admission_blocked_reason"], "trace_manual_recovery")
+            self.assertEqual(state["pending_records"], 1)
+            self.assertEqual(state["pending_recovery"], 1)
+            self.assertEqual(state["failure_count"], 2)
+            self.assertIsNone(writer.append({"kind": "later"}))
+            self.assertEqual(writer.snapshot()["pending_records"], 1)
+            self.assertEqual(pending.read_bytes(), original)
+            self.assertEqual(list(root.glob("*.trace.jsonl")), [])
+
     def test_trace_stage_clocks_survive_failure_and_new_segment(self):
         clock = [100.0]
         with tempfile.TemporaryDirectory() as folder:
