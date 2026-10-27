@@ -4,6 +4,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Add a memory-only storage pressure controller and independent monitor with
+  spaced recovery, unknown-clock, sampling-failure and stop guards. Production
+  writer, API and frontend integration is still pending.
+
 - Reject over-limit image fact rows before creating a JPEG or appending
   a fact, and align the recovery parser with admitted long fields.
 
