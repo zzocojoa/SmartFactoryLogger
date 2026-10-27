@@ -1072,7 +1072,7 @@ off→on·목적지/날짜 변경·probe backoff와 설정 세대별 결합, CSV
 - `581a2b17`, `fc415da7`: 마지막으로 표시된 fallback과 pending을 구분하고 교체된 pending URL을 즉시 해제한다. 이전 onLoad/onError는 현재 상태·오류 수·timer를 바꾸지 않는다.
 - `830c078e`, `e2fdcd5f`: 실제 visibility listener와 설정 변경·종료·unmount에 timer/URL 수명을 연결했다. 구 설정의 응답은 본문 완료 후 폐기하고 새 설정 요청을 이어간다. 진행 중 HTTP를 취소하지 않고 shutdown drain을 유지한다.
 - `6218d618`, `b03d4ece`, `8ce32f75`, `4d173ef4`, `6fb2d410`: 503에서도 기존 취득 식별을 보존하고, 잘못된 Retry-After는 현재 간격의 양수 fallback을 사용한다. 간격 변경만 deadline을 갱신하고 표시 설정 변경은 유지한다. 큰 양수 지연은 브라우저 정수 범위 안에서 단조 시각으로 나눠 기다린다. 숨김 뒤 실제 오류가 도착해도 새 timer/예산 소비는 없다.
-- `e7b5685a`, `f8da5043`: 실제 오류·본문 drain·누락/음수/소수/문자열 fallback 회귀와 3회 재확인 간격(6초)보다 늦은 표시 callback을 추가 검사했다. 이 회귀는 새로운 RED로 집계하지 않는다.
+- `e7b5685a`, `f8da5043`: 실제 오류·본문 drain·누락/음수/소수/문자열 fallback 회귀와 3회 재확인 간격에 해당하는 6초 지연 표시 callback을 추가 검사했다. 이 회귀는 새로운 RED로 집계하지 않는다.
 
 11개 행동 RED→GREEN을 확인했다. 주소 정리 시험의 finally assertion이 최초 실패를 가린 기록과 환경 timer 전체 개수 가정이 어긋난 기록은 별도 보존하고 제품 코드 변경 전에 시험 범위를 수정했다. TypeScript 대상 버전에서 Set 순회가 거부된 exit2는 forEach로 수정한 뒤 타입/관련 검사를 다시 통과했다.
 
