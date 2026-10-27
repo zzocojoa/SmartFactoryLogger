@@ -102,6 +102,66 @@ class CsvImageStartupTests(unittest.TestCase):
                 patch.object(spot_api, '_spot_diagnostic_journal_shutdown_started', False):
             asyncio.run(exercise())
 
+    def test_destination_probe_does_not_reuse_fact_directory_success(self):
+        log_path = self.root / 'fact'
+        log_path.mkdir()
+        preserved = log_path / 'operator-note.txt'
+        preserved.write_bytes(b'keep original data')
+        image_root = self.root / 'image-path-is-a-file'
+        image_root.write_bytes(b'keep this file too')
+        writer = SpotImageCaptureWriter(log_path=log_path, capture_root=image_root)
+        before = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        result = {item['sink_id']: item for item in writer.probe_storage_destinations(captured_at=1793106000.0)}
+        self.assertEqual(result['image_jpeg']['probe_status'], 'blocked')
+        self.assertEqual(result['image_fact']['probe_status'], 'available')
+        self.assertEqual(result['image_fact']['probe_scope'], 'directory_only')
+        self.assertEqual(result['image_jpeg']['probe_scope'], 'directory_only')
+        self.assertEqual(result['image_fact']['destination_path'], str(log_path.absolute()))
+        self.assertEqual(result['image_jpeg']['destination_path'], str(image_root / '2026' / '10' / '27'))
+        after = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        self.assertEqual(after, before)
+        self.assertEqual(writer.written_count, 0)
+
+    def test_destination_probe_success_does_not_clear_uncertain_history(self):
+        log_path = self.root / 'fact'
+        log_path.mkdir()
+        history = log_path / spot_image_fact.SPOT_IMAGE_FACT_FILENAME
+        history.write_bytes(b'unknown,history\nkeep,original\n')
+        before = history.read_bytes()
+        writer = SpotImageCaptureWriter(log_path=log_path, capture_root=self.root / 'images')
+        self.assertFalse(writer._manifest_state_ready)
+        results = writer.probe_storage_destinations(captured_at=1793106000.0)
+        self.assertTrue(all(item['probe_status'] == 'available' for item in results))
+        self.assertFalse(writer._manifest_state_ready)
+        self.assertEqual(history.read_bytes(), before)
+        self.assertEqual([path for path in self.root.rglob('*') if path.is_file()], [history])
+
+    def test_destination_probe_readback_and_cleanup_preserve_replaced_files(self):
+        replace_file = spot_image_fact.os.replace
+        for mode in ('changed_content', 'replaced_identity'):
+            with self.subTest(mode=mode):
+                target_root = self.root / mode
+                writer = SpotImageCaptureWriter(log_path=target_root / 'fact', capture_root=target_root / 'images')
+
+                def change_probe(source, target):
+                    replace_file(source, target)
+                    if mode == 'changed_content':
+                        Path(target).write_bytes(b'changed probe contents')
+                    else:
+                        replacement = Path(target).with_name('other-owner-file')
+                        replacement.write_bytes(b'do not delete another owner file')
+                        replace_file(replacement, target)
+
+                with patch.object(spot_image_fact.os, 'replace', change_probe):
+                    results = writer.probe_storage_destinations(captured_at=1793106000.0)
+                self.assertTrue(all(item['probe_status'] == 'blocked' for item in results))
+                remaining = [path for path in target_root.rglob('*') if path.is_file()]
+                if mode == 'changed_content':
+                    self.assertEqual(remaining, [])
+                else:
+                    self.assertEqual(len(remaining), 2)
+                    self.assertTrue(all(path.read_bytes() == b'do not delete another owner file' for path in remaining))
+
     def test_csv_opens_while_image_writer_initialization_is_blocked(self):
         started, release, opened = threading.Event(), threading.Event(), threading.Event()
         initialize = SpotImageCaptureWriter._initialize_manifest_state

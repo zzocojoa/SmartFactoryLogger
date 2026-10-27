@@ -6,6 +6,7 @@ import io
 import json
 import os
 import stat
+import tempfile
 import threading
 import time
 from contextlib import nullcontext
@@ -65,6 +66,61 @@ _SPOT_IMAGE_FACT_FILE_LOCK = threading.RLock()
 _SPOT_IMAGE_UNCERTAIN_FACT_KEYS: set[bytes] = set()
 _SPOT_IMAGE_UNCERTAIN_FACT_KEY_LIMIT = 4096
 _SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW = False
+
+
+def _probe_storage_directory(destination: Path) -> None:
+    """Check only two exclusively created files in the actual destination."""
+    destination.mkdir(parents=True, exist_ok=True)
+    payload = b"SmartFactory storage probe v1\n"
+    owned: dict[Path, tuple[int, int]] = {}
+
+    def identity(path: Path) -> tuple[int, int]:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_ino:
+            raise RuntimeError("storage probe file identity unavailable")
+        return info.st_dev, info.st_ino
+
+    try:
+        paths: list[Path] = []
+        for _ in range(2):
+            fd, name = tempfile.mkstemp(prefix=".sfl-storage-probe-", dir=destination)
+            path = Path(name)
+            with os.fdopen(fd, "wb") as handle:
+                info = os.fstat(handle.fileno())
+                if not info.st_ino:
+                    raise RuntimeError("storage probe handle identity unavailable")
+                owned[path] = (info.st_dev, info.st_ino)
+                if not paths:
+                    if handle.write(payload) != len(payload):
+                        raise OSError("storage probe short write")
+                    handle.flush()
+            paths.append(path)
+        source, target = paths
+        if any(identity(path) != expected for path, expected in owned.items()):
+            raise RuntimeError("storage probe files changed before replace")
+        source_identity = owned[source]
+        os.replace(source, target)
+        del owned[source]
+        owned[target] = source_identity
+        with target.open("rb") as read_handle:
+            info = os.fstat(read_handle.fileno())
+            if (info.st_dev, info.st_ino) != source_identity or read_handle.read(len(payload) + 1) != payload:
+                raise RuntimeError("storage probe readback mismatch")
+        if identity(target) != source_identity:
+            raise RuntimeError("storage probe changed after readback")
+    finally:
+        cleanup_error: OSError | RuntimeError | None = None
+        for path, expected in owned.items():
+            try:
+                if identity(path) != expected:
+                    raise RuntimeError("storage probe cleanup identity changed")
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except (OSError, RuntimeError) as exc:
+                cleanup_error = exc
+        if cleanup_error is not None:
+            raise cleanup_error
 
 
 def _bounded_fact_rows(handle: TextIO) -> Generator[list[str], None, None]:
@@ -131,6 +187,27 @@ class SpotImageCaptureWriter:
     @property
     def fact_path(self) -> Path:
         return self.log_path / self.fact_filename
+
+    def probe_storage_destinations(self, *, captured_at: float) -> tuple[dict[str, Any], ...]:
+        """Owner-only directory checks; never clear existing fact uncertainty."""
+        day = datetime.fromtimestamp(captured_at, timezone.utc)
+        image_directory = self.capture_root / day.strftime("%Y") / day.strftime("%m") / day.strftime("%d")
+        results = []
+        for sink_id, destination in (("image_fact", self.log_path), ("image_jpeg", image_directory)):
+            error_type = None
+            try:
+                reservation = (self.payload_reservation(128, "destination_probe_byte_limit")
+                               if self.payload_reservation is not None else nullcontext())
+                with reservation:
+                    _probe_storage_directory(destination)
+            except (OSError, RuntimeError) as exc:
+                error_type = type(exc).__name__
+            results.append({
+                "sink_id": sink_id, "destination_path": str(destination.absolute()),
+                "probe_scope": "directory_only", "probe_status": "blocked" if error_type else "available",
+                "probe_error_type": error_type, "probe_checked_monotonic": time.monotonic(),
+            })
+        return tuple(results)
 
     @property
     def fact_row_count(self) -> int:
