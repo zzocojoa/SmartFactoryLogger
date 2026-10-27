@@ -53,6 +53,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
   formula-escape string copies and retain their shared v1/v2 ownership until
   drained. Normalize only the required prefix of bounded temperature text,
   preserving its content and truncation indicator.
+- Reserve joined CSV metadata before allocation. Preflight and reserve image
+  snapshot JSON encoding, then retain its decoding workspace until capture
+  completion. Preserve capture identity and failure history on budget refusal;
+  subsequent successful writes do not erase that history.
+- Anchor the image save interval to successful queue admission, including time
+  spent preparing its snapshot, instead of the start of the admission attempt.
 - Fact construction/readback, CSV row construction/scalar conversion and retained
   error-path values, and image workspace reservations remain unfinished.
 - These changes are development work after the approved `cd46692a` build. The
