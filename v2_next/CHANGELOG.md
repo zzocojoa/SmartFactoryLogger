@@ -4,6 +4,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Persist each admitted CSV event's original output contract and per-sink
+  processing failure identity/reason. Retain failure receipts until trace commit,
+  and record accepted IDs left in the queue when uncertain file ownership blocks
+  further writing. Preserve unresolved outcomes and prior failures; the independent
+  per-ID integrity validator and policy-exclusion evidence remain in development.
 - Track required CSV v1/v2 outputs separately as accepted, committed, failed,
   or outstanding counts. Complete each logical event only after all required
   outputs settle, refuse restart with unresolved accepted output ownership, and
