@@ -2725,6 +2725,58 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(len(attempts), completed_attempts)
             self.assertEqual(list(tmp_dir.rglob(".sfl-storage-probe-*")), [])
 
+    def test_csv_idle_probe_pressure_keeps_original_destination_and_deadline(self) -> None:
+        entered, release = threading.Event(), threading.Event()
+        clock, hold = [100.0], [False]
+        original_replace = os.replace
+        with self.create_temp_dir() as tmp_dir:
+            log_dir = tmp_dir / "csv"
+            service = self.create_service(log_dir, True)
+
+            def held_replace(source, target, *args, **kwargs):
+                if hold[0] and Path(source).parent == log_dir and Path(source).name.startswith(".sfl-storage-probe-"):
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("test did not release CSV probe")
+                return original_replace(source, target, *args, **kwargs)
+
+            with patch.object(os, "replace", held_replace), \
+                    patch("backend.FacilityData.repository.time.monotonic", side_effect=lambda: clock[0]):
+                service.start()
+                try:
+                    deadline = time.perf_counter() + 3
+                    while time.perf_counter() < deadline:
+                        destinations = service.get_runtime_state()["csv_storage_destinations"]
+                        if destinations and destinations[0]["current_storage_availability"] == "available":
+                            break
+                        time.sleep(.01)
+                    self.assertEqual(destinations[0]["current_storage_availability"], "available")
+                    hold[0], clock[0] = True, 101.0
+                    self.assertTrue(entered.wait(3))
+                    sample, = [s for s in service.get_storage_pressure_samples() if s.sink_id == "csv_v1"]
+                    controller = StoragePressureController()
+                    self.assertEqual(controller.evaluate([sample], now_monotonic=101.25).state, "NORMAL")
+                    clock[0] = 103.0
+                    delayed = controller.evaluate(service.get_storage_pressure_samples()[:1], now_monotonic=103.0)
+                    self.assertEqual(delayed.state, "PRESSURED", "idle CSV probe lost its original stage deadline")
+                    self.assertEqual(delayed.max_stage_overdue_seconds, 2.0)
+                    service.apply_config(auto_save=False, log_path=tmp_dir / "disabled")
+                    with patch.object(Path, "open", side_effect=AssertionError("pressure sample opened a file")), \
+                            patch.object(Path, "stat", side_effect=AssertionError("pressure sample statted a file")):
+                        retained, = [s for s in service.get_storage_pressure_samples() if s.sink_id == "csv_v1"]
+                    self.assertEqual((retained.config_generation, retained.destination_key),
+                                     (sample.config_generation, sample.destination_key))
+                    self.assertFalse(retained.enabled)
+                    self.assertEqual(retained.pending_bytes, 128)
+                    self.assertEqual(retained.oldest_pending_monotonic, 101.0)
+                    self.assertEqual(retained.stage_due_monotonic, 101.0)
+                finally:
+                    release.set()
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            self.assertEqual(service.get_runtime_state()["csv_probe_workspace_bytes"], 0)
+            self.assertFalse((tmp_dir / "disabled").exists())
+
     def test_csv_probe_cleanup_failure_requires_manual_recovery(self) -> None:
         original_unlink = Path.unlink
         clock, retained = [100.0], []

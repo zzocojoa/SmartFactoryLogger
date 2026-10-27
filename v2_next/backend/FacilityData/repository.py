@@ -484,6 +484,7 @@ class CSVLoggerService:
         self._csv_recovery_sinks: set[tuple[int, str]] = set()
         self._csv_probe_failure_count = 0
         self._csv_probe_workspace_bytes = 0
+        self._csv_active_probe: Optional[tuple[int, str, Path, float]] = None
         self._uncertain_csv_paths: set[Path] = set()
         self._unclosed_csv_handles: dict[int, TextIO] = {}
         self._csv_manual_recovery_required = False
@@ -895,7 +896,7 @@ class CSVLoggerService:
         return data
 
     @contextmanager
-    def _reserve_csv_output(self, size: int, *, probe: bool = False) -> Iterator[None]:
+    def _reserve_csv_output(self, size: int, *, probe: Optional[tuple[int, str, Path]] = None) -> Iterator[None]:
         with self._runtime_lock:
             if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
                     + size > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
@@ -903,6 +904,7 @@ class CSVLoggerService:
             self._pending_processing_payload_bytes += size
             if probe:
                 self._csv_probe_workspace_bytes += size
+                self._csv_active_probe = (*probe, time.monotonic())
         try:
             yield
         finally:
@@ -910,6 +912,7 @@ class CSVLoggerService:
                 self._pending_processing_payload_bytes -= size
                 if probe:
                     self._csv_probe_workspace_bytes -= size
+                    self._csv_active_probe = None
 
     def _record_csv_processing_failure(self, envelope: CSVEventEnvelope, reason: str,
                                        sink: Optional[str] = None) -> None:
@@ -3880,6 +3883,9 @@ class CSVLoggerService:
     def _csv_storage_targets_locked(self, current: CSVWriteConfig) -> dict[tuple[int, str], Path]:
         targets = {(current.generation, sink): current.log_dir for sink in current.required_sinks}
         targets.update(self._csv_probe_manual_targets)
+        if self._csv_active_probe is not None:
+            generation, sink, directory, _ = self._csv_active_probe
+            targets[(generation, sink)] = directory
         for envelope, sinks in self._pending_events.values():
             for sink in sinks:
                 targets[(envelope.write_config.generation, sink)] = envelope.write_config.log_dir
@@ -4007,7 +4013,7 @@ class CSVLoggerService:
         error = file_error = None
         file_scope = "not_checked"
         try:
-            with self._reserve_csv_output(128, probe=True):
+            with self._reserve_csv_output(128, probe=(*key, targets[key])):
                 try:
                     _probe_storage_directory(targets[key])
                 except RuntimeError:
@@ -4020,7 +4026,7 @@ class CSVLoggerService:
         required = self._csv_probe_files.get(key)
         if error is None and not self._csv_needs_manual_recovery():
             try:
-                with self._reserve_csv_output(128, probe=True):
+                with self._reserve_csv_output(128, probe=(*key, targets[key])):
                     file_scope = self._check_csv_probe_file(key)
             except Exception as exc:
                 file_error = type(exc).__name__
@@ -4096,15 +4102,22 @@ class CSVLoggerService:
         for destination in state["csv_storage_destinations"]:
             key = destination["config_generation"], destination["sink_id"]
             stage = stages.get(key, {})
+            probe = state["csv_probe_stage"]
+            probe_bytes = 0
+            oldest, due = stage.get("oldest_pending_monotonic"), stage.get("stage_due_monotonic")
+            if probe is not None and (probe["config_generation"], probe["sink_id"]) == key:
+                probe_bytes = state["csv_probe_workspace_bytes"]
+                oldest = probe["started_monotonic"] if oldest is None else min(oldest, probe["started_monotonic"])
+                due = probe["started_monotonic"] if due is None else min(due, probe["started_monotonic"])
             enabled = (key[0] == state["csv_config_generation"] and key[1] in state["csv_required_sinks"])
             samples.append(StoragePressureSample(
                 key[1], key[0], destination["destination_key"], enabled,
                 destination["current_storage_availability"], pending_count=stage.get("pending_count", 0),
+                pending_bytes=probe_bytes,
                 count_limit=limit, byte_limit=CSV_PENDING_PAYLOAD_BYTE_LIMIT,
                 budget_pending_count=state["pending_event_count"], budget_pending_bytes=state["pending_payload_bytes"],
                 pending_recovery=destination["pending_recovery_count"],
-                oldest_pending_monotonic=stage.get("oldest_pending_monotonic"),
-                stage_due_monotonic=stage.get("stage_due_monotonic"),
+                oldest_pending_monotonic=oldest, stage_due_monotonic=due,
                 clock_domain=stage.get("clock_domain", destination["clock_domain"]), writer_alive=alive,
                 manual_recovery_required=destination["manual_recovery_required"],
             ))
@@ -4134,6 +4147,9 @@ class CSVLoggerService:
             csv_storage_destinations = self._csv_storage_snapshot_locked(current_settings)
             csv_probe_failure_count = self._csv_probe_failure_count
             csv_probe_workspace_bytes = self._csv_probe_workspace_bytes
+            probe = self._csv_active_probe
+            csv_probe_stage = ({"config_generation": probe[0], "sink_id": probe[1], "started_monotonic": probe[3]}
+                               if probe is not None else None)
             csv_pending_data_stages = self._csv_pending_data_stages_locked()
             pending_source_payload_bytes = self._pending_source_payload_bytes
             pending_processing_payload_bytes = self._pending_processing_payload_bytes
@@ -4179,6 +4195,7 @@ class CSVLoggerService:
             "csv_required_sinks": current_settings.required_sinks,
             "csv_probe_failure_count": csv_probe_failure_count,
             "csv_probe_workspace_bytes": csv_probe_workspace_bytes,
+            "csv_probe_stage": csv_probe_stage,
             "csv_pending_data_stages": csv_pending_data_stages,
             "admission_summary": admission_summary,
             "csv_persistence_outcomes": persistence_outcomes,
