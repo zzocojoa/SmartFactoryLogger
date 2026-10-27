@@ -25,6 +25,87 @@ from backend.FacilityData.drivers.real_plc import RealPLCDriver
 
 
 class FactPollingTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows extended-length path alias')
+    async def test_runtime_fact_manifest_accepts_windows_path_alias(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp).resolve()
+            path = root / 'spot_observation_fact.csv'
+            extended = Path('\\\\?\\' + str(root))
+            for name, value in {'_spot_observation_queue': None,
+                                '_spot_observation_queue_path': None,
+                                '_spot_observation_fact_writer': None}.items():
+                stack.enter_context(patch.object(spot_api, name, value))
+            stack.enter_context(patch.object(spot_api.config, 'LOG_PATH', str(extended)))
+            owner = spot_api._get_spot_observation_queue()
+            try:
+                self.assertTrue(owner.enqueue(observation()))
+                await asyncio.to_thread(owner._queue.join)
+                self.assertEqual(owner.snapshot()['completed_count'], 1)
+                self.assertTrue(spot_api.ensure_spot_observation_fact_initialized(
+                    fact_path=path, allow_offline_rebuild=False))
+                manifest = spot_api.get_spot_observation_fact_manifest_summary(
+                    fact_path=path, allow_offline_rebuild=False)
+                self.assertEqual(manifest['row_count'], 1)
+                self.assertEqual(manifest['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
+                other = root / 'other' / path.name
+                other.parent.mkdir()
+                os.link(path, other)
+                for candidate in (other, root / 'missing' / path.name):
+                    with self.assertRaisesRegex(RuntimeError, 'different initialization path'):
+                        spot_api.ensure_spot_observation_fact_initialized(
+                            fact_path=candidate, allow_offline_rebuild=False)
+                    with self.assertRaisesRegex(RuntimeError, 'does not match manifest path'):
+                        spot_api.get_spot_observation_fact_manifest_summary(
+                            fact_path=candidate, allow_offline_rebuild=False)
+                self.assertTrue(other.samefile(path))
+                self.assertFalse((root / 'missing').exists())
+            finally:
+                self.assertTrue(await asyncio.to_thread(owner.close, 3))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows extended-length path alias')
+    async def test_runtime_fact_path_alias_retains_initialization_pending(self):
+        started, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp).resolve() / 'new' / 'nested'
+            path = root / 'spot_observation_fact.csv'
+            original_mkdir = Path.mkdir
+
+            def delayed_mkdir(directory, *args, **kwargs):
+                if directory.name == 'nested':
+                    started.set()
+                    if not release.wait(5):
+                        raise TimeoutError('test did not release directory creation')
+                return original_mkdir(directory, *args, **kwargs)
+
+            stack.enter_context(patch.object(Path, 'mkdir', delayed_mkdir))
+            for name, value in {'_spot_observation_queue': None,
+                                '_spot_observation_queue_path': None,
+                                '_spot_observation_fact_writer': None}.items():
+                stack.enter_context(patch.object(spot_api, name, value))
+            stack.enter_context(patch.object(spot_api.config, 'LOG_PATH', '\\\\?\\' + str(root)))
+            owner = spot_api._get_spot_observation_queue()
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                self.assertFalse(root.exists())
+                with self.assertRaises(FactPersistencePending):
+                    spot_api.ensure_spot_observation_fact_initialized(
+                        fact_path=path, allow_offline_rebuild=False)
+                with self.assertRaises(FactPersistencePending):
+                    spot_api.get_spot_observation_fact_manifest_summary(
+                        fact_path=path, allow_offline_rebuild=False)
+                self.assertTrue(owner.enqueue(observation()))
+                release.set()
+                await asyncio.to_thread(owner._queue.join)
+                self.assertTrue(spot_api.ensure_spot_observation_fact_initialized(
+                    fact_path=path, allow_offline_rebuild=False))
+                with patch.object(Path, 'samefile', side_effect=PermissionError('identity denied')):
+                    with self.assertRaisesRegex(RuntimeError, 'different initialization path'):
+                        spot_api.ensure_spot_observation_fact_initialized(
+                            fact_path=path, allow_offline_rebuild=False)
+            finally:
+                release.set()
+                self.assertTrue(await asyncio.to_thread(owner.close, 3))
+
     async def wait_for_csv_evidence(self, logger, root, expected):
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:

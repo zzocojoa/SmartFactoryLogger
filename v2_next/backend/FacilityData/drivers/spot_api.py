@@ -221,6 +221,25 @@ _spot_observation_queue_path: Optional[Path] = None
 _spot_observation_queue_lock = threading.Lock()
 
 
+def _observation_fact_path_matches(expected: Path | None, actual: Path) -> bool:
+    if expected is None:
+        return False
+    left, right = expected.resolve(), actual.resolve()
+    if left == right:
+        return True
+    # Windows resolve may retain the extended-length prefix during creation.
+    # Compare directory identity and matching remaining names, not just file
+    # identity (which could accept a hard link in a different destination).
+    while left.name and Path(left.name) == Path(right.name):
+        try:
+            return left.parent.samefile(right.parent)
+        except FileNotFoundError:
+            left, right = left.parent, right.parent
+        except OSError:
+            return False
+    return False
+
+
 def _get_spot_observation_queue() -> SpotObservationQueue:
     global _spot_observation_queue, _spot_observation_queue_path
     with _spot_observation_queue_lock:
@@ -232,7 +251,7 @@ def _get_spot_observation_queue() -> SpotObservationQueue:
                 with _spot_observation_fact_writer_lock:
                     if _spot_observation_fact_writer is None:
                         _spot_observation_fact_writer = SpotObservationFactWriter(expected_path)
-                    if _spot_observation_fact_writer.output_path.resolve() != expected_path:
+                    if not _observation_fact_path_matches(_spot_observation_fact_writer.output_path, expected_path):
                         raise RuntimeError("observation writer belongs to a different path")
                     return _spot_observation_fact_writer
             _spot_observation_queue = SpotObservationQueue(create_writer)
@@ -3491,11 +3510,11 @@ def get_spot_observation_fact_manifest_summary(
     allow_offline_rebuild: bool = True,
 ) -> Dict[str, Any]:
     if _spot_observation_queue is not None:
-        if fact_path is not None and _spot_observation_queue_path != fact_path.resolve():
+        if fact_path is not None and not _observation_fact_path_matches(_spot_observation_queue_path, fact_path):
             raise RuntimeError("observation queue path does not match manifest path")
         return _spot_observation_queue.manifest_summary(realtime_rows=realtime_rows)
     writer = _get_spot_observation_fact_writer()
-    if fact_path is not None and writer.output_path.resolve() != fact_path.resolve():
+    if fact_path is not None and not _observation_fact_path_matches(writer.output_path, fact_path):
         if not allow_offline_rebuild:
             raise RuntimeError(
                 "SPOT observation fact runtime manifest path does not match closeout path"
@@ -3514,14 +3533,14 @@ def ensure_spot_observation_fact_initialized(
     if _spot_observation_queue is None and _spot_observation_fact_writer is None and not allow_offline_rebuild:
         _get_spot_observation_queue()
     if _spot_observation_queue is not None:
-        if _spot_observation_queue_path != fact_path.resolve():
+        if not _observation_fact_path_matches(_spot_observation_queue_path, fact_path):
             raise RuntimeError("observation queue belongs to a different initialization path")
         state = _spot_observation_queue.snapshot()["initialization_state"]
         if state == "pending":
             raise FactPersistencePending("observation writer is initializing")
         return state == "ready"
     writer = _get_spot_observation_fact_writer()
-    if writer.output_path.resolve() != fact_path.resolve():
+    if not _observation_fact_path_matches(writer.output_path, fact_path):
         if not allow_offline_rebuild:
             raise RuntimeError(
                 "SPOT observation fact runtime manifest path does not match initialization path"
