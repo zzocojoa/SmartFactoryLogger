@@ -9,6 +9,30 @@ from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, Per
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_rejection_ranges_merge_only_adjacent_matching_outcomes(self):
+        ledger = AdmissionRejectionLedger()
+        receipts = [(1, "INVALID", "bad_value", 7), (2, "INVALID", "bad_value", 7),
+                    (3, "ACCEPTED", None, 7), (4, "INVALID", "bad_value", 7),
+                    (5, "INVALID", "bad_type", 7), (6, "INVALID", "bad_type", 8),
+                    (7, "REJECTED_FULL", "bad_type", 8), (8, "REJECTED_FULL", "bad_type", 8)]
+        with patch("backend.FacilityData.persistence_trace.ADMISSION_REJECTION_RANGE_LIMIT", 5):
+            for receipt in receipts:
+                ledger.record(*receipt)
+            ranges = ledger.rejection_ranges()
+            self.assertEqual([(item.first_sequence, item.last_sequence) for item in ranges],
+                             [(1, 2), (4, 4), (5, 5), (6, 6), (7, 8)],
+                             "adjacent equivalent rejections were not compacted")
+            self.assertEqual([(item.status, item.reason, item.config_generation) for item in ranges],
+                             [("INVALID", "bad_value", 7), ("INVALID", "bad_value", 7),
+                              ("INVALID", "bad_type", 7), ("INVALID", "bad_type", 8),
+                              ("REJECTED_FULL", "bad_type", 8)])
+            self.assertFalse(ledger.snapshot()["details_incomplete"])
+            self.assertEqual(ledger.snapshot()["rejected_count"], 7)
+            ledger.record(9, "REJECTED_FULL", "queue_full", 8)
+            self.assertTrue(ledger.snapshot()["details_incomplete"])
+            self.assertEqual(ledger.snapshot()["omitted_rejection_count"], 1)
+            self.assertEqual(ledger.rejection_ranges(), ranges)
+
     def test_rejection_ranges_bound_details_without_losing_counts(self):
         ledger = AdmissionRejectionLedger()
         reasons = (("REJECTED_FULL", "queue_full"), ("REJECTED_LIMIT", "pending_byte_limit"),

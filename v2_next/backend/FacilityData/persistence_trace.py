@@ -43,6 +43,12 @@ class AdmissionRejectionLedger:
         self._counts[status] += 1
         if status in ("ACCEPTED", "DISABLED"):
             return
+        if self._ranges:
+            previous = self._ranges[-1]
+            if (previous.last_sequence + 1 == sequence and previous.status == status
+                    and previous.reason == reason and previous.config_generation == generation):
+                self._ranges[-1] = AdmissionRejectionRange(previous.first_sequence, sequence, status, reason, generation)
+                return
         if len(self._ranges) < ADMISSION_REJECTION_RANGE_LIMIT:
             self._ranges.append(AdmissionRejectionRange(sequence, sequence, status, reason, generation))
             return
