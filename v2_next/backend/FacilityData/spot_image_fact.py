@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, Generator, Mapping, Optional, TextIO
 
 from backend.FacilityData.spot_observation_fact import build_spot_observation_key
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded
 
 
 SPOT_IMAGE_FACT_COLUMNS = [
@@ -55,6 +56,7 @@ SPOT_IMAGE_FACT_COLUMNS = [
 SPOT_IMAGE_FACT_FILENAME = "spot_image_fact.csv"
 SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
 SPOT_IMAGE_FACT_ROW_BYTE_LIMIT = 1024 * 1024
+SPOT_IMAGE_FACT_DIGEST_BUFFER_BYTES = 4096
 
 _MANAGED_IMAGE_EXTENSIONS = {".jpg", ".png", ".gif", ".bmp", ".webp", ".bin"}
 _SPOT_IMAGE_FACT_FILE_LOCK = threading.RLock()
@@ -458,11 +460,7 @@ class SpotImageCaptureWriter:
                 return
             expected_size = identity[2]
             digest = hashlib.sha256()
-            last_byte = b""
-            with self.fact_path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-                    last_byte = chunk[-1:]
+            last_byte = self._read_fact_digest(digest, 0, expected_size)
             if last_byte != b"\n":
                 with _SPOT_IMAGE_FACT_FILE_LOCK:
                     self._mark_fact_append_uncertain()
@@ -486,6 +484,24 @@ class SpotImageCaptureWriter:
         except FileNotFoundError:
             return 0
 
+    def _read_fact_digest(self, digest: Any, offset: int, size: int) -> bytes:
+        scratch = min(SPOT_IMAGE_FACT_DIGEST_BUFFER_BYTES, size)
+        reservation = (self.payload_reservation(scratch, "fact_digest_byte_limit")
+                       if self.payload_reservation is not None else nullcontext())
+        last_byte = b""
+        with reservation, memoryview(bytearray(scratch)) as window:
+            with self.fact_path.open("rb", buffering=0) as handle:
+                handle.seek(offset)
+                remaining = size
+                while remaining:
+                    count = handle.readinto(window[:min(len(window), remaining)])
+                    if not count:
+                        raise OSError("SPOT image fact digest read was truncated")
+                    digest.update(window[:count])
+                    last_byte = bytes(window[count - 1:count])
+                    remaining -= count
+        return last_byte
+
     def _extend_manifest_digest(
         self,
         previous_size: int,
@@ -503,19 +519,11 @@ class SpotImageCaptureWriter:
             self._manifest_state_ready = False
             return
         try:
-            with self.fact_path.open("rb") as handle:
-                handle.seek(previous_size)
-                remaining = current_size - previous_size
-                while remaining > 0:
-                    chunk = handle.read(min(1024 * 1024, remaining))
-                    if not chunk:
-                        raise OSError("SPOT image fact digest read was truncated")
-                    self._fact_digest.update(chunk)
-                    remaining -= len(chunk)
+            self._read_fact_digest(self._fact_digest, previous_size, current_size - previous_size)
             if self._fact_file_size() != current_size:
                 self._manifest_state_ready = False
                 return
-        except OSError:
+        except (OSError, PayloadBudgetExceeded):
             # The fact row is durable. Preserve row/dedupe state and make the
             # final manifest fail closed rather than writing the same capture twice.
             self._manifest_state_ready = False

@@ -1,5 +1,6 @@
 import asyncio
 import csv
+from contextlib import contextmanager
 from datetime import datetime
 import hashlib
 import io
@@ -21,6 +22,7 @@ from PIL import Image
 
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded
 from backend.FacilityData import spot_image_fact as image_fact
 from backend.FacilityData.spot_image_fact import (
     SPOT_IMAGE_FACT_COLUMNS,
@@ -1476,6 +1478,72 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertFalse(restarted.try_manifest_stats()[2])
             self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
             self.assertEqual(list(root.glob("*.schema-mismatch.csv")), [])
+
+    def test_image_fact_digest_reserves_bounded_scratch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = dict(image_bytes=b"\xff\xd8digest-workspace\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            writer.write_capture(**args)
+            original = writer.fact_path.read_bytes()
+            reserved = 0
+            denied = True
+            reads = []
+
+            @contextmanager
+            def reserve(size, reason):
+                nonlocal reserved
+                self.assertEqual(reason, "fact_digest_byte_limit")
+                if denied:
+                    raise PayloadBudgetExceeded(reason)
+                reserved += size
+                try:
+                    yield
+                finally:
+                    reserved -= size
+
+            with self.assertRaisesRegex(PayloadBudgetExceeded, "fact_digest_byte_limit"):
+                SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0,
+                                       payload_reservation=reserve)
+            self.assertEqual(writer.fact_path.read_bytes(), original)
+            self.assertEqual(reserved, 0)
+            denied = False
+            opened = Path.open
+
+            class MeasuredRead:
+                def __init__(self, handle):
+                    self.handle = handle
+
+                def __enter__(self):
+                    self.handle.__enter__()
+                    return self
+
+                def __exit__(self, *exc):
+                    return self.handle.__exit__(*exc)
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def readinto(inner, buffer):
+                    self.assertGreaterEqual(reserved, len(buffer), "digest read exceeded reserved workspace")
+                    self.assertLessEqual(len(buffer), 4096)
+                    reads.append(len(buffer))
+                    return inner.handle.readinto(buffer)
+
+            def measured_open(path, mode="r", *open_args, **kwargs):
+                handle = opened(path, mode, *open_args, **kwargs)
+                return MeasuredRead(handle) if path == writer.fact_path and mode == "rb" else handle
+
+            with patch.object(Path, "open", new=measured_open):
+                restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0,
+                                                   payload_reservation=reserve)
+                restarted.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+            self.assertGreaterEqual(len(reads), 2)
+            self.assertEqual(reserved, 0)
+            self.assertEqual(restarted.fact_row_count, 2)
+            self.assertEqual(restarted.fact_sha256, hashlib.sha256(writer.fact_path.read_bytes()).hexdigest())
 
     def test_image_oversized_history_row_blocks_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
