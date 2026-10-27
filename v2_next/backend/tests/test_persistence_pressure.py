@@ -187,6 +187,47 @@ class StoragePressureTests(unittest.TestCase):
         self.assertIn("monitor_stopped", monitor.snapshot().reasons)
         self.assertGreaterEqual(monitor.snapshot().sampling_failure_count, 1)
 
+    def test_disabled_generation_remains_active_until_its_pending_drains(self):
+        controller = StoragePressureController()
+        old = self.sample(enabled=False, availability="blocked", pending_count=1,
+                          oldest_pending_monotonic=90.0, stage_due_monotonic=100.0)
+        current = self.sample(config_generation=2, destination_key="destination-B")
+        self.assertEqual(controller.evaluate([old, current], now_monotonic=100.0).state, "PERSISTENCE_BLOCKED")
+        drained = replace(old, pending_count=0)
+        for now, expected in ((101.0, "PRESSURED"), (102.0, "PRESSURED"), (103.0, "NORMAL")):
+            self.assertEqual(controller.evaluate([drained, current], now_monotonic=now).state, expected)
+        changed = replace(current, config_generation=3, destination_key="destination-C", availability="unknown")
+        self.assertEqual(controller.evaluate([current, changed], now_monotonic=104.0).state, "PERSISTENCE_BLOCKED")
+
+    def test_monitor_stop_timeout_does_not_spawn_a_replacement(self):
+        block = threading.Event()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def sample_provider():
+            if block.is_set():
+                entered.set()
+                release.wait(5.0)
+            return [self.sample()]
+
+        monitor = StoragePressureMonitor(sample_provider)
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2.0
+            while monitor.snapshot().state != "NORMAL" and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(monitor.snapshot().state, "NORMAL")
+            block.set()
+            self.assertTrue(entered.wait(2.0))
+            self.assertFalse(monitor.stop(timeout=0.01))
+            self.assertEqual(monitor.snapshot().state, "PERSISTENCE_BLOCKED")
+            self.assertIn("monitor_stopping", monitor.snapshot().reasons)
+            self.assertFalse(monitor.start(), "a live sampling owner was replaced after a timeout")
+        finally:
+            release.set()
+            self.assertTrue(monitor.stop(timeout=2.0))
+        self.assertIn("monitor_stopped", monitor.snapshot().reasons)
+
 
 if __name__ == "__main__":
     unittest.main()
