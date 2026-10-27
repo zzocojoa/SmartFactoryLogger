@@ -9,12 +9,14 @@ All notable changes to Smart Factory Logger V2 are documented here.
   verify file identity, bounded row bytes, canonical column/value hashes and
   overlapping physical-row receipts without rewriting evidence. Restore the
   CSV parser limit after closeout reads so admitted large fields can finish.
-  Full file/configuration/destination coverage and QA integration remain
+  Bind rows to the original admitted destination, CSV columns/schema and
+  effective configuration intervals. Missing or ambiguous contracts remain
+  incomplete. Full file/terminal-metadata coverage and QA integration remain
   incomplete; per-row verification does not emit a full data-integrity PASS.
 
 - Persist policy-excluded CSV ID ranges within the shared 4,096 outcome-range
   budget. Add bounded read-only evidence parsing and admission-total checks;
-  full file/configuration/destination validation and QA integration remain incomplete.
+  full file/terminal-metadata validation and QA integration remain incomplete.
 
 - Persist each admitted CSV event's original output contract and per-sink
   processing failure identity/reason. Retain failure receipts until trace commit,
