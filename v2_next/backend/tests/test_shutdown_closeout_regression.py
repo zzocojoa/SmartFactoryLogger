@@ -1191,6 +1191,29 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
             fact_file_stats.assert_not_called()
 
+    def test_image_capture_identity_conflict_preserves_existing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=log_path, capture_root=log_path / "spot_images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8first-capture\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            first = writer.write_capture(**args)
+            args["capture_id"] = first["spot_image_capture_id"]
+            originals = {path: path.read_bytes() for path in log_path.rglob("*") if path.is_file()}
+            with self.assertRaisesRegex(RuntimeError, "capture identity conflicts"):
+                writer.write_capture(**dict(args, image_bytes=b"\xff\xd8other-capture\xff\xd9"))
+            with self.assertRaisesRegex(RuntimeError, "capture identity conflicts"):
+                writer.write_capture(**dict(args, source="different-acquisition"))
+            self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+            self.assertEqual(writer.write_capture(**args), first)
+            restarted = SpotImageCaptureWriter(log_path=log_path, capture_root=log_path / "spot_images", retention_days=0)
+            with self.assertRaisesRegex(RuntimeError, "capture identity conflicts"):
+                restarted.write_capture(**dict(args, image_age_ms=500.0))
+            self.assertEqual(restarted.write_capture(**args), first)
+            self.assertEqual(writer.fact_row_count, 1)
+            self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+
     def test_image_digest_read_failure_does_not_duplicate_durable_capture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)

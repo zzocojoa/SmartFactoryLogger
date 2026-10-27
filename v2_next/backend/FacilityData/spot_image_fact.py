@@ -152,23 +152,6 @@ class SpotImageCaptureWriter:
         output_path.mkdir(parents=True, exist_ok=True)
         image_path = output_path / f"{capture_id}{extension}"
 
-        existing_fact = self._cached_fact_for_capture_id(capture_id)
-        if existing_fact is None and self._capture_may_already_be_recorded(
-            captured_at=captured_at,
-            image_path=image_path,
-        ):
-            existing_fact = self._existing_fact_for_capture_id(capture_id)
-        if existing_fact is not None:
-            if not image_path.exists():
-                tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
-                tmp_path.write_bytes(image_bytes)
-                tmp_path.replace(image_path)
-            return dict(existing_fact)
-
-        tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
-        tmp_path.write_bytes(image_bytes)
-        tmp_path.replace(image_path)
-
         fact = build_spot_image_fact(
             capture_id=capture_id,
             captured_iso=captured_iso,
@@ -185,6 +168,26 @@ class SpotImageCaptureWriter:
             link_stale_threshold_ms=self.link_stale_threshold_ms,
             observation_snapshot=observation_snapshot,
         )
+
+        existing_fact = self._cached_fact_for_capture_id(capture_id)
+        if existing_fact is None and self._capture_may_already_be_recorded(
+            captured_at=captured_at,
+            image_path=image_path,
+        ):
+            existing_fact = self._existing_fact_for_capture_id(capture_id)
+        if existing_fact is not None:
+            if any(existing_fact.get(key) != fact[key] for key in SPOT_IMAGE_FACT_COLUMNS):
+                raise RuntimeError("SPOT image capture identity conflicts with stored fact")
+            if not image_path.exists():
+                tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
+                tmp_path.write_bytes(image_bytes)
+                tmp_path.replace(image_path)
+            return dict(existing_fact)
+
+        tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
+        tmp_path.write_bytes(image_bytes)
+        tmp_path.replace(image_path)
+
         self._append_fact(fact)
         self._remember_fact(fact)
         self.written_count += 1
