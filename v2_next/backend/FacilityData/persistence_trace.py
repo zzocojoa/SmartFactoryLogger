@@ -51,6 +51,7 @@ class PersistenceTraceWriter:
         self._refused_count = 0
         self._incomplete = False
         self._processing_bytes = 0
+        self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
 
     def append(self, record: Mapping[str, Any]) -> int | None:
@@ -67,6 +68,7 @@ class PersistenceTraceWriter:
             # Keep readback possible even when the producer fills both slots.
             available = TRACE_PENDING_BYTE_LIMIT - pending_bytes - max(self._processing_bytes, TRACE_READBACK_BYTES)
             if workspace > available:
+                self._blocked_workspace_bytes = max(self._blocked_workspace_bytes, workspace)
                 self._refuse("trace_workspace_full")
                 return None
             if self._segments and len(self._segments[-1].records) >= TRACE_SEGMENT_RECORD_LIMIT:
@@ -92,6 +94,8 @@ class PersistenceTraceWriter:
                     self._refuse("record_too_large", incomplete=True)
                     return None
                 if max(header_workspace, header_bound + workspace) > available:
+                    self._blocked_workspace_bytes = max(
+                        self._blocked_workspace_bytes, header_workspace, header_bound + workspace)
                     self._refuse("trace_workspace_full")
                     return None
                 header = encode_json_payload(header_source, sort_keys=True, compact=True, newline=True)
@@ -183,11 +187,18 @@ class PersistenceTraceWriter:
                 self._committed_sequence = segment.sequence
                 self._segments.popleft()
                 del segment  # Drop encoded bytes before another producer reuses their budget.
+                available = TRACE_PENDING_BYTE_LIMIT - sum(item.size for item in self._segments) - TRACE_READBACK_BYTES
+                if self._blocked_workspace_bytes <= available:
+                    self._blocked_workspace_bytes = 0
                 return True
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             admission_blocked_reason = None
+            available = (TRACE_PENDING_BYTE_LIMIT - sum(segment.size for segment in self._segments)
+                         - max(self._processing_bytes, TRACE_READBACK_BYTES))
+            if self._blocked_workspace_bytes > available:
+                admission_blocked_reason = "trace_workspace_full"
             if len(self._segments) >= TRACE_PENDING_SEGMENT_LIMIT:
                 tail = self._segments[-1]
                 if (tail.sealed or len(tail.records) >= TRACE_SEGMENT_RECORD_LIMIT

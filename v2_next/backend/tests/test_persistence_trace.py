@@ -9,6 +9,44 @@ from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_workspace_pressure_blocks_admission_until_budget_returns(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "workspace-producer")
+            detail = "x" * (384 * 1024)
+            for sequence in range(4):
+                self.assertIsNotNone(writer.append({"event_id": sequence, "detail": detail}))
+            state = writer.snapshot()
+            self.assertEqual(state["pending_segments"], 2)
+            self.assertEqual(state["pending_records"], 4)
+            self.assertIsNone(writer.append({"event_id": 4, "detail": detail}))
+            state = writer.snapshot()
+            self.assertEqual(state["last_error"], "trace_workspace_full")
+            self.assertEqual(state["admission_blocked_reason"], "trace_workspace_full",
+                             "byte pressure left the producer admission gate open")
+            self.assertLessEqual(state["pending_bytes"], 2 * 1024**2)
+            original_replace = Path.replace
+
+            def failed_publish(source, target):
+                if str(target).endswith(".trace.jsonl"):
+                    raise OSError("injected trace storage unavailable")
+                return original_replace(source, target)
+
+            with patch.object(Path, "replace", failed_publish):
+                self.assertFalse(writer.flush(force=True))
+            self.assertEqual(writer.snapshot()["admission_blocked_reason"], "trace_workspace_full")
+            self.assertEqual(writer.snapshot()["pending_records"], 4)
+            self.assertTrue(writer.flush(force=True))
+            self.assertIsNone(writer.snapshot()["admission_blocked_reason"])
+            self.assertGreaterEqual(writer.snapshot()["failure_count"], 1)
+            self.assertIsNotNone(writer.append({"event_id": 4, "detail": detail}))
+            while writer.snapshot()["pending_records"]:
+                self.assertTrue(writer.flush(force=True))
+            stored = [json.loads(line) for path in sorted(root.glob("*.trace.jsonl"))
+                      for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(stored, [{"event_id": sequence, "detail": detail} for sequence in range(5)])
+            self.assertEqual(writer.snapshot()["pending_bytes"], 0)
+
     def test_partial_trace_write_is_preserved_without_publication(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
