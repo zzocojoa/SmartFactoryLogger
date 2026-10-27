@@ -1849,8 +1849,9 @@ def _spot_image_storage_blocked() -> bool:
             and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED")
 
 
-def _spot_image_pressure_response(image_url: str, profile: SpotImageProfile) -> tuple[bytes, Dict[str, Any]]:
+def _spot_image_pressure_response(profile: SpotImageProfile) -> tuple[bytes, Dict[str, Any]]:
     global _img_cache_hit_count
+    image_url = _resolve_spot_image_url()
     entry = _img_cache_entry
     if entry is not None and entry.image_url == image_url:
         _img_cache_hit_count += 1
@@ -3889,7 +3890,7 @@ async def fetch_image_async(
             raise
 
         if _spot_image_storage_blocked():
-            return _spot_image_pressure_response(image_url, normalized_profile)
+            return _spot_image_pressure_response(normalized_profile)
         cache_entry = _img_cache_entry
         if _is_spot_image_cache_fresh(
             cache_entry,
@@ -3915,7 +3916,7 @@ async def fetch_image_async(
                     upstream_status=None,
                 )
             if _spot_image_storage_blocked():
-                return _spot_image_pressure_response(image_url, normalized_profile)
+                return _spot_image_pressure_response(normalized_profile)
             cache_entry = _img_cache_entry
             if _is_spot_image_cache_fresh(
                 cache_entry,
@@ -3950,7 +3951,7 @@ async def fetch_image_async(
             if current_image_url != image_url:
                 continue
             if isinstance(exc, SpotStoragePressureError):
-                return _spot_image_pressure_response(image_url, normalized_profile)
+                return _spot_image_pressure_response(normalized_profile)
             raise
         finally:
             async with _img_fetch_lock:

@@ -5051,6 +5051,49 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
             self.assertTrue(monitor.stop())
 
+    async def test_storage_pressure_rechecks_sensor_after_image_lock_wait(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        blocked = threading.Event()
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'blocked' if blocked.is_set() else 'available')])
+        transport = FakeSpotHttpTransport()
+        task = None
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2
+            while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, 'NORMAL')
+            with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                    patch.object(spot_api, '_spot_http_transport', transport):
+                await spot_api.fetch_image_async()
+                entry = spot_api._img_cache_entry
+                spot_api._img_cache_entry = replace(entry, captured_at_monotonic=entry.captured_at_monotonic - 30)
+                await spot_api._img_fetch_lock.acquire()
+                task = asyncio.create_task(backend_app.spot_image(StarletteRequest(
+                    {'type': 'http', 'method': 'GET', 'path': '/api/spot/live_image.jpg', 'headers': []})))
+                await asyncio.sleep(.01)
+                self.assertFalse(task.done())
+                spot_api.config.SPOT_IP = 'other-sensor.local'
+                blocked.set()
+                deadline = time.monotonic() + 2
+                while monitor.snapshot().state != 'PERSISTENCE_BLOCKED' and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                spot_api._img_fetch_lock.release()
+                responses = await asyncio.gather(task, return_exceptions=True)
+                self.assertEqual(responses[0].status_code, 503,
+                                 'old sensor JPEG escaped after configuration changed during lock wait')
+                self.assertEqual(responses[0].detail['code'], 'storage_pressure')
+                self.assertEqual(len(transport.requests), 1)
+        finally:
+            if spot_api._img_fetch_lock.locked():
+                spot_api._img_fetch_lock.release()
+            if task is not None:
+                await asyncio.gather(task, return_exceptions=True)
+            self.assertTrue(monitor.stop())
+
     async def test_snapshot_and_live_callers_share_one_upstream_refresh(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
         image_bytes = _jpeg_bytes("shared-profiles")
