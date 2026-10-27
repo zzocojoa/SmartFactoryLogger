@@ -4,6 +4,14 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Add bounded persistence trace segments with retained publish retries and a
+  first-record monotonic flush deadline. Preserve short writes as uncertain
+  pending files instead of publishing an incomplete final segment.
+- Connect CSV producer start/stop and admitted configuration intervals to these
+  traces. Freeze the stop boundary before later closed-admission requests and
+  reject a clean shutdown when boundary evidence remains unresolved. Coverage
+  is explicitly limited to producer/configuration boundaries; per-row evidence,
+  partial-data recovery and storage-pressure control remain in development.
 - Begin the HTTP persistence-integrity plan: bounded queued/in-flight payloads,
   immutable CSV inputs and admitted settings, explicit fact/CSV rejection results,
   and image destination binding across runtime configuration changes.
