@@ -4,6 +4,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Preserve malformed image fact history across writer restart instead of
+  appending to an incomplete tail or rolling an unknown schema aside.
+  Scan for only the requested capture and retain one recent row, avoiding
+  an unbounded history dictionary while keeping retry deduplication. Full
+  file-identity and workspace-budget validation remain pending.
+
 - Retain the original image event and payload reservation across transient I/O
   errors, with bounded monotonic retry backoff and explicit pending/history
   counters. Stop new retries at shutdown, preserve uncertainty across writer
@@ -16,7 +22,7 @@ All notable changes to Smart Factory Logger V2 are documented here.
   identity before/after reading, reserve that workspace in the capture owner's
   payload budget, and preserve conflicting files. A partial fact write, short
   write or uncertain close blocks that writer's subsequent captures and final
-  success; full same-event recovery and storage-pressure control remain pending.
+  success; complete fact/JPEG reconciliation and storage-pressure control remain pending.
 
 - Bind CSV shutdown state and finalized sidecar bytes to producer evidence.
   Independently check the sidecar schema, final persisted row identity and

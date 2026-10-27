@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T10:35:44.492886+00:00",
+  "lastUpdated": "2026-10-27T20:04:01.620033+09:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,22 +48293,23 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "5157bedec39bd85e34d18a6b5581aab9f1444a39",
+      "currentDevelopmentCommit": "aec3f1e6c4c2968a8fbb7ee7b109fc6408c87226",
       "lastBackendVerification": {
-        "commit": "5157bedec39bd85e34d18a6b5581aab9f1444a39",
-        "total": 1094,
-        "passed": 1093,
+        "commit": "aec3f1e6c4c2968a8fbb7ee7b109fc6408c87226",
+        "total": 1099,
+        "passed": 1098,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-owned-recovery/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-history-recovery/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
         "Bounded fact spool and capture payload accounting",
-        "Same capture event/reservation retries transient I/O with bounded backoff; original JPEG reuse; process-local bounded uncertainty survives writer replacement; transient fact reads preserve originals"
+        "Same capture event/reservation retries transient I/O with bounded backoff; original JPEG reuse; process-local bounded uncertainty survives writer replacement; transient fact reads preserve originals",
+        "Restarted writer preserves malformed history without rollover; sequential identity lookup and one-row cache replace the unbounded historical dictionary"
       ],
       "remainingScope": [
-        "Complete fact/JPEG reconciliation, malformed history/tail handling and bounded historical lookup/workspace accounting",
+        "Complete fact/JPEG reconciliation, historical semantic/duplicate checks, active-file identity and all bounded read/parse/output workspace reservations",
         "Storage-pressure controller, destination probes and bounded retries",
         "API dispatch suppression and frontend timer/observation-reference contracts",
         "All r4 RV/RR-T/FR-T scenarios and final installer verification",
@@ -48319,7 +48320,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_RECHECK_20261027_63a52959/health-result.json"
       },
-      "updatedAt": "2026-10-27T10:35:44.492886+00:00"
+      "updatedAt": "2026-10-27T20:04:01.620033+09:00"
     }
   },
   "pipeline": {
@@ -50409,5 +50410,5 @@
       "scope": "approved_ui_s1_logic_review_package_server_application_collection_preservation_and_next_rollback"
     }
   ],
-  "updatedAt": "2026-10-27T10:35:44.492886+00:00"
+  "updatedAt": "2026-10-27T20:04:01.620033+09:00"
 }
