@@ -4,16 +4,17 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
-- Validate CSV producer boundaries, producer/writer identity, contiguous trace
-  segments, admission ID coverage and each required output receipt. Use a
-  temporary disk index for outcome ranges; detect missing/overlapping IDs,
-  mismatched output contracts and processing failures without rewriting evidence.
-  Actual data-byte validation, full terminal outcome totals and QA integration
-  remain incomplete; no full data-integrity PASS is emitted.
+- Reconcile CSV producer boundaries, trace segments, admission IDs, required
+  output receipts and terminal counts. Under explicit allowed data roots,
+  verify file identity, bounded row bytes, canonical column/value hashes and
+  overlapping physical-row receipts without rewriting evidence. Restore the
+  CSV parser limit after closeout reads so admitted large fields can finish.
+  Full file/configuration/destination coverage and QA integration remain
+  incomplete; per-row verification does not emit a full data-integrity PASS.
 
 - Persist policy-excluded CSV ID ranges within the shared 4,096 outcome-range
   budget. Add bounded read-only evidence parsing and admission-total checks;
-  full per-ID/output-byte validation and QA integration remain incomplete.
+  full file/configuration/destination validation and QA integration remain incomplete.
 
 - Persist each admitted CSV event's original output contract and per-sink
   processing failure identity/reason. Retain failure receipts until trace commit,
@@ -32,7 +33,7 @@ All notable changes to Smart Factory Logger V2 are documented here.
   ranges until their trace segments commit, retry publication with the same IDs,
   and persist terminal admission counts including omitted detail and prior failures.
   Pin the first rejection's trace settings across save OFF/ON/OFF transitions.
-  Per-sink final outcome reconciliation and the remaining pressure/UI contracts
+  Full final-state coverage and the remaining pressure/UI contracts
   are still in development; recorded admission counts do not imply data integrity PASS.
 - Reject new CSV admission while persistence evidence has two full segments or
   cannot reserve the workspace needed by a pending trace record. Reopen admission
