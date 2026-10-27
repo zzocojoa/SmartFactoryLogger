@@ -337,6 +337,8 @@ class _CSVRecordUncertain(OSError):
 
 CSV_ROW_READBACK_BYTES = 4096
 CSV_ROW_DIGEST_BYTES = 32
+CSV_ROW_RECEIPT_BYTES = 2 * CSV_ROW_DIGEST_BYTES
+CSV_OUTPUT_CONTENT_CONTRACT = "CSV_ROW_CONTENT_V1"
 
 
 @dataclass
@@ -347,6 +349,7 @@ class _CSVRowLocation:
     offset: int
     length: int
     digest: bytes
+    output_digest: bytes
     write_completed: bool = False
     data_reported: bool = False
     sink_id: Optional[str] = None
@@ -354,12 +357,14 @@ class _CSVRowLocation:
 
 
 class _CSVRecordOutput:
-    def __init__(self, owner: "CSVLoggerService", handle: TextIO, path: Path, row: Iterable[Any]):
+    def __init__(self, owner: "CSVLoggerService", handle: TextIO, path: Path, row: Iterable[Any],
+                 columns: tuple[str, ...], values: tuple[str, ...]):
         self.owner, self.handle, self.path, self.row = owner, handle, path, row
+        self.columns, self.values = columns, values
 
     def write(self, text: str) -> int:
         try:
-            return self.owner._write_csv_record(self.handle, self.path, self.row, text)
+            return self.owner._write_csv_record(self.handle, self.path, self.row, text, self.columns, self.values)
         finally:
             # Exception tracebacks must not outlive the output reservation with
             # an extra serialized row still attached to this frame.
@@ -374,21 +379,22 @@ def _csv_output_workspace(values: tuple[str, ...]) -> int:
         encoded += 2
     record_buffer = (characters // 32768 + 1) * 32768 * 4
     return (2 * record_buffer + characters * width + 2 * encoded + 3 + io.DEFAULT_BUFFER_SIZE
-            + CSV_ROW_READBACK_BYTES + 2 * CSV_ROW_DIGEST_BYTES)
+            + CSV_ROW_READBACK_BYTES + 3 * CSV_ROW_DIGEST_BYTES)
 
 
 class _ReservedCSVWriter:
     """Keep a file open without retaining an unaccounted C CSV record buffer."""
 
-    def __init__(self, owner: "CSVLoggerService", handle: TextIO, path: Path):
+    def __init__(self, owner: "CSVLoggerService", handle: TextIO, path: Path, columns: tuple[str, ...]):
         self._owner = owner
         self._handle = handle
         self._path = path
+        self._columns = columns
 
     def writerow(self, row: Iterable[Any], /) -> Any:
         values = tuple("" if value is None else str(value) for value in row)
         with self._owner._reserve_csv_output(_csv_output_workspace(values)):
-            writer = csv.writer(_CSVRecordOutput(self._owner, self._handle, self._path, row))
+            writer = csv.writer(_CSVRecordOutput(self._owner, self._handle, self._path, row, self._columns, values))
             try:
                 result = writer.writerow(values)
                 self._handle.flush()
@@ -760,7 +766,7 @@ class CSVLoggerService:
                 location = self._pending_csv_locations.pop(id(row), None)
                 if location is not None:
                     del location
-                    self._pending_processing_payload_bytes -= CSV_ROW_DIGEST_BYTES
+                    self._pending_processing_payload_bytes -= CSV_ROW_RECEIPT_BYTES
                 binding = self._pending_row_events.pop(id(row), None)
                 if binding is None:
                     continue  # Direct legacy flush callers have no admitted envelope.
@@ -1078,7 +1084,7 @@ class CSVLoggerService:
         handle = None
         try:
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
-            writer = _ReservedCSVWriter(self, handle, full_path)
+            writer = _ReservedCSVWriter(self, handle, full_path, settings.v1_header)
             if handle.tell() == 0 and settings.v1_header:
                 writer.writerow(settings.v1_header)
                 handle.flush()
@@ -1093,7 +1099,7 @@ class CSVLoggerService:
                 try:
                     self._ensure_dir(settings.fallback_log_dir)
                     handle = fallback_path.open("a", newline="", encoding="utf-8-sig")
-                    writer = _ReservedCSVWriter(self, handle, fallback_path)
+                    writer = _ReservedCSVWriter(self, handle, fallback_path, settings.v1_header)
                     if handle.tell() == 0 and settings.v1_header:
                         writer.writerow(settings.v1_header)
                         handle.flush()
@@ -1187,7 +1193,7 @@ class CSVLoggerService:
                             return None, None
 
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
-            writer = _ReservedCSVWriter(self, handle, full_path)
+            writer = _ReservedCSVWriter(self, handle, full_path, contract.columns)
             if handle.tell() == 0:
                 writer.writerow(list(contract.columns))
                 handle.flush()
@@ -3000,12 +3006,31 @@ class CSVLoggerService:
                 raise _CSVRecordUncertain("csv_record_content_changed")
         return True
 
-    def _write_csv_record(self, handle: TextIO, path: Path, row: Iterable[Any], text: str) -> int:
+    def _csv_output_content_digest(self, columns: tuple[str, ...], values: tuple[str, ...]) -> bytes:
+        source = prepared = payload = None
+        try:
+            source = {"contract_version": CSV_OUTPUT_CONTENT_CONTRACT, "columns": columns, "values": values}
+            prepared, byte_bound, characters, width = prepare_json_payload(source, CSV_PENDING_PAYLOAD_BYTE_LIMIT)
+            text_bytes = (characters + 1) * width
+            with self._reserve_csv_output(max(2 * text_bytes, text_bytes + byte_bound)):
+                try:
+                    payload = encode_json_payload(prepared, sort_keys=True, compact=True)
+                    return hashlib.sha256(payload).digest()
+                finally:
+                    source = prepared = payload = None
+        except PayloadBudgetExceeded as exc:
+            raise CSVOutputBudgetExceeded("csv_output_content_byte_limit") from exc
+        finally:
+            source = prepared = payload = None
+            columns = values = ()
+
+    def _write_csv_record(self, handle: TextIO, path: Path, row: Iterable[Any], text: str,
+                          columns: tuple[str, ...], values: tuple[str, ...]) -> int:
         row_key = id(row)
         with self._runtime_lock:
             admitted = row_key in self._pending_row_events
             location = self._pending_csv_locations.get(row_key)
-        payload = digest = None
+        payload = digest = output_digest = None
         reserved = False
         try:
             if path in self._uncertain_csv_paths:
@@ -3019,23 +3044,24 @@ class CSVLoggerService:
                         raise _CSVRecordUncertain("csv_append_position_unconfirmed")
                     with self._runtime_lock:
                         if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
-                                + CSV_ROW_DIGEST_BYTES > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                                + CSV_ROW_RECEIPT_BYTES > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
                             raise CSVOutputBudgetExceeded("csv_row_digest_byte_limit")
-                        self._pending_processing_payload_bytes += CSV_ROW_DIGEST_BYTES
+                        self._pending_processing_payload_bytes += CSV_ROW_RECEIPT_BYTES
                         reserved = True
                 else:
                     offset = location.offset
                 payload = text.encode("utf-8-sig" if offset == 0 else "utf-8")
                 digest = hashlib.sha256(payload).digest()
+                output_digest = self._csv_output_content_digest(columns, values)
                 if location is None:
-                    location = _CSVRowLocation(path, info.st_dev, info.st_ino, offset, len(payload), digest)
+                    location = _CSVRowLocation(path, info.st_dev, info.st_ino, offset, len(payload), digest, output_digest)
                     with self._runtime_lock:
                         self._pending_csv_locations[row_key] = location
                     reserved = False  # The pending row now owns this charge.
                 else:
                     if location.path != path:
                         raise _CSVRecordUncertain("csv_row_destination_changed")
-                    if (len(payload), digest) != (location.length, location.digest):
+                    if (len(payload), digest, output_digest) != (location.length, location.digest, location.output_digest):
                         raise _CSVRecordUncertain("csv_row_content_conflict")
                     if self._csv_record_exists(location, handle):
                         return len(text)
@@ -3049,11 +3075,12 @@ class CSVLoggerService:
                 self._csv_manual_recovery_required = True
             raise
         finally:
-            payload = digest = None
+            payload = digest = output_digest = None
             text = ""
+            columns = values = ()
             if reserved:
                 with self._runtime_lock:
-                    self._pending_processing_payload_bytes -= CSV_ROW_DIGEST_BYTES
+                    self._pending_processing_payload_bytes -= CSV_ROW_RECEIPT_BYTES
 
     def _write_csv_rows(self, writer: _CSVWriter, rows: list[Tuple[list, datetime]],
                         sink: str) -> list[Tuple[list, datetime]]:
@@ -3122,7 +3149,7 @@ class CSVLoggerService:
             try:
                 # The trace owner reserves its serialization and queued bytes.
                 # Account separately for the temporary hex digest created here.
-                with self._reserve_csv_output(2 * CSV_ROW_DIGEST_BYTES):
+                with self._reserve_csv_output(4 * CSV_ROW_DIGEST_BYTES):
                     try:
                         record = {
                             "kind": "csv_row_data", "record_version": 1,
@@ -3132,6 +3159,8 @@ class CSVLoggerService:
                             "file_path": str(location.path), "file_device": location.device,
                             "file_id": location.inode, "row_byte_offset": location.offset,
                             "row_byte_length": location.length, "output_bytes_sha256": location.digest.hex(),
+                            "output_contract_version": CSV_OUTPUT_CONTENT_CONTRACT,
+                            "output_payload_hash": location.output_digest.hex(),
                         }
                         sequence = trace.append(record)
                         with self._runtime_lock:

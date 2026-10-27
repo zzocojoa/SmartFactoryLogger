@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import hashlib
+import io
 import json
 from contextlib import contextmanager
 import os
@@ -474,6 +475,40 @@ class CSVLoggerServiceTests(unittest.TestCase):
                                      record["output_bytes_sha256"])
                     info = path.stat()
                     self.assertEqual((record["file_device"], record["file_id"]), (info.st_dev, info.st_ino))
+
+    def test_csv_trace_binds_canonical_output_content(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+            service.start()
+            try:
+                receipts = []
+                for index in range(2):
+                    data = self.create_data(f"2026-03-09T07:20:25.{index}00", 30.0 + index)
+                    data.Die_ID = '금형,"A"\n😀'
+                    receipts.append(service.enqueue_detailed(data))
+            finally:
+                closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            evidence = [record for record in records if record["kind"] == "csv_row_data"]
+            self.assertEqual(len(evidence), 4)
+            for record in evidence:
+                path = Path(record["file_path"])
+                contents = path.read_bytes()
+                start, length = record["row_byte_offset"], record["row_byte_length"]
+                values = list(csv.reader(io.StringIO(contents[start:start + length].decode("utf-8-sig"))))
+                self.assertEqual(len(values), 1)
+                canonical = {"contract_version": "CSV_ROW_CONTENT_V1",
+                             "columns": self.read_rows(path)[0], "values": values[0]}
+                expected = hashlib.sha256(json.dumps(canonical, ensure_ascii=False, allow_nan=False,
+                                                    sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                self.assertEqual(record.get("output_payload_hash"), expected,
+                                 "CSV evidence lacks the canonical output column/value identity")
+                self.assertEqual(record.get("output_contract_version"), "CSV_ROW_CONTENT_V1")
+                receipt = next(item for item in receipts if item["producer_seq"] == record["producer_seq"])
+                self.assertEqual(record["source_payload_hash"], receipt["source_payload_hash"])
+                self.assertNotEqual(record["source_payload_hash"], record["output_payload_hash"])
 
     def test_producer_stop_boundary_excludes_post_stop_rejections(self) -> None:
         with self.create_temp_dir() as tmp_dir:
