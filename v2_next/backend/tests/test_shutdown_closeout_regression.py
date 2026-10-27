@@ -1570,6 +1570,67 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 restarted.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
             self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
 
+    def test_image_fact_row_limit_counts_utf8_and_multiline(self) -> None:
+        for label, value in (("ascii", "x" * 60_000), ("utf8", "한" * 20_000),
+                             ("multiline", ("x" * 999 + "\n") * 60)):
+            for over_limit in (False, True):
+                with self.subTest(kind=label, over_limit=over_limit), tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+                    row = writer.write_capture(image_bytes=b"\xff\xd8row-boundary\xff\xd9", captured_at=1782910800.0,
+                                               source_url="http://synthetic.invalid/image.jpg", source="test",
+                                               image_age_ms=0.0, link_checked_at=None, observation_snapshot=None)
+                    for column in SPOT_IMAGE_FACT_COLUMNS[-16:]:
+                        row[column] = value
+
+                    def render():
+                        stream = io.StringIO(newline="")
+                        csv.DictWriter(stream, fieldnames=SPOT_IMAGE_FACT_COLUMNS).writerow(row)
+                        return stream.getvalue().encode("utf-8")
+
+                    padding = 1024 * 1024 + int(over_limit) - len(render())
+                    self.assertGreater(padding, 0)
+                    row[SPOT_IMAGE_FACT_COLUMNS[-1]] += "a" * (padding // 2)
+                    row[SPOT_IMAGE_FACT_COLUMNS[-2]] += "a" * (padding - padding // 2)
+                    record = render()
+                    self.assertEqual(len(record), 1024 * 1024 + int(over_limit))
+                    header = io.StringIO(newline="")
+                    csv.writer(header).writerow(SPOT_IMAGE_FACT_COLUMNS)
+                    original = header.getvalue().encode("utf-8") + record
+                    writer.fact_path.write_bytes(original)
+                    restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+                    self.assertEqual(restarted.try_manifest_stats()[2], not over_limit)
+                    if not over_limit:
+                        self.assertEqual(restarted.fact_row_count, 1)
+                        self.assertEqual(restarted.fact_sha256, hashlib.sha256(original).hexdigest())
+                    self.assertEqual(writer.fact_path.read_bytes(), original)
+
+    def test_image_digest_budget_failure_after_append_keeps_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+
+            @contextmanager
+            def reserve(size, reason):
+                if reason == "fact_digest_byte_limit":
+                    raise PayloadBudgetExceeded(reason)
+                yield
+
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0,
+                                           payload_reservation=reserve)
+            args = dict(image_bytes=b"\xff\xd8committed-before-digest\xff\xd9", captured_at=1782910800.0,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            expected = writer.write_capture(**args)
+            original = writer.fact_path.read_bytes()
+            self.assertFalse(writer.try_manifest_stats()[2])
+            self.assertEqual(writer.write_capture(**args), expected)
+            self.assertEqual(writer.fact_path.read_bytes(), original)
+            self.assertEqual(writer.fact_row_count, 1)
+            self.assertEqual(writer.written_count, 1)
+            self.assertFalse(writer.try_manifest_stats()[2])
+            with self.assertRaisesRegex(RuntimeError, "runtime manifest state is unavailable"):
+                _ = writer.fact_sha256
+
     def test_image_history_lookup_has_bounded_memory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
