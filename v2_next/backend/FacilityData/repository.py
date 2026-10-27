@@ -724,7 +724,8 @@ class CSVLoggerService:
             with self._runtime_lock:
                 self._drop_count += 1
                 self._last_drop_at = now
-            return {**result, "status": "REJECTED_LIMIT", "reason": blocked_reason}
+            status = "REJECTED_UNAVAILABLE" if blocked_reason == "trace_manual_recovery" else "REJECTED_LIMIT"
+            return {**result, "status": status, "reason": blocked_reason}
         reserved_bytes = 0
         payload = None
         envelope = None

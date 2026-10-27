@@ -1625,6 +1625,45 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(boundaries[0]["after_producer_seq"], first["producer_seq"] - 1)
             self.assertEqual(boundaries[1]["final_producer_seq"], last["producer_seq"])
 
+    def test_csv_reports_trace_manual_recovery_as_unavailable(self) -> None:
+        original_replace = Path.replace
+        damaged = threading.Event()
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True)
+
+            def damage_pending(source, target):
+                if (str(target).endswith(".trace.jsonl") and not damaged.is_set()
+                        and b'"kind":"csv_row_data"' in source.read_bytes()):
+                    source.write_bytes(b"uncertain trace bytes\n")
+                    damaged.set()
+                    raise OSError("injected interrupted trace publication")
+                return original_replace(source, target)
+
+            with patch.object(Path, "replace", damage_pending):
+                service.start()
+                try:
+                    self.assertEqual(service.enqueue_detailed(
+                        self.create_data("2026-03-09T07:20:25.000", 30.0))["status"], "ACCEPTED")
+                    self.assertTrue(damaged.wait(5))
+                    for _ in range(300):
+                        trace = service.get_runtime_state()["persistence_trace"]
+                        if trace["manual_recovery_required"]:
+                            break
+                        time.sleep(.01)
+                    self.assertTrue(trace["manual_recovery_required"])
+                    files = {path: path.read_bytes() for path in tmp_dir.rglob("*.pending")}
+                    self.assertTrue(files)
+                    result = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                    self.assertEqual(result["status"], "REJECTED_UNAVAILABLE",
+                                     "uncertain trace was misclassified as capacity pressure")
+                    self.assertEqual(result["reason"], "trace_manual_recovery")
+                    self.assertEqual(service.get_runtime_state()["pending_event_count"], 1)
+                finally:
+                    closed = service.stop(timeout_sec=5)
+            self.assertFalse(closed)
+            self.assertEqual({path: path.read_bytes() for path in files}, files)
+            self.assertEqual(sum(len(self.read_rows(path)) - 1 for path in self.list_v1_files(tmp_dir)), 1)
+
     def test_csv_evidence_retry_preserves_written_rows(self) -> None:
         for v2 in (False, True):
             with self.subTest(v2=v2), self.create_temp_dir() as tmp_dir:
