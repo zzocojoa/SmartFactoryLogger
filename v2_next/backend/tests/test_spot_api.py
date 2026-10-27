@@ -45,7 +45,7 @@ from backend.FacilityData.spot_image_fact import (
     SpotImageCaptureWriter,
     _under_range_cause_candidate,
 )
-from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
+from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter, build_spot_observation_fact
 from backend.FacilityData.persistence_pressure import StoragePressureMonitor, StoragePressureSample
 
 FocusUrlopenTarget = str | UrlRequest
@@ -4866,6 +4866,77 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(diagnostics["request_budget_within_target"])
 
+    async def test_mid_sweep_pressure_preserves_dispatched_result_and_fact_status(self) -> None:
+        spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
+        for timeout in (False, True):
+            with self.subTest(timeout=timeout), tempfile.TemporaryDirectory() as temp_dir:
+                self.reset_spot_state()
+                spot_api._spot_service_instance_id = str(uuid4())
+                spot_api.config.LOG_PATH = Path(temp_dir)
+                blocked = threading.Event()
+                monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+                    'temperature_fact', 1, 'fixture', True,
+                    'blocked' if blocked.is_set() else 'available')])
+
+                class InflightTransport(FakeSpotHttpTransport):
+                    async def request(self, request: spot_api.SpotHttpRequest) -> spot_api.SpotHttpResponse:
+                        response = self.request_sync(request)
+                        blocked.set()
+                        deadline = time.monotonic() + 2
+                        while monitor.snapshot().state != 'PERSISTENCE_BLOCKED' and time.monotonic() < deadline:
+                            await asyncio.sleep(.01)
+                        if timeout:
+                            raise httpx.ReadTimeout('fixture in-flight timeout')
+                        return response
+
+                transport = InflightTransport()
+                try:
+                    self.assertTrue(monitor.start())
+                    deadline = time.monotonic() + 2
+                    while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                        await asyncio.sleep(.01)
+                    self.assertEqual(monitor.snapshot().state, 'NORMAL')
+                    with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                            patch.object(spot_api, '_spot_http_transport', transport):
+                        async with httpx.AsyncClient() as client:
+                            await spot_api._refresh_spot_diagnostics(client)
+                        self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                        self.assertEqual(len(transport.requests), 1)
+                        snapshot = spot_api._spot_diagnostics_snapshot
+                        self.assertEqual(snapshot['diagnostics_capture_status'],
+                                         'error' if timeout else 'async_partial')
+                        expected = {name: 'not_requested' for name in spot_api._SPOT_DIAGNOSTIC_OUTPUT_PARAMS}
+                        expected['alarmstatus'] = 'timeout' if timeout else 'success'
+                        expected['signalpc'] = 'storage_pressure'
+                        self.assertEqual(snapshot['diagnostics_field_status'], expected)
+                        self.assertEqual(snapshot['diagnostics_raw_values'], {} if timeout else {'alarmstatus': '7'})
+                        self.assertEqual(snapshot.get('alarmstatus'), None if timeout else '7')
+                        self.assertEqual(bool(spot_api._spot_diagnostics_last_error_code), timeout)
+                        fact = build_spot_observation_fact(snapshot)
+                        self.assertEqual(json.loads(fact['diagnostics_field_status_json']), expected)
+                        diagnostics = spot_api.get_spot_diagnostics()
+                        self.assertEqual(diagnostics['diagnostics_http_dispatch_count'], 1)
+                        self.assertEqual(diagnostics['diagnostics_storage_suppressed_request_count'], 1)
+                        journal = diagnostics['diagnostic_request_journal']
+                        self.assertEqual(journal['state_counts']['queued'], 2)
+                        self.assertEqual(journal['state_counts']['running'], 1)
+                        self.assertEqual(journal['state_counts']['suppressed'], 1)
+                        self.assertEqual(journal['failure_count_total'], int(timeout))
+                        self.assertEqual(journal['active_request_count'], 0)
+                    self.assertTrue(spot_api._close_spot_diagnostic_request_journal(timeout_sec=2))
+                    recovered = SpotDiagnosticRequestJournal(Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME)
+                    try:
+                        restored = recovered.snapshot()
+                        self.assertEqual(restored['pre_dispatch_suppressed_count'], 1)
+                        self.assertEqual(restored['failure_count_total'], int(timeout))
+                        self.assertEqual(restored['active_request_count'], 0)
+                        self.assertEqual(restored['recovery_invalid_line_count'], 0)
+                    finally:
+                        recovered.close()
+                finally:
+                    monitor.stop()
+                    spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
+
     async def test_storage_blocked_poll_skips_diagnostic_task_and_resumes(self) -> None:
         spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
         blocked = threading.Event()
@@ -6861,6 +6932,79 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SpotDiagnosticRequestJournalTests(unittest.TestCase):
+    def test_suppression_cannot_relabel_running_or_exceptional_requests(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            journal = SpotDiagnosticRequestJournal(Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME)
+            service_id = str(uuid4())
+            try:
+                running = journal.queue_request(
+                    snapshot_correlation_id=f'{service_id}:diag:1',
+                    poll_correlation_id=f'{service_id}:poll:1',
+                    diagnostic_field='alarmstatus', api_route='/output')
+                journal.mark_running(running)
+                journal.mark_completed(running, outcome='storage_pressure')
+                self.assertEqual(journal.snapshot()['active_request_count'], 1)
+                self.assertEqual(journal.snapshot()['pre_dispatch_suppressed_count'], 0)
+                self.assertEqual(journal.snapshot()['invalid_transition_count'], 1)
+                journal.mark_timed_out(running, exception=httpx.ReadTimeout('fixture'), timeout_phase='response')
+                queued = journal.queue_request(
+                    snapshot_correlation_id=f'{service_id}:diag:2',
+                    poll_correlation_id=f'{service_id}:poll:2',
+                    diagnostic_field='signalpc', api_route='/output')
+                journal.mark_completed(queued, outcome='storage_pressure', exception=RuntimeError('fixture'))
+                self.assertEqual(journal.snapshot()['active_request_count'], 1)
+                self.assertEqual(journal.snapshot()['invalid_transition_count'], 2)
+                journal.mark_completed(queued, outcome='storage_pressure')
+                snapshot = journal.snapshot()
+                self.assertEqual(snapshot['active_request_count'], 0)
+                self.assertEqual(snapshot['pre_dispatch_suppressed_count'], 1)
+                self.assertEqual(snapshot['failure_count_total'], 1)
+            finally:
+                journal.close()
+
+    def test_recovery_accepts_legacy_events_but_rejects_legacy_suppression(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
+            journal = SpotDiagnosticRequestJournal(path)
+            service_id = str(uuid4())
+            context = journal.queue_request(
+                snapshot_correlation_id=f'{service_id}:diag:1', poll_correlation_id=f'{service_id}:poll:1',
+                diagnostic_field='alarmstatus', api_route='/output')
+            journal.mark_running(context)
+            journal.mark_completed(context, outcome='success')
+            self.assertTrue(journal.close())
+            records = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+            for record in records:
+                record['schema_version'] = 'spot-diagnostic-request-journal-v1'
+            legacy = ''.join(json.dumps(record) + '\n' for record in records)
+            path.write_text(legacy, encoding='utf-8')
+            journal = SpotDiagnosticRequestJournal(path)
+            try:
+                self.assertEqual(journal.snapshot()['outcome_counts']['success'], 1)
+                queued = journal.queue_request(
+                    snapshot_correlation_id=f'{service_id}:diag:2', poll_correlation_id=f'{service_id}:poll:2',
+                    diagnostic_field='signalpc', api_route='/output')
+                journal.mark_completed(queued, outcome='storage_pressure')
+                invalid = dict(journal.snapshot()['recent_events'][-1])
+                invalid['schema_version'] = 'spot-diagnostic-request-journal-v1'
+                invalid['request_id'] = 'diagnostic:' + uuid4().hex
+            finally:
+                self.assertTrue(journal.close())
+            with path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps(invalid) + '\n')
+            original = path.read_bytes()
+            recovered = SpotDiagnosticRequestJournal(path)
+            try:
+                restored = recovered.snapshot()
+                self.assertEqual(restored['outcome_counts']['success'], 1)
+                self.assertEqual(restored['pre_dispatch_suppressed_count'], 1)
+                self.assertEqual(restored['failure_count_total'], 0)
+                self.assertEqual(restored['active_request_count'], 0)
+                self.assertEqual(restored['recovery_invalid_line_count'], 1)
+                self.assertEqual(path.read_bytes(), original)
+            finally:
+                recovered.close()
+
     def test_storage_suppression_is_a_queued_terminal_and_survives_journal_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
