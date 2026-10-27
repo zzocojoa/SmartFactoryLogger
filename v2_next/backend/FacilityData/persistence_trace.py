@@ -5,6 +5,7 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import stat
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -186,6 +187,7 @@ class PersistenceTraceWriter:
         self._probe_retry_delay_seconds = 1.0
         self._last_probe_success_monotonic: float | None = None
         self._last_probe_error: str | None = None
+        self._latest_publication: tuple[Path, tuple[int, int, int, int]] | None = None
         self._processing_bytes = 0
         self._blocked_workspace_bytes = 0
         self._last_error: str | None = None
@@ -279,15 +281,43 @@ class PersistenceTraceWriter:
                     offset += count
             return handle.readinto(view[:1]) == 0
 
-    def _publish(self, segment: _TraceSegment) -> None:
+    @staticmethod
+    def _file_identity(path: Path) -> tuple[int, int, int, int]:
+        try:
+            info = path.lstat()
+        except FileNotFoundError as exc:
+            raise _TraceContentUncertain("trace_publication_missing") from exc
+        if not stat.S_ISREG(info.st_mode) or not info.st_ino:
+            raise _TraceContentUncertain("trace_publication_identity_unavailable")
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+    def _verified_publication(self, path: Path, segment: _TraceSegment) -> tuple[Path, tuple[int, int, int, int]]:
+        before = self._file_identity(path)
+        if not self._matches(path, segment) or self._file_identity(path) != before:
+            raise _TraceContentUncertain("trace_published_content_mismatch")
+        return path, before
+
+    def _check_latest_publication(self) -> None:
+        if self._latest_publication is None:
+            return
+        path, expected = self._latest_publication
+        if self._file_identity(path) != expected:
+            raise _TraceContentUncertain("trace_publication_changed")
+        with path.open("rb", buffering=0) as handle:
+            info = os.fstat(handle.fileno())
+            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != expected:
+                raise _TraceContentUncertain("trace_publication_handle_changed")
+        if self._file_identity(path) != expected:
+            raise _TraceContentUncertain("trace_publication_changed_after_access")
+
+    def _publish(self, segment: _TraceSegment) -> tuple[Path, tuple[int, int, int, int]]:
         self.root.mkdir(parents=True, exist_ok=True)
         stem = f"{self._instance_id}-{segment.sequence:08d}"
         final = self.root / f"{stem}.trace.jsonl"
         pending = self.root / f".{stem}.pending"
         if final.exists():
-            if not self._matches(final, segment):
-                raise _TraceContentUncertain("trace_final_content_conflict")
-            return  # Publication succeeded before an earlier error was observed.
+            # Publication may have succeeded before an earlier error was observed.
+            return self._verified_publication(final, segment)
         if pending.exists():
             if not self._matches(pending, segment):
                 raise _TraceContentUncertain("trace_pending_content_uncertain")
@@ -303,8 +333,7 @@ class PersistenceTraceWriter:
             if not self._matches(pending, segment):
                 raise _TraceContentUncertain("trace_pending_content_uncertain")
         pending.replace(final)
-        if not self._matches(final, segment):
-            raise _TraceContentUncertain("trace_published_content_mismatch")
+        return self._verified_publication(final, segment)
 
     def probe_storage(self) -> None:
         """Owner-only idle destination check; pending publications take priority."""
@@ -316,7 +345,11 @@ class PersistenceTraceWriter:
                 self._processing_bytes = TRACE_PROBE_WORKSPACE_BYTES
             error: OSError | RuntimeError | None = None
             try:
+                # Check the existing file before a directory probe can recreate
+                # a deleted parent. Directory success cannot repair old evidence.
+                self._check_latest_publication()
                 _probe_storage_directory(self.root)
+                self._check_latest_publication()
             except (OSError, RuntimeError) as exc:
                 error = exc
             finally:
@@ -334,11 +367,13 @@ class PersistenceTraceWriter:
                                                        if self._probe_failed else 1.0)
                     self._probe_failed = True
                     # Uncertain cleanup must not accumulate more probe files.
-                    if isinstance(error, RuntimeError):
+                    if isinstance(error, (RuntimeError, _TraceContentUncertain)):
                         self._manual_recovery_required = True
                         self._incomplete = True
                         self._last_error = "trace_probe_manual_recovery"
                 else:
+                    if self._latest_publication is not None:
+                        self._availability_scope = "directory_and_latest_publication_access"
                     self._probe_failed = False
                     self._probe_retry_delay_seconds = 1.0
                     self._last_probe_success_monotonic = checked
@@ -364,7 +399,7 @@ class PersistenceTraceWriter:
                 segment.flush_due_monotonic = min(segment.flush_due_monotonic, now)
                 self._processing_bytes = TRACE_READBACK_BYTES
             try:
-                self._publish(segment)
+                publication = self._publish(segment)
             except OSError as exc:
                 with self._lock:
                     self._failure_count += 1
@@ -387,6 +422,7 @@ class PersistenceTraceWriter:
                 with self._lock:
                     self._processing_bytes = 0
             with self._lock:
+                self._latest_publication = publication
                 self._current_storage_availability = "available"
                 self._availability_scope = "last_trace_publication"
                 self._availability_checked_monotonic = self.clock()

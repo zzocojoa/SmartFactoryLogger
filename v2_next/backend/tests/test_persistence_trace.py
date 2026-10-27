@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -12,6 +13,41 @@ from backend.FacilityData.freshness import clock_domain_id
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_trace_probe_preserves_changed_publication(self):
+        for change in ("replace", "delete", "edit"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as folder:
+                clock = [100.0]
+                root = Path(folder)
+                writer = PersistenceTraceWriter(root, "owned-publication", clock=lambda: clock[0])
+                writer.append({"kind": "first"})
+                self.assertTrue(writer.flush(force=True))
+                final, = root.glob("*.trace.jsonl")
+                original = final.read_bytes()
+                if change == "replace":
+                    final.rename(root / "original-retained")
+                    final.write_bytes(original)
+                elif change == "delete":
+                    final.unlink()
+                else:
+                    info = final.stat()
+                    final.write_bytes(b"x" * len(original))
+                    os.utime(final, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+                after_change = {path.name: path.read_bytes() for path in root.iterdir()}
+                clock[0] = 101.0
+                writer.probe_storage()
+                state = writer.snapshot()
+                self.assertTrue(state["manual_recovery_required"],
+                                "directory success concealed a changed trace publication")
+                self.assertEqual(state["current_storage_availability"], "blocked")
+                self.assertTrue(state["incomplete"])
+                self.assertIsNone(state["next_probe_monotonic"])
+                self.assertIsNone(writer.append({"kind": "later"}))
+                self.assertFalse(writer.flush(force=True))
+                clock[0] = 1000.0
+                writer.probe_storage()
+                self.assertEqual(state["probe_failure_count"], writer.snapshot()["probe_failure_count"])
+                self.assertEqual({path.name: path.read_bytes() for path in root.iterdir()}, after_change)
+
     def test_trace_retry_cap_and_reset_preserve_pending_bytes(self):
         clock, calls = [100.0], []
         with tempfile.TemporaryDirectory() as folder:
