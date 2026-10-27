@@ -1201,6 +1201,18 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(state["pending_payload_bytes"], 0)
             records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
                        for line in path.read_text(encoding="utf-8").splitlines()]
+            failed_outputs = [record for record in records if record.get("kind") == "csv_processing_failure"]
+            self.assertEqual(len(failed_outputs), 2, "failed CSV outputs have no durable per-ID evidence")
+            self.assertEqual({record["sink_id"] for record in failed_outputs}, {"csv_v1", "csv_v2"})
+            for record in failed_outputs:
+                self.assertEqual(record["producer_instance_id"], first["producer_instance_id"])
+                self.assertEqual(record["producer_seq"], first["producer_seq"])
+                self.assertEqual(record["source_payload_hash"], first["source_payload_hash"])
+                self.assertEqual(record["config_generation"], first["config_generation"])
+                self.assertEqual(record["required_sinks"], list(first["required_sinks"]))
+                self.assertEqual(record["reason"], "csv_output_byte_limit")
+                self.assertEqual(record["status"], "FAILED")
+                self.assertEqual(record["admitted_log_dir"], str(tmp_dir))
             summary = next(record for record in records if record.get("kind") == "admission_summary")
             saved_outcomes = summary.get("required_sink_outcomes")
             self.assertIsNotNone(saved_outcomes, "terminal trace omitted required-sink outcomes")
@@ -1218,6 +1230,65 @@ class CSVLoggerServiceTests(unittest.TestCase):
             for path in files:
                 rows = self.read_rows(path)
                 self.assertEqual([float(row[rows[0].index("MainPress")]) for row in rows[1:]], [31.0])
+
+    def test_csv_failure_evidence_survives_publish_error(self) -> None:
+        # Regression guards for retained failure evidence: recoverable and persistent I/O failure.
+        for recover in (False, True):
+            with self.subTest(recover=recover), self.create_temp_dir() as tmp_dir:
+                service = self.create_service(tmp_dir, True, csv_v2_enabled=True)
+                blocked, release = threading.Event(), threading.Event()
+                original_replace = Path.replace
+
+                def failed_publish(path, target):
+                    if str(target).endswith(".trace.jsonl") and not release.is_set():
+                        blocked.set()
+                        raise OSError("failure receipt publish unavailable")
+                    return original_replace(path, target)
+
+                data = self.create_data("2026-03-09T07:20:25.000", 30.0)
+                data.Die_ID = "D" * (5 * 1024**2)
+                with self.assertLogs(service.logger, level="ERROR"), patch.object(Path, "replace", failed_publish):
+                    service.start()
+                    try:
+                        receipt = service.enqueue_detailed(data)
+                        self.assertEqual(receipt["status"], "ACCEPTED")
+                        self.assertTrue(blocked.wait(10), "failure evidence publish was not attempted")
+                        state = service.get_runtime_state()
+                        self.assertEqual(state["csv_processing_failure_evidence_pending_count"], 2)
+                        self.assertEqual(state["pending_event_count"], 1)
+                        self.assertGreater(state["pending_payload_bytes"], 0)
+                        self.assertEqual(state["csv_persistence_outcomes"]["failed_event_count"], 0)
+                        if recover:
+                            release.set()
+                            deadline = time.monotonic() + 10
+                            while time.monotonic() < deadline and service.get_runtime_state()["pending_event_count"]:
+                                time.sleep(0.02)
+                            self.assertEqual(service.get_runtime_state()["pending_event_count"], 0)
+                        self.assertFalse(service.stop(timeout_sec=10))
+                        if not recover:
+                            with self.assertRaises(RuntimeError):
+                                service.start()
+                    finally:
+                        release.set()
+                        service.stop(timeout_sec=10)
+                records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                           for line in path.read_text(encoding="utf-8").splitlines()]
+                failures = [record for record in records if record.get("kind") == "csv_processing_failure"]
+                state = service.get_runtime_state()
+                self.assertGreaterEqual(state["persistence_trace"]["failure_count"], 1)
+                if recover:
+                    self.assertEqual(len(failures), 2)
+                    self.assertEqual({record["sink_id"] for record in failures}, {"csv_v1", "csv_v2"})
+                    self.assertEqual({record["producer_seq"] for record in failures}, {receipt["producer_seq"]})
+                    self.assertEqual({record["source_payload_hash"] for record in failures}, {receipt["source_payload_hash"]})
+                    self.assertEqual(state["csv_processing_failure_evidence_pending_count"], 0)
+                    self.assertEqual(state["pending_payload_bytes"], 0)
+                    self.assertEqual(state["csv_persistence_outcomes"]["failed_event_count"], 1)
+                else:
+                    self.assertEqual(failures, [])
+                    self.assertFalse(any(record.get("kind") == "admission_summary" for record in records))
+                    self.assertEqual(state["csv_processing_failure_evidence_pending_count"], 2)
+                    self.assertEqual(state["pending_event_count"], 1)
 
     def test_csv_ema_workspace_reuses_serialization_reservation(self) -> None:
         started, release = threading.Event(), threading.Event()

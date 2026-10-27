@@ -475,6 +475,8 @@ class CSVLoggerService:
         self._last_processing_failure_seq: Optional[int] = None
         self._last_processing_failure_reason: Optional[str] = None
         self._failed_pending_sequences: set[int] = set()
+        # At most one receipt per required sink of each retained admitted event.
+        self._pending_csv_failure_evidence: dict[tuple[int, str], tuple[str, Optional[int]]] = {}
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
@@ -880,6 +882,8 @@ class CSVLoggerService:
             pending = self._pending_events[envelope.producer_seq][1]
             failed_sinks = set(pending) if sink is None else pending.intersection((sink,))
             self._sink_failed_counts.update(failed_sinks)
+            for failed_sink in failed_sinks:
+                self._pending_csv_failure_evidence[(envelope.producer_seq, failed_sink)] = (reason, None)
             if sink is None:
                 pending.clear()
             else:
@@ -917,9 +921,10 @@ class CSVLoggerService:
                 else:
                     del self._pending_decoded_payloads[sequence]
             bound_sequences = {binding[1] for binding in self._pending_row_events.values()}
+            failure_evidence_sequences = {key[0] for key in self._pending_csv_failure_evidence}
             for completed in tuple(self._completed_event_sequences):
-                if completed in bound_sequences:
-                    continue  # A failed flush can still retain its caller's rows.
+                if completed in bound_sequences or completed in failure_evidence_sequences:
+                    continue  # Retain ownership until row references and failure evidence settle.
                 pending = self._pending_events.pop(completed)
                 if completed in self._failed_pending_sequences:
                     self._terminal_failed_event_count += 1
@@ -3586,6 +3591,42 @@ class CSVLoggerService:
             self._admission_ledger.acknowledge_committed(committed)
         return flushed
 
+    def _drain_csv_processing_failures(self, *, force: bool = False) -> bool:
+        with self._runtime_lock:
+            keys = tuple(self._pending_csv_failure_evidence)[:TRACE_SEGMENT_RECORD_LIMIT]
+        if not keys:
+            return True
+        trace = self._persistence_trace
+        if trace is None:
+            return False
+        for sequence, sink in keys:
+            with self._runtime_lock:
+                reason, token = self._pending_csv_failure_evidence[(sequence, sink)]
+                envelope = self._pending_events[sequence][0]
+            if token is not None:
+                continue
+            settings = envelope.write_config
+            token = trace.append({
+                "kind": "csv_processing_failure", "contract_version": "CSV_PROCESSING_FAILURE_V1",
+                "producer_instance_id": envelope.producer_instance_id, "producer_seq": sequence,
+                "source_payload_hash": envelope.source_payload_hash, "config_generation": settings.generation,
+                "required_sinks": settings.required_sinks, "sink_id": sink,
+                "admitted_log_dir": str(settings.log_dir), "status": "FAILED", "reason": reason,
+            })
+            if token is None:
+                break  # Keep the same identity and reason when the segment budget is full.
+            with self._runtime_lock:
+                self._pending_csv_failure_evidence[(sequence, sink)] = (reason, token)
+        # Only the worker performs I/O, outside the producer's runtime lock.
+        flushed = trace.flush(force=force)
+        committed = trace.snapshot()["committed_segment_seq"]
+        with self._runtime_lock:
+            for key, (_, token) in tuple(self._pending_csv_failure_evidence.items()):
+                if token is not None and token <= committed:
+                    del self._pending_csv_failure_evidence[key]
+        self._finish_csv_decode(None)
+        return flushed
+
     def _finish_persistence_trace(self) -> bool:
         if self._persistence_trace is None:
             self._begin_persistence_trace(self._write_settings())
@@ -3595,11 +3636,14 @@ class CSVLoggerService:
         self._record_persistence_trace_stop()
         while True:
             previous_commit = trace.snapshot()["committed_segment_seq"]
+            if not self._drain_csv_processing_failures(force=True):
+                break
             if not self._drain_admission_rejections(force=True):
                 break
             state = trace.snapshot()
             with self._runtime_lock:
                 pending = self._admission_ledger.snapshot()["pending_rejection_count"]
+                pending += len(self._pending_csv_failure_evidence)
             if not state["pending_records"] and not pending:
                 break
             if state["committed_segment_seq"] == previous_commit:
@@ -3609,7 +3653,8 @@ class CSVLoggerService:
             admission = self._admission_ledger.snapshot()
             sink_outcomes = self._csv_persistence_outcomes_locked()
             sink_outcomes["coverage"] = "TERMINAL_REQUIRED_SINK_COUNTS"
-        if state["pending_records"] or admission["pending_rejection_count"]:
+            failure_evidence_pending = bool(self._pending_csv_failure_evidence)
+        if state["pending_records"] or admission["pending_rejection_count"] or failure_evidence_pending:
             return False  # A terminal summary must not precede its retained ranges.
         summary = dict(admission, kind="admission_summary", contract_version="CSV_ADMISSION_SUMMARY_V1",
                        after_producer_seq=self._trace_start_seq, coverage="PRODUCER_ADMISSION_COUNTS_ONLY",
@@ -3668,6 +3713,7 @@ class CSVLoggerService:
             pending_source_payload_bytes = self._pending_source_payload_bytes
             pending_processing_payload_bytes = self._pending_processing_payload_bytes
             processing_failure_count = self._processing_failure_count
+            processing_failure_evidence_pending_count = len(self._pending_csv_failure_evidence)
             last_processing_failure_seq = self._last_processing_failure_seq
             last_processing_failure_reason = self._last_processing_failure_reason
             csv_write_failure_count = self._csv_write_failure_count
@@ -3705,6 +3751,7 @@ class CSVLoggerService:
             "pending_event_count": pending_event_count,
             "admission_summary": admission_summary,
             "csv_persistence_outcomes": persistence_outcomes,
+            "csv_processing_failure_evidence_pending_count": processing_failure_evidence_pending_count,
             "pending_source_payload_bytes": pending_source_payload_bytes,
             "pending_processing_payload_bytes": pending_processing_payload_bytes,
             "pending_payload_bytes": pending_source_payload_bytes + pending_processing_payload_bytes,
@@ -3760,6 +3807,7 @@ class CSVLoggerService:
             row = None
             v2_row = None
             try:
+                self._drain_csv_processing_failures()
                 self._drain_admission_rejections()
                 item: Optional[FactoryData] = None
                 envelope: Optional[CSVEventEnvelope] = None
