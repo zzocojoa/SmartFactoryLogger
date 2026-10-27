@@ -320,7 +320,15 @@ class SpotImageCaptureWriter:
                     self._mark_fact_append_uncertain()
                 raise
             try:
-                self._fact_identity = self._fact_identity_snapshot()
+                closed_identity = self._fact_identity_snapshot()
+                if (
+                    closed_identity is None
+                    or closed_identity[:2] != opened_identity[:2]
+                    or closed_identity[2] != expected_size
+                ):
+                    self._mark_fact_append_uncertain()
+                    raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
+                self._fact_identity = closed_identity
                 self._fact_identity_known = True
             except OSError:
                 self._fact_identity_known = False
