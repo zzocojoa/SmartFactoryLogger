@@ -107,6 +107,10 @@ class SpotObservationQueue:
             "spool_next_recovery_monotonic": None, "spool_recovery_failure_count": 0,
             "spool_recovered_count": 0, "spool_recovery_error_type": None,
             "spool_manual_recovery": False,
+            "initialization_next_retry_monotonic": None,
+            "initialization_retry_delay_sec": 1.0,
+            "initialization_failure_count": 0,
+            "initialization_manual_recovery": False,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
         self._thread.start()
@@ -387,18 +391,51 @@ class SpotObservationQueue:
                     self._state["last_success_at"] = time.time()
             self._state["spool_next_recovery_monotonic"] = self._spool_recovery_at
 
+    def _initialize_writer(self, writer: SpotObservationFactWriter) -> bool:
+        if not writer.initialization_retryable:
+            return writer.ensure_initialized()
+        # Only confirmed, closed read failures are retried here. Creation,
+        # header writes and spool mutations retain their separate failure path.
+        delay = 1.0
+        try:
+            while writer.initialization_retryable and not self._stop.is_set():
+                due = time.monotonic() + delay
+                with self._lock:
+                    self._state["initialization_state"] = "failed"
+                    self._state["accepting"] = False
+                    self._state["initialization_failure_count"] += 1
+                    self._state["write_failure_count"] = self._worker_failure_count + writer.failure_count
+                    self._state["last_error_code"] = "initialization_failed"
+                    self._state["required_file_availability"] = "blocked"
+                    self._state["initialization_next_retry_monotonic"] = due
+                    self._state["initialization_retry_delay_sec"] = delay
+                while time.monotonic() < due:
+                    if self._stop.wait(min(.05, max(0.0, due - time.monotonic()))):
+                        return False
+                if self._stop.is_set():
+                    return False
+                if writer.ensure_initialized():
+                    return True
+                delay = min(30.0, 2 * delay)
+            return False
+        finally:
+            with self._lock:
+                self._state["initialization_next_retry_monotonic"] = None
+                self._state["initialization_manual_recovery"] = writer.initialization_manual_recovery
+
     def _run(self) -> None:
         started = time.monotonic()
         try:
             writer = self._factory()
             self._writer = writer
             writer.payload_reservation = self._reserve_writer_payload
-            if not writer.ensure_initialized():
+            if not self._initialize_writer(writer):
                 raise RuntimeError("fact_header_initialization_failed")
             writer._flush_spool()
             self._refresh_state(writer)
             with self._lock:
                 self._state["initialization_state"] = "ready"
+                self._state["accepting"] = not self._stop.is_set()
                 self._state["initialization_duration_ms"] = (time.monotonic()-started)*1000
             self._probe_required_file_access(writer)
             if self._state["required_file_manual_recovery"]:
@@ -407,7 +444,11 @@ class SpotObservationQueue:
             with self._lock:
                 self._state["initialization_state"] = "failed"
                 self._state["accepting"] = False
-                self._state["write_failure_count"] += 1
+                self._worker_failure_count += 1
+                self._state["write_failure_count"] = self._worker_failure_count + (
+                    self._writer.failure_count if self._writer is not None else 0)
+                self._state["initialization_manual_recovery"] = bool(
+                    self._writer is not None and self._writer.initialization_manual_recovery)
                 self._state["last_error_code"] = "initialization_failed"
             return  # Accepted-but-unwritten items remain visible; never claim clean.
         while not self._stop.is_set() or not self._queue.empty():

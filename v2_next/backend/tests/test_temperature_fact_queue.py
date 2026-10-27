@@ -334,6 +334,126 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_owner_recovers_initial_read_without_new_arrivals(self):
+        original_open = Path.open
+        clock, fail = [100.0], [True]
+        entered, release = threading.Event(), threading.Event()
+        attempts = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            self.assertIsNotNone(SpotObservationFactWriter(path).write_fact(observation(1)))
+            before = path.read_bytes()
+
+            def read_failure(target, mode="r", *args, **kwargs):
+                if target == path and mode == "rb":
+                    attempts.append(clock[0])
+                    if fail[0]:
+                        raise PermissionError("synthetic unavailable initial history")
+                return original_open(target, mode, *args, **kwargs)
+
+            def create_writer():
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError("fixture did not release constructor")
+                return SpotObservationFactWriter(path)
+
+            def wait_state(owner, key, expected):
+                deadline = time.perf_counter() + 3
+                while time.perf_counter() < deadline:
+                    state = owner.snapshot()
+                    if state.get(key) == expected:
+                        return state
+                    time.sleep(.01)
+                self.fail(f"{key} never reached {expected}: {owner.snapshot()}")
+
+            with patch.object(Path, "open", read_failure), patch(
+                    "backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(create_writer)
+                owner_thread = owner._thread
+                try:
+                    self.assertTrue(entered.wait(2))
+                    self.assertTrue(owner.enqueue(observation(2)))
+                    release.set()
+                    wait_state(owner, "initialization_state", "failed")
+                    self.assertTrue(owner.snapshot()["writer_alive"], "initial read retry must keep its single owner alive")
+                    wait_state(owner, "initialization_next_retry_monotonic", 101.0)
+                    clock[0] = 100.9
+                    time.sleep(.12)
+                    self.assertEqual(attempts, [100.0])
+                    clock[0] = 101.0
+                    wait_state(owner, "initialization_next_retry_monotonic", 103.0)
+                    self.assertEqual(attempts, [100.0, 101.0])
+                    fail[0], clock[0] = False, 103.0
+                    state = wait_state(owner, "completed_count", 1)
+                    self.assertEqual(state["initialization_state"], "ready")
+                    self.assertTrue(state["accepting"])
+                    self.assertGreater(state["write_failure_count"], 0)
+                    self.assertIsNone(state["initialization_next_retry_monotonic"])
+                    self.assertIs(owner._thread, owner_thread)
+                    self.assertFalse(state["writes_drained"])
+                finally:
+                    release.set()
+                    owner.close(3)
+            self.assertFalse(owner.snapshot()["writer_alive"])
+            self.assertTrue(path.read_bytes().startswith(before))
+            self.assertEqual([row["spot_observation_key"] for row in self.read_rows(path)],
+                             ["synthetic-A:1", "synthetic-A:2"])
+
+    def test_initial_read_retry_cap_and_close_preserve_pending_admission(self):
+        original_open = Path.open
+        clock, attempts = [100.0], []
+        entered, release = threading.Event(), threading.Event()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            self.assertTrue(SpotObservationFactWriter(path).ensure_initialized())
+            before = path.read_bytes()
+
+            def failed_open(target, mode="r", *args, **kwargs):
+                if target == path and mode == "rb":
+                    attempts.append(clock[0])
+                    raise PermissionError("synthetic persistent initial read failure")
+                return original_open(target, mode, *args, **kwargs)
+
+            def create_writer():
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError("fixture did not release constructor")
+                return SpotObservationFactWriter(path)
+
+            with patch.object(Path, "open", failed_open), patch(
+                    "backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(create_writer)
+                try:
+                    self.assertTrue(entered.wait(2))
+                    self.assertTrue(owner.enqueue(observation(1)))
+                    release.set()
+                    for delay in (1, 2, 4, 8, 16, 30, 30):
+                        expected = clock[0] + delay
+                        deadline = time.perf_counter() + 3
+                        while owner.snapshot()["initialization_next_retry_monotonic"] != expected:
+                            self.assertLess(time.perf_counter(), deadline, "retry schedule did not advance")
+                            time.sleep(.01)
+                        self.assertEqual(owner.snapshot()["initialization_retry_delay_sec"], delay)
+                        if delay == 30 and len(attempts) == 7:
+                            break
+                        clock[0] = expected
+                    self.assertFalse(owner.close(2))
+                    state = owner.snapshot()
+                    self.assertFalse(state["writer_alive"])
+                    self.assertIsNone(state["initialization_next_retry_monotonic"])
+                    self.assertEqual(state["pending_write_count"], 1)
+                    self.assertEqual(state["oldest_pending_monotonic"], 100.0)
+                    self.assertGreater(state["pending_payload_bytes"], 0)
+                    self.assertGreater(state["write_failure_count"], 0)
+                    stopped_attempts = list(attempts)
+                    clock[0] += 1000
+                    time.sleep(.08)
+                    self.assertEqual(attempts, stopped_attempts)
+                finally:
+                    release.set()
+                    owner.close(2)
+            self.assertEqual(path.read_bytes(), before)
+
     def test_spool_recovery_batches_run_before_queued_arrivals(self):
         original_open = Path.open
         clock, fail, pause = [100.0], [True], [False]
