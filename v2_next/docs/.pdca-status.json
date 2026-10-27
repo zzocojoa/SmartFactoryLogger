@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-27T15:13:43.014758+00:00",
+  "lastUpdated": "2026-10-27T15:53:33.222428+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
+      "currentDevelopmentCommit": "e2c29819863d08a38e527e1022be797715c538d5",
       "lastBackendVerification": {
-        "commit": "9f7e1dbf7628faa0d17ee9065e0c17f75e886cab",
-        "total": 1140,
-        "passed": 1139,
+        "commit": "e2c29819863d08a38e527e1022be797715c538d5",
+        "total": 1144,
+        "passed": 1143,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/required-file-state/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48316,11 +48316,12 @@
         "Pressure monitor expires stale NORMAL snapshots after two one-second controller intervals and requires spaced recovery after a delayed sample; no production integration yet",
         "Image gate rechecks BLOCKED after device lock; same-sensor cache/503 with profile retry seconds, distinct dispatch/suppressed-task counters, preserved already-dispatched acquisitions, CORS and strict frontend metadata parsing; pressure monitor is not started by production lifecycle yet",
         "Explicit pressure 200/503 responses use a separate positive recheck timer without consuming/resetting ordinary retry attempts; preserve capture metadata, bound pending/displayed object URLs, ignore stale callbacks and configuration responses, use real visibility/config/shutdown/drain cleanup, and avoid timer overflow. Tested with actual React effects and controlled network responses; runtime monitor activation remains incomplete.",
-        "Periodic diagnostics gate both task creation and actual dispatch on BLOCKED; preserve received values/real errors, explicitly mark current suppressed and remaining unrequested fields, keep distinct counters, and persist/recover v2 suppression separately from failures with legacy v1 reads and malformed-schema rejection. Production monitor remains unconnected."
+        "Periodic diagnostics gate both task creation and actual dispatch on BLOCKED; preserve received values/real errors, explicitly mark current suppressed and remaining unrequested fields, keep distinct counters, and persist/recover v2 suppression separately from failures with legacy v1 reads and malformed-schema rejection. Production monitor remains unconnected.",
+        "Image owner checks required fact access separately from directory success, retries locked files without new capture/UI, restores transient initialization digest/row reads only after revalidation, and latches replacement/deletion across failed reads; original bytes and failure history remain."
       ],
       "remainingScope": [
-        "Complete required-file and CSV/fact availability, fixed stage deadlines and per-generation pending contracts; preserve per-destination history across writer replacement",
-        "Initializer failure/restart ownership and bounded retry lifecycle remain unverified; directory probes are not complete file availability proof",
+        "Complete required-file availability for CSV/observation/trace/spool, fixed stage deadlines and per-generation pending contracts; preserve per-destination history across writer replacement",
+        "Constructor-aborting initializer failure/restart ownership and bounded retry lifecycle remain unverified; image file access probes do not prove whole historical integrity",
         "Wire required writer state providers and monitor lifecycle; implement PRESSURED cadence, NORMAL interval/temperature priority, full status/observation-reference contracts and runtime end-to-end integration",
         "Complete fact/JPEG reconciliation, recovery and aggregate workspace reservations; all 17 r4 scenarios",
         "Final whole-state health/build/installer verification and master integration"
@@ -48330,7 +48331,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/health-result.json"
       },
-      "updatedAt": "2026-10-27T15:13:43.014758+00:00",
+      "updatedAt": "2026-10-27T15:53:33.222428+00:00",
       "lastRelatedBackendVerification": {
         "commit": "2976c9a3d86e44ed57e661634775226b84a42b9c",
         "total": 190,
@@ -48396,6 +48397,12 @@
         "legacyJournalRead": true,
         "oldReaderRollbackVerified": false,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-diagnostics/verification.json"
+      },
+      "lastRequiredFileVerification": {
+        "commit": "e2c29819863d08a38e527e1022be797715c538d5",
+        "behaviorRedGreenSteps": 3,
+        "ownerRegressionTests": 1,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/required-file-state/verification.json"
       }
     }
   },
