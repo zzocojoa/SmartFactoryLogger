@@ -225,6 +225,26 @@ def _file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
+def _admitted_destination_issues(database: sqlite3.Connection, record: dict[str, Any]) -> set[str]:
+    sequence = record.get("producer_seq")
+    if type(sequence) is not int or sequence < 1:
+        return {"missing_csv_admission_contract"}
+    admissions = database.execute("SELECT body FROM csv_contracts WHERE sequence=? LIMIT 2",
+                                  (str(sequence),)).fetchall()
+    if not admissions:
+        return {"missing_csv_admission_contract"}
+    if len(admissions) != 1:
+        return {"ambiguous_csv_admission_contract"}
+    contract = json.loads(admissions[0][0])
+    destination, filename = contract.get("admitted_log_dir"), record.get("file_path")
+    if (not isinstance(destination, str) or not Path(destination).is_absolute()
+            or not isinstance(filename, str) or not Path(filename).is_absolute()):
+        return {"invalid_csv_destination_contract"}
+    # Compare the frozen configured directory, not the current settings or
+    # fallback directory. This lexical check never probes an untrusted path.
+    return set() if Path(filename).parent == Path(destination) else {"csv_destination_contract_mismatch"}
+
+
 class _CsvReadWindow(io.RawIOBase):
     """Feed the text/CSV parser a bounded region without owning the file."""
 
@@ -343,6 +363,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
     terminal_summary: dict[str, Any] | None = None
     byte_issues: set[str] = set()
     content_issues: set[str] = set()
+    destination_issues: set[str] = set()
     checked_rows = 0
     roots: list[tuple[Path, Path]] = []
     for root in data_roots:
@@ -408,11 +429,12 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             records += 1
             issues.update(_index_admission(database, record, header.get("producer_instance_id")))
             issues.update(_index_sink_record(database, record, header.get("producer_instance_id")))
-            if data_roots and record.get("kind") == "csv_row_data":
-                checked_rows += 1
-                row_byte_issues, row_content_issues = _csv_row_issues(record, roots)
-                byte_issues.update(row_byte_issues)
-                content_issues.update(row_content_issues)
+            if data_roots:
+                if record.get("kind") == "csv_admission" and type(record.get("producer_seq")) is int:
+                    database.execute("INSERT INTO csv_contracts VALUES (?, ?)",
+                                     (str(record["producer_seq"]), line.decode("utf-8")))
+                elif record.get("kind") == "csv_row_data":
+                    database.execute("INSERT INTO csv_rows VALUES (?)", (line.decode("utf-8"),))
             kind = record.get("kind")
             if isinstance(kind, str) and kind in boundaries:
                 field = "after_producer_seq" if kind == "producer_start" else "final_producer_seq"
@@ -427,6 +449,15 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                 issues.update(_admission_total_issues(record))
                 if all(type(record.get(key)) is int for key in ("after_producer_seq", "last_producer_seq")):
                     summary_bounds = record["after_producer_seq"], record["last_producer_seq"]
+    # A receipt's segment may precede its admission in the caller's file list.
+    # Keep bounded records on disk, then compare each row to its original contract.
+    for (body,) in database.execute("SELECT body FROM csv_rows"):
+        row = json.loads(body)
+        checked_rows += 1
+        destination_issues.update(_admitted_destination_issues(database, row))
+        row_byte_issues, row_content_issues = _csv_row_issues(row, roots)
+        byte_issues.update(row_byte_issues)
+        content_issues.update(row_content_issues)
     if not paths:
         issues.add("missing_trace")
     if paths and not unsupported and summaries == 0:
@@ -456,6 +487,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
                 issues.add("producer_boundary_mismatch")
     issues.update(byte_issues)
     issues.update(content_issues)
+    issues.update(destination_issues)
     incomplete = bool(issues - {"missing_trace"})
     if unsupported:
         issues.add("unsupported_trace_schema")
@@ -466,6 +498,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection, dat
             "admission_summary_count": summaries, "data_integrity_status": "NOT_EVALUATED",
             "checked_csv_rows": checked_rows,
             "row_bytes_status": "INCOMPLETE" if byte_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
+            "destination_status": "INCOMPLETE" if byte_issues or destination_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED",
             "output_content_status": "INCOMPLETE" if byte_issues or content_issues else "VERIFIED" if checked_rows else "NOT_EVALUATED"}
 
 
@@ -485,10 +518,13 @@ def validate_csv_persistence_trace(paths: Sequence[Path], *, data_roots: Sequenc
                 database.execute("CREATE INDEX sink_receipt_identity ON sink_receipts(sequence, sink)")
                 database.execute("CREATE TABLE row_locations (device TEXT, file_id TEXT, first_byte TEXT, end_byte TEXT)")
                 database.execute("CREATE INDEX row_location_order ON row_locations(device, file_id, length(first_byte), first_byte)")
+                database.execute("CREATE TABLE csv_contracts (sequence TEXT, body TEXT)")
+                database.execute("CREATE INDEX csv_contract_identity ON csv_contracts(sequence)")
+                database.execute("CREATE TABLE csv_rows (body TEXT)")
                 return _validate_csv_trace(paths, database, data_roots)
     except (OSError, sqlite3.Error):
         return {"contract_version": "CSV_PERSISTENCE_VALIDATION_V1", "coverage": "CSV_ADMISSION_AND_REQUIRED_SINK_EVIDENCE",
                 "status": "INCOMPLETE", "issues": ["validator_workspace_unavailable"],
                 "segment_count": len(paths), "record_count": 0, "admission_summary_count": 0,
                 "data_integrity_status": "NOT_EVALUATED", "checked_csv_rows": 0, "row_bytes_status": "NOT_EVALUATED",
-                "output_content_status": "NOT_EVALUATED"}
+                "output_content_status": "NOT_EVALUATED", "destination_status": "NOT_EVALUATED"}

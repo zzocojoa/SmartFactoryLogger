@@ -67,6 +67,72 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_wrong_admitted_destination(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            before, after = tmp_dir / "before", tmp_dir / "after"
+            service = self.create_service(before, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                service.apply_config(log_path=after)
+                second = service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
+                self.assertEqual([first["status"], second["status"]], ["ACCEPTED", "ACCEPTED"])
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertGreater(len(paths), 1)
+            self.assertEqual(validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])["issues"], [])
+            originals = {path: path.read_bytes() for path in paths}
+            data_files = {path: path.read_bytes() for path in tmp_dir.rglob("*.csv")}
+            for path, contents in originals.items():
+                amended = []
+                for line in contents.splitlines(keepends=True):
+                    record = json.loads(line)
+                    if record.get("kind") == "csv_admission" and record["producer_seq"] == first["producer_seq"]:
+                        line = (json.dumps(dict(record, admitted_log_dir=str(after))) + "\n").encode()
+                    amended.append(line)
+                path.write_bytes(b"".join(amended))
+            altered = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+            self.assertIn("csv_destination_contract_mismatch", result["issues"],
+                          "a row outside its admitted destination was accepted")
+            self.assertEqual(result["status"], "INCOMPLETE")
+            self.assertEqual(result["row_bytes_status"], "VERIFIED")
+            self.assertEqual(result["destination_status"], "INCOMPLETE")
+            self.assertEqual({path: path.read_bytes() for path in paths}, altered)
+            self.assertEqual({path: path.read_bytes() for path in data_files}, data_files)
+            cases = [({"admitted_log_dir": None}, "invalid_csv_destination_contract"),
+                     ({"admitted_log_dir": "relative"}, "invalid_csv_destination_contract"),
+                     ({"admitted_log_dir": str(after), "fallback_log_dir": str(before)}, "csv_destination_contract_mismatch"),
+                     ("missing", "missing_csv_admission_contract"),
+                     ("duplicate", "ambiguous_csv_admission_contract")]
+            for changes, issue in cases:
+                with self.subTest(changes=changes):
+                    for path, contents in originals.items():
+                        amended = []
+                        for line in contents.splitlines(keepends=True):
+                            record = json.loads(line)
+                            if record.get("kind") == "csv_admission" and record["producer_seq"] == first["producer_seq"]:
+                                if changes == "missing":
+                                    continue
+                                if changes == "duplicate":
+                                    amended.append(line)
+                                else:
+                                    line = (json.dumps(dict(record, **changes)) + "\n").encode()
+                            amended.append(line)
+                        path.write_bytes(b"".join(amended))
+                    result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+                    self.assertIn(issue, result["issues"])
+                    self.assertEqual(result["destination_status"], "INCOMPLETE")
+                    self.assertEqual({path: path.read_bytes() for path in data_files}, data_files)
+            for path, contents in originals.items():
+                path.write_bytes(contents)
+            result = validate_csv_persistence_trace(list(reversed(paths)), data_roots=[tmp_dir])
+            self.assertEqual(result["issues"], [])
+            self.assertEqual(result["checked_csv_rows"], 4)
+            self.assertEqual(result["destination_status"], "VERIFIED")
+            self.assertEqual(validate_csv_persistence_trace(paths)["destination_status"], "NOT_EVALUATED")
+
     def test_validator_rejects_overlapping_csv_row_locations(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
