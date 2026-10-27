@@ -671,16 +671,23 @@ def _spot_image_capture_config_signature() -> tuple[Path, Path, int, float]:
 
 
 @contextmanager
-def _reserve_image_writer_payload(size: int, reason: str) -> Iterator[None]:
+def _reserve_image_writer_payload(
+    size: int, reason: str, sink_id: str, destination: Path, generation: int,
+) -> Iterator[None]:
     global _spot_image_capture_pending_payload_bytes
+    destination_key = _image_destination_key(destination)
+    token = object()
     with _spot_image_capture_lock:
         if _spot_image_capture_pending_payload_bytes + size > _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT:
             raise PayloadBudgetExceeded(reason)
         _spot_image_capture_pending_payload_bytes += size
+        _spot_image_workspace_stages[token] = _ImageCapturePendingStage(
+            time.monotonic(), clock_domain_id(), generation, ((sink_id, destination_key),), size)
     try:
         yield
     finally:
         with _spot_image_capture_lock:
+            _spot_image_workspace_stages.pop(token)
             _spot_image_capture_pending_payload_bytes -= size
 
 

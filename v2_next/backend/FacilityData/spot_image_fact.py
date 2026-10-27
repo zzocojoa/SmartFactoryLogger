@@ -155,7 +155,7 @@ class SpotImageCaptureWriter:
     failure_count: int = 0
     written_count: int = 0
     last_cleanup_at: float = field(default_factory=time.time)
-    payload_reservation: Callable[[int, str], ContextManager[None]] | None = field(default=None, repr=False)
+    payload_reservation: Callable[[int, str, str, Path, int], ContextManager[None]] | None = field(default=None, repr=False)
     _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
     _latest_recorded_capture_at: Optional[float] = field(default=None, init=False, repr=False)
     _fact_row_count: Optional[int] = field(default=None, init=False, repr=False)
@@ -212,7 +212,9 @@ class SpotImageCaptureWriter:
             error_type = None
             probe_manual_recovery = False
             try:
-                reservation = (self.payload_reservation(128, "destination_probe_byte_limit")
+                workspace_path = self.fact_path if sink_id == "image_fact" else destination
+                reservation = (self.payload_reservation(128, "destination_probe_byte_limit", sink_id,
+                                                       workspace_path, self._destination_probe_generation)
                                if self.payload_reservation is not None else nullcontext())
                 with reservation:
                     try:
@@ -445,7 +447,8 @@ class SpotImageCaptureWriter:
                 raise RuntimeError("SPOT image capture file is uncertain: identity changed")
             # Verify the existing whole capture without allocating another JPEG.
             size = min(4096, max(1, len(expected)))
-            reservation = (self.payload_reservation(size, "capture_verification_byte_limit")
+            reservation = (self.payload_reservation(size, "capture_verification_byte_limit", "image_jpeg",
+                                                   path.parent, self._destination_probe_generation)
                            if self.payload_reservation is not None else nullcontext())
             with reservation, memoryview(bytearray(size)) as window, memoryview(expected) as source:
                 offset = 0
@@ -698,7 +701,8 @@ class SpotImageCaptureWriter:
 
     def _read_fact_digest(self, digest: Any, offset: int, size: int) -> bytes:
         scratch = min(SPOT_IMAGE_FACT_DIGEST_BUFFER_BYTES, size)
-        reservation = (self.payload_reservation(scratch, "fact_digest_byte_limit")
+        reservation = (self.payload_reservation(scratch, "fact_digest_byte_limit", "image_fact",
+                                               self.fact_path, self._destination_probe_generation)
                        if self.payload_reservation is not None else nullcontext())
         last_byte = b""
         with reservation, memoryview(bytearray(scratch)) as window:
