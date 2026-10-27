@@ -5,10 +5,49 @@ import tracemalloc
 import unittest
 from unittest.mock import patch
 
-from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, PersistenceTraceWriter
+from backend.FacilityData.persistence_trace import AdmissionRejectionLedger, AdmissionRejectionRange, PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_claimed_rejection_ranges_remain_reserved_until_acknowledged(self):
+        ledger = AdmissionRejectionLedger()
+        with patch("backend.FacilityData.persistence_trace.ADMISSION_REJECTION_RANGE_LIMIT", 2):
+            ledger.record(1, "INVALID", "bad_input", 1)
+            ledger.record(2, "INVALID", "bad_input", 1)
+            first = ledger.claim_range()
+            self.assertIsNotNone(first, "rejection range was not frozen for evidence publication")
+            ledger.record(3, "INVALID", "bad_input", 1)
+            ledger.record(4, "INVALID", "bad_input", 1)
+            ledger.record(5, "REJECTED_FULL", "queue_full", 1)
+            self.assertEqual((first.first_sequence, first.last_sequence), (1, 2))
+            self.assertIs(ledger.claim_range(), first)
+            self.assertEqual(ledger.snapshot()["rejection_range_count"], 2)
+            self.assertEqual(ledger.snapshot()["pending_rejection_count"], 4)
+            self.assertEqual(ledger.snapshot()["omitted_rejection_count"], 1)
+            with self.assertRaises(ValueError):
+                ledger.acknowledge_range(AdmissionRejectionRange(1, 2, "INVALID", "bad_input", 1))
+            self.assertEqual(ledger.snapshot()["committed_rejection_count"], 0)
+            ledger.acknowledge_range(first)
+            with self.assertRaises(ValueError):
+                ledger.acknowledge_range(first)
+            self.assertEqual(ledger.snapshot()["rejection_range_count"], 1)
+            self.assertEqual(ledger.snapshot()["committed_rejection_count"], 2)
+            ledger.record(6, "REJECTED_LIMIT", "pending_byte_limit", 1)
+            second = ledger.claim_range()
+            self.assertEqual((second.first_sequence, second.last_sequence), (3, 4))
+            ledger.acknowledge_range(second)
+            third = ledger.claim_range()
+            self.assertEqual((third.first_sequence, third.last_sequence), (6, 6))
+            ledger.acknowledge_range(third)
+            self.assertIsNone(ledger.claim_range())
+            closed = ledger.snapshot()
+            self.assertEqual(closed["rejected_count"], 6)
+            self.assertEqual(closed["committed_rejection_count"], 5)
+            self.assertEqual(closed["committed_rejection_range_count"], 3)
+            self.assertEqual(closed["pending_rejection_count"], 0)
+            self.assertEqual(closed["rejection_range_count"], 0)
+            self.assertTrue(closed["details_incomplete"])
+
     def test_unaccounted_sequences_remain_incomplete_at_close(self):
         ledger = AdmissionRejectionLedger(after_sequence=10)
         ledger.record(11, "ACCEPTED", None, 1)

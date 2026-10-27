@@ -35,7 +35,11 @@ class AdmissionRejectionLedger:
     def __init__(self, *, after_sequence: int = 0) -> None:
         self._after_sequence = after_sequence
         self._counts: Counter[str] = Counter()
-        self._ranges: list[AdmissionRejectionRange] = []
+        self._ranges: deque[AdmissionRejectionRange] = deque()
+        self._claimed: AdmissionRejectionRange | None = None
+        self._pending_rejections = 0
+        self._committed_rejections = 0
+        self._committed_ranges = 0
         self._omitted = 0
         self._first_omitted: int | None = None
         self._last_omitted: int | None = None
@@ -51,9 +55,11 @@ class AdmissionRejectionLedger:
             if (previous.last_sequence + 1 == sequence and previous.status == status
                     and previous.reason == reason and previous.config_generation == generation):
                 self._ranges[-1] = AdmissionRejectionRange(previous.first_sequence, sequence, status, reason, generation)
+                self._pending_rejections += 1
                 return
-        if len(self._ranges) < ADMISSION_REJECTION_RANGE_LIMIT:
+        if len(self._ranges) + int(self._claimed is not None) < ADMISSION_REJECTION_RANGE_LIMIT:
             self._ranges.append(AdmissionRejectionRange(sequence, sequence, status, reason, generation))
+            self._pending_rejections += 1
             return
         self._omitted += 1
         if self._first_omitted is None:
@@ -69,15 +75,33 @@ class AdmissionRejectionLedger:
                 "accounted_count": accounted, "unaccounted_count": unaccounted,
                 "accepted_count": accepted, "excluded_count": excluded,
                 "rejected_count": accounted - accepted - excluded, "outcome_counts": dict(self._counts),
-                "rejection_range_count": len(self._ranges), "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
+                "rejection_range_count": len(self._ranges) + int(self._claimed is not None),
+                "rejection_range_limit": ADMISSION_REJECTION_RANGE_LIMIT,
+                "pending_rejection_count": self._pending_rejections,
+                "committed_rejection_count": self._committed_rejections,
+                "committed_rejection_range_count": self._committed_ranges,
                 "details_incomplete": self._omitted > 0 or unaccounted != 0, "omitted_rejection_count": self._omitted,
                 "first_omitted_producer_seq": self._first_omitted, "last_omitted_producer_seq": self._last_omitted}
 
     def rejection_ranges(self) -> tuple[AdmissionRejectionRange, ...]:
-        return tuple(self._ranges)
+        return (() if self._claimed is None else (self._claimed,)) + tuple(self._ranges)
 
     def close(self, final_sequence: int) -> None:
         self._last_sequence = final_sequence
+
+    def claim_range(self) -> AdmissionRejectionRange | None:
+        if self._claimed is None and self._ranges:
+            self._claimed = self._ranges.popleft()
+        return self._claimed
+
+    def acknowledge_range(self, claimed: AdmissionRejectionRange) -> None:
+        if claimed is None or claimed is not self._claimed:
+            raise ValueError("Only the currently claimed rejection range may be acknowledged")
+        count = claimed.last_sequence - claimed.first_sequence + 1
+        self._pending_rejections -= count
+        self._committed_rejections += count
+        self._committed_ranges += 1
+        self._claimed = None
 
 
 class _TraceContentUncertain(OSError):
