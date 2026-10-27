@@ -8,6 +8,36 @@ from backend.FacilityData.persistence_trace import PersistenceTraceWriter
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    def test_two_full_segments_refuse_new_records_until_commit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            writer = PersistenceTraceWriter(root, "bounded-producer")
+            tokens = []
+            for sequence in range(2000):
+                token = writer.append({"event_id": sequence, "sink_id": "csv_v2"})
+                self.assertIsNotNone(token)
+                tokens.append(token)
+            self.assertIsNone(writer.append({"event_id": 2000}), "trace accepted beyond two full segments")
+            state = writer.snapshot()
+            self.assertEqual(state["pending_segments"], 2)
+            self.assertEqual(state["pending_records"], 2000)
+            self.assertLessEqual(state["pending_bytes"], 2 * 1024**2)
+            self.assertEqual(tokens[:1000], [1] * 1000)
+            self.assertEqual(tokens[1000:], [2] * 1000)
+            self.assertTrue(writer.flush(force=True))
+            self.assertEqual(writer.snapshot()["pending_records"], 1000)
+            self.assertIsNotNone(writer.append({"event_id": 2000, "sink_id": "csv_v2"}))
+            while writer.snapshot()["pending_records"]:
+                self.assertTrue(writer.flush(force=True))
+            records = []
+            for path in sorted(root.glob("*.trace.jsonl")):
+                self.assertLessEqual(path.stat().st_size, 1024**2)
+                rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()][1:]
+                self.assertLessEqual(len(rows), 1000)
+                records.extend(rows)
+            self.assertEqual([r["event_id"] for r in records], list(range(2001)))
+            self.assertEqual(writer.snapshot()["pending_bytes"], 0)
+
     def test_failed_publish_keeps_same_segment_for_retry(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

@@ -11,6 +11,9 @@ import time
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+TRACE_SEGMENT_RECORD_LIMIT = 1000
+TRACE_PENDING_SEGMENT_LIMIT = 2
+
 
 @dataclass
 class _TraceSegment:
@@ -36,16 +39,22 @@ class PersistenceTraceWriter:
         self._lock = threading.Lock()
         self._writer_lock = threading.Lock()
         self._failure_count = 0
+        self._refused_count = 0
 
     def append(self, record: Mapping[str, Any]) -> int | None:
-        payload = self._encode(record)
         with self._lock:
+            if self._segments and len(self._segments[-1].records) >= TRACE_SEGMENT_RECORD_LIMIT:
+                self._segments[-1].sealed = True
             if not self._segments or self._segments[-1].sealed:
+                if len(self._segments) >= TRACE_PENDING_SEGMENT_LIMIT:
+                    self._refused_count += 1
+                    return None
                 sequence = self._next_sequence
                 self._next_sequence += 1
                 header = self._encode({"schema_version": 1, "producer_instance_id": self.producer_id,
                                        "writer_instance_id": self._instance_id, "segment_id": sequence})
                 self._segments.append(_TraceSegment(sequence, header))
+            payload = self._encode(record)
             segment = self._segments[-1]
             segment.records.append(payload)
             return segment.sequence
@@ -110,4 +119,5 @@ class PersistenceTraceWriter:
                     "pending_bytes": sum(segment.size for segment in self._segments),
                     "pending_segments": len(self._segments),
                     "committed_segment_seq": self._committed_sequence,
-                    "failure_count": self._failure_count}
+                    "failure_count": self._failure_count,
+                    "refused_count": self._refused_count}
