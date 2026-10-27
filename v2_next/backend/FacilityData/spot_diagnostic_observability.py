@@ -18,7 +18,8 @@ from uuid import uuid4
 from backend.FacilityData.spot_diagnostics import SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 
 
-SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION = "spot-diagnostic-request-journal-v1"
+SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION = "spot-diagnostic-request-journal-v2"
+_LEGACY_JOURNAL_SCHEMA_VERSION = "spot-diagnostic-request-journal-v1"
 SPOT_DIAGNOSTIC_JOURNAL_FILENAME = "spot_diagnostic_request_events.jsonl"
 SPOT_DIAGNOSTIC_FAILURE_JOURNAL_FILENAME = "spot_diagnostic_request_failures.jsonl"
 DEFAULT_RECENT_EVENT_LIMIT = 512
@@ -33,7 +34,7 @@ MAX_RECOVERY_LINE_BYTES = 16 * 1024
 
 _ALLOWED_ROUTES = frozenset({"/control", "/output"})
 _ALLOWED_STATES = frozenset(
-    {"queued", "running", "completed", "timed_out", "cancelled", "terminal_missing"}
+    {"queued", "running", "completed", "timed_out", "cancelled", "terminal_missing", "suppressed"}
 )
 _ALLOWED_OUTCOMES = frozenset(
     {
@@ -45,11 +46,12 @@ _ALLOWED_OUTCOMES = frozenset(
         "timeout",
         "cancelled",
         "terminal_missing_after_restart",
+        "storage_pressure",
     }
 )
 _ALLOWED_TIMEOUT_PHASES = frozenset({"connect", "response", "write", "pool", "unknown"})
 _TERMINAL_STATES = frozenset(
-    {"completed", "timed_out", "cancelled", "terminal_missing"}
+    {"completed", "timed_out", "cancelled", "terminal_missing", "suppressed"}
 )
 _SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]+$")
 _REQUEST_ID_PATTERN = re.compile(r"^diagnostic:[0-9a-f]{32}$")
@@ -77,6 +79,7 @@ _RECOVERED_BASE_KEYS = frozenset(
     }
 )
 _RECOVERED_STATE_KEYS = {
+    "suppressed": frozenset({"ended_at_utc", "queue_wait_ms", "outcome"}),
     "queued": frozenset({"queued_at_utc"}),
     "running": frozenset({"started_at_utc", "queue_wait_ms"}),
     "completed": frozenset(
@@ -458,7 +461,7 @@ class SpotDiagnosticRequestJournal:
             normalized_outcome = "transport_error"
         self._mark_terminal(
             context,
-            state="completed",
+            state="suppressed" if normalized_outcome == "storage_pressure" else "completed",
             outcome=normalized_outcome,
             exception=exception,
             timeout_phase=None,
@@ -515,6 +518,7 @@ class SpotDiagnosticRequestJournal:
                 "event_count_retained": len(self._recent_events),
                 "event_drop_count": self._event_drop_count,
                 "failure_count_total": self._failure_count_total,
+                "pre_dispatch_suppressed_count": self._outcome_counts["storage_pressure"],
                 "failure_count_retained": len(self._failure_events),
                 "failure_drop_count": self._failure_drop_count,
                 "active_request_count": len(self._active),
@@ -563,6 +567,9 @@ class SpotDiagnosticRequestJournal:
             if active is None or active.state not in {"queued", "running"} or state not in _TERMINAL_STATES:
                 self._invalid_transition_count += 1
                 return
+            if state == "suppressed" and (active.state != "queued" or exception is not None):
+                self._invalid_transition_count += 1
+                return
             started_at_utc = active.running_at_utc or context.queued_at_utc
             started_at_monotonic = active.running_at_monotonic or context.queued_at_monotonic
             details: dict[str, object] = {
@@ -575,6 +582,9 @@ class SpotDiagnosticRequestJournal:
                 ),
                 "outcome": outcome,
             }
+            if state == "suppressed":
+                details.pop("started_at_utc")
+                details.pop("elapsed_ms")
             if exception is not None:
                 details["exception_class"] = _safe_exception_class(exception.__class__)
                 details["cause_exception_class"] = _safe_exception_class(
@@ -589,7 +599,7 @@ class SpotDiagnosticRequestJournal:
                 details=details,
             )
             self._outcome_counts[outcome] += 1
-            if state != "completed" or outcome != "success":
+            if self._is_failure_event(event):
                 self._failure_count_total += 1
                 if len(self._failure_events) == self._failure_event_limit:
                     self._failure_drop_count += 1
@@ -928,12 +938,16 @@ class SpotDiagnosticRequestJournal:
         sequence = value.get("event_sequence")
         state = value.get("state")
         if (
-            value.get("schema_version") != SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION
+            value.get("schema_version") not in {SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION, _LEGACY_JOURNAL_SCHEMA_VERSION}
             or isinstance(sequence, bool)
             or not isinstance(sequence, int)
             or sequence <= 0
             or not isinstance(state, str)
             or state not in _ALLOWED_STATES
+        ):
+            return None
+        if value.get("schema_version") == _LEGACY_JOURNAL_SCHEMA_VERSION and (
+            state == "suppressed" or value.get("outcome") == "storage_pressure"
         ):
             return None
         allowed_keys = _RECOVERED_BASE_KEYS | _RECOVERED_STATE_KEYS[state]
@@ -993,7 +1007,10 @@ class SpotDiagnosticRequestJournal:
             "timeout",
             "cancelled",
             "terminal_missing_after_restart",
+            "storage_pressure",
         }:
+            return None
+        if state == "suppressed" and outcome != "storage_pressure":
             return None
         if state == "timed_out":
             timeout_phase = value.get("timeout_phase")
@@ -1046,7 +1063,7 @@ class SpotDiagnosticRequestJournal:
         outcome = event.get("outcome")
         if isinstance(outcome, str) and outcome in _ALLOWED_OUTCOMES:
             self._outcome_counts[outcome] += 1
-            if state != "completed" or outcome != "success":
+            if self._is_failure_event(event):
                 self._failure_count_total += 1
                 if len(self._failure_events) == self._failure_event_limit:
                     self._failure_drop_count += 1

@@ -6736,6 +6736,52 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SpotDiagnosticRequestJournalTests(unittest.TestCase):
+    def test_storage_suppression_is_a_queued_terminal_and_survives_journal_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
+            service_id = str(uuid4())
+            journal = SpotDiagnosticRequestJournal(log_path)
+            try:
+                suppressed = journal.queue_request(
+                    snapshot_correlation_id=f"{service_id}:diag:1",
+                    poll_correlation_id=f"{service_id}:poll:1",
+                    diagnostic_field="signalpc", api_route="/output",
+                )
+                journal.mark_completed(suppressed, outcome="storage_pressure")
+                snapshot = journal.snapshot()
+                self.assertEqual(snapshot["recent_events"][-1]["outcome"], "storage_pressure")
+                self.assertEqual(snapshot["recent_events"][-1]["state"], "suppressed")
+                self.assertEqual(snapshot["active_request_count"], 0)
+                self.assertEqual(snapshot["state_counts"]["running"], 0)
+                self.assertEqual(snapshot["failure_count_total"], 0)
+                self.assertEqual(snapshot["outcome_counts"]["success"], 0)
+                self.assertEqual(snapshot.get("pre_dispatch_suppressed_count"), 1)
+                failed = journal.queue_request(
+                    snapshot_correlation_id=f"{service_id}:diag:2",
+                    poll_correlation_id=f"{service_id}:poll:2",
+                    diagnostic_field="alarmstatus", api_route="/output",
+                )
+                journal.mark_running(failed)
+                journal.mark_timed_out(failed, exception=httpx.ReadTimeout("actual failure"), timeout_phase="response")
+                self.assertTrue(journal.flush())
+            finally:
+                self.assertTrue(journal.close())
+            failure_path = log_path.with_name("spot_diagnostic_request_failures.jsonl")
+            failure_rows = [json.loads(row) for row in failure_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["outcome"] for row in failure_rows], ["timeout"])
+            recovered = SpotDiagnosticRequestJournal(log_path)
+            try:
+                snapshot = recovered.snapshot()
+                self.assertEqual(snapshot["outcome_counts"]["storage_pressure"], 1)
+                self.assertEqual(snapshot["state_counts"]["suppressed"], 1)
+                self.assertEqual(snapshot["failure_count_total"], 1)
+                self.assertEqual(snapshot["active_request_count"], 0)
+                self.assertEqual(snapshot["recovery_invalid_line_count"], 0)
+                self.assertEqual(snapshot["pre_dispatch_suppressed_count"], 1)
+                self.assertEqual(snapshot["schema_version"], "spot-diagnostic-request-journal-v2")
+            finally:
+                self.assertTrue(recovered.close())
+
     def test_concurrent_lifecycles_are_serialized_without_state_loss(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             journal = SpotDiagnosticRequestJournal(
