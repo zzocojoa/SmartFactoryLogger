@@ -462,6 +462,7 @@ class CSVLoggerService:
         self._producer_seq = 0
         self._trace_start_seq = 0
         self._trace_stop_seq: Optional[int] = None
+        self._trace_config_generation: Optional[int] = None
         self._persistence_trace: Optional[PersistenceTraceWriter] = None
         self._trace_boundary_failed = False
         self.logger_service_instance_id = str(uuid4())
@@ -521,6 +522,7 @@ class CSVLoggerService:
             with self._runtime_lock:
                 self._trace_start_seq = self._producer_seq
             self._trace_stop_seq = None
+            self._trace_config_generation = None
             self._persistence_trace = None
             self._trace_boundary_failed = False
             self.thread = None
@@ -3159,10 +3161,26 @@ class CSVLoggerService:
         token = trace.append({
             "kind": "producer_start", "after_producer_seq": self._trace_start_seq,
             "config_generation": settings.generation, "required_sinks": settings.required_sinks,
-            "coverage": "PRODUCER_BOUNDARIES_ONLY",
+            "coverage": "PRODUCER_AND_CONFIG_BOUNDARIES",
         })
         self._trace_boundary_failed |= token is None
         self._persistence_trace = trace
+
+    def _record_trace_config(self, envelope: CSVEventEnvelope) -> None:
+        settings = envelope.write_config
+        self._begin_persistence_trace(settings)
+        trace = self._persistence_trace
+        if trace is None or self._trace_config_generation == settings.generation:
+            return
+        token = trace.append({
+            "kind": "config_activated", "effective_from_producer_seq": envelope.producer_seq,
+            "config_generation": settings.generation, "required_sinks": settings.required_sinks,
+            "admitted_log_dir": str(settings.log_dir),
+            "csv_v2_schema_version": settings.v2_contract.schema_version if settings.v2_enabled else None,
+            "csv_v2_column_hash": settings.v2_contract.column_hash if settings.v2_enabled else None,
+        })
+        self._trace_boundary_failed |= token is None
+        self._trace_config_generation = settings.generation
 
     def _finish_persistence_trace(self) -> bool:
         trace = self._persistence_trace
@@ -3172,7 +3190,7 @@ class CSVLoggerService:
             final_sequence = self._trace_stop_seq if self._trace_stop_seq is not None else self._producer_seq
             pending_events = len(self._pending_events)
         token = trace.append({"kind": "producer_stop", "final_producer_seq": final_sequence,
-                              "pending_event_count": pending_events, "coverage": "PRODUCER_BOUNDARIES_ONLY"})
+                              "pending_event_count": pending_events, "coverage": "PRODUCER_AND_CONFIG_BOUNDARIES"})
         self._trace_boundary_failed |= token is None
         while trace.snapshot()["pending_records"]:
             if not trace.flush(force=True):
@@ -3230,7 +3248,7 @@ class CSVLoggerService:
             "last_processing_failure_reason": last_processing_failure_reason,
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "persistence_trace": trace.snapshot() if trace is not None else None,
-            "persistence_trace_coverage": "PRODUCER_BOUNDARIES_ONLY" if trace is not None else "NOT_EVALUATED",
+            "persistence_trace_coverage": "PRODUCER_AND_CONFIG_BOUNDARIES" if trace is not None else "NOT_EVALUATED",
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
             "running": self.running,
@@ -3331,7 +3349,7 @@ class CSVLoggerService:
                     csv_v1_enabled, csv_v2_enabled = settings.v1_enabled, settings.v2_enabled
 
                 if envelope is not None:
-                    self._begin_persistence_trace(envelope.write_config)
+                    self._record_trace_config(envelope)
                     decoded_sequence = envelope.producer_seq
                     item = self._decode_csv_event(envelope)
                     if item is None:

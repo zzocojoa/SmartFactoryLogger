@@ -162,9 +162,10 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(len(pending), 1)
             records = [json.loads(line) for line in pending[0].read_text(encoding="utf-8").splitlines()]
             self.assertEqual(records[0]["producer_instance_id"], first["producer_instance_id"])
-            self.assertEqual([record["kind"] for record in records[1:]], ["producer_start", "producer_stop"])
-            self.assertEqual(records[1]["after_producer_seq"], first["producer_seq"] - 1)
-            self.assertEqual(records[2]["final_producer_seq"], last["producer_seq"])
+            boundaries = [record for record in records[1:] if record["kind"] in {"producer_start", "producer_stop"}]
+            self.assertEqual([record["kind"] for record in boundaries], ["producer_start", "producer_stop"])
+            self.assertEqual(boundaries[0]["after_producer_seq"], first["producer_seq"] - 1)
+            self.assertEqual(boundaries[1]["final_producer_seq"], last["producer_seq"])
 
     def test_producer_stop_boundary_excludes_post_stop_rejections(self) -> None:
         with self.create_temp_dir() as tmp_dir:
@@ -302,6 +303,20 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertGreater(third["config_generation"], second["config_generation"])
             self.assertEqual(second["required_sinks"], ("csv_v1",))
             self.assertEqual(third["required_sinks"], ("csv_v2",))
+            trace_records = [json.loads(line) for path in sorted(tmp_dir.rglob("*.trace.jsonl"))
+                             for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            activations = [record for record in trace_records if record["kind"] == "config_activated"]
+            self.assertEqual(len(activations), 2, "CSV trace omitted admitted configuration intervals")
+            self.assertEqual([record["effective_from_producer_seq"] for record in activations],
+                             [first["producer_seq"], third["producer_seq"]])
+            self.assertEqual([record["config_generation"] for record in activations],
+                             [first["config_generation"], third["config_generation"]])
+            self.assertEqual([record["required_sinks"] for record in activations], [["csv_v1"], ["csv_v2"]])
+            self.assertEqual([Path(record["admitted_log_dir"]) for record in activations], [old_dir, new_dir])
+            self.assertEqual(activations[1]["csv_v2_schema_version"], "2.3.1")
+            state = service.get_runtime_state()["persistence_trace"]
+            self.assertEqual(state["pending_records"], 0)
+            self.assertEqual(state["failure_count"], 0)
 
     def test_config_flush_error_preserves_next_generation_event(self) -> None:
         started, release, failed = threading.Event(), threading.Event(), threading.Event()
