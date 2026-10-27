@@ -5117,6 +5117,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 diagnostics = spot_api.get_spot_diagnostics()
                 self.assertEqual(diagnostics.get('image_http_dispatch_count'), 0,
                                  'actual image dispatch count is unavailable')
+                self.assertEqual(diagnostics.get('image_dispatch_attempt_count'), 0)
+                self.assertEqual(diagnostics.get('diagnostic_dispatch_attempt_count'), 0)
+                self.assertEqual(diagnostics.get('pre_dispatch_suppressed_count'), 1)
                 self.assertEqual(diagnostics.get('image_storage_suppressed_task_count'), 1)
                 self.assertEqual(diagnostics['image_upstream_request_count'], 1)
                 blocked.clear()
@@ -5129,6 +5132,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(resumed.status_code, 200)
                 diagnostics = spot_api.get_spot_diagnostics()
                 self.assertEqual(diagnostics['image_http_dispatch_count'], 1)
+                self.assertEqual(diagnostics.get('image_dispatch_attempt_count'), 1)
+                self.assertEqual(diagnostics.get('pre_dispatch_suppressed_count'), 1)
                 self.assertEqual(diagnostics['image_storage_suppressed_task_count'], 1)
                 self.assertEqual(diagnostics['image_upstream_request_count'], 2)
                 self.assertEqual(len(transport.requests), 1)
