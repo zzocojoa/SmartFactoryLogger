@@ -517,6 +517,46 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertEqual(history.read_bytes(), before)
         self.assertEqual([path for path in self.root.rglob('*') if path.is_file()], [history])
 
+    def test_image_probe_cleanup_failure_blocks_automatic_reuse(self):
+        writer = SpotImageCaptureWriter(log_path=self.root / 'fact', capture_root=self.root / 'images')
+        captured_at = 1793106000.0
+        writer.write_capture(image_bytes=b'preserved image', captured_at=captured_at,
+                             source_url='http://spot.invalid/image.jpg', source='test',
+                             image_age_ms=None, link_checked_at=None, observation_snapshot=None)
+        originals = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        writer.bind_destination_probe_generation(7)
+        unlink, retained = Path.unlink, []
+
+        def failed_cleanup(path, *args, **kwargs):
+            if path.name.startswith('.sfl-storage-probe-'):
+                retained.append(path)
+                raise PermissionError('image probe cleanup denied')
+            return unlink(path, *args, **kwargs)
+
+        with patch.object(Path, 'unlink', failed_cleanup):
+            results = writer.probe_storage_destinations(captured_at=captured_at)
+            self.assertTrue(all(item['manual_recovery_required'] for item in results),
+                            'unremoved image probes must require manual recovery')
+            self.assertEqual({item['sink_id'] for item in results}, {'image_fact', 'image_jpeg'})
+            self.assertTrue(all(item['current_storage_availability'] == 'blocked' for item in results))
+            self.assertEqual(len(retained), 2)
+            before = tuple(retained)
+            self.assertIsNone(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'])
+            writer.bind_destination_probe_generation(8)
+            self.assertFalse(writer.destination_probe_due(captured_at=captured_at + 86400,
+                                                         now_monotonic=1e12))
+            self.assertEqual(writer.probe_storage_destinations(captured_at=captured_at + 86400), results)
+            self.assertEqual(tuple(retained), before, 'manual recovery created more probe files')
+            with self.assertRaisesRegex(RuntimeError, 'manual recovery'):
+                writer.write_capture(image_bytes=b'not admitted', captured_at=captured_at + 86400,
+                                     source_url='http://spot.invalid/image.jpg', source='test',
+                                     image_age_ms=None, link_checked_at=None, observation_snapshot=None)
+        self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 1)
+        self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+        self.assertTrue(all(path.exists() for path in retained))
+        self.assertEqual(set(path for path in self.root.rglob('*') if path.is_file()),
+                         set(originals) | set(retained))
+
     def test_destination_probe_readback_and_cleanup_preserve_replaced_files(self):
         replace_file = spot_image_fact.os.replace
         for mode in ('changed_content', 'replaced_identity'):

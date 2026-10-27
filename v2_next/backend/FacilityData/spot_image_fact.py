@@ -177,6 +177,7 @@ class SpotImageCaptureWriter:
     _destination_probe_retry_delay: float = field(default=1.0, init=False, repr=False)
     _destination_probe_failure_count: int = field(default=0, init=False, repr=False)
     _destination_probe_generation: int = field(default=0, init=False, repr=False)
+    _destination_probe_manual_recovery: bool = field(default=False, init=False, repr=False)
     _destination_probe_lock: Any = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -201,16 +202,25 @@ class SpotImageCaptureWriter:
 
     def probe_storage_destinations(self, *, captured_at: float) -> tuple[dict[str, Any], ...]:
         """Owner-only destination checks, preserving file and directory evidence separately."""
+        if self.probe_manual_recovery_required():
+            return self.destination_probe_snapshot()
         day = datetime.fromtimestamp(captured_at, timezone.utc)
         image_directory = self.capture_root / day.strftime("%Y") / day.strftime("%m") / day.strftime("%d")
         results = []
         for sink_id, destination in (("image_fact", self.log_path), ("image_jpeg", image_directory)):
             error_type = None
+            probe_manual_recovery = False
             try:
                 reservation = (self.payload_reservation(128, "destination_probe_byte_limit")
                                if self.payload_reservation is not None else nullcontext())
                 with reservation:
-                    _probe_storage_directory(destination)
+                    try:
+                        _probe_storage_directory(destination)
+                    except RuntimeError:
+                        probe_manual_recovery = True
+                        with self._destination_probe_lock:
+                            self._destination_probe_manual_recovery = True
+                        raise
             except (OSError, RuntimeError) as exc:
                 error_type = type(exc).__name__
             file_error_type = None
@@ -220,7 +230,7 @@ class SpotImageCaptureWriter:
                     file_scope = self._check_fact_access()
                 except (OSError, RuntimeError) as exc:
                     file_error_type = type(exc).__name__
-            manual_recovery = sink_id == "image_fact" and self._fact_append_is_uncertain()
+            manual_recovery = probe_manual_recovery or (sink_id == "image_fact" and self._fact_append_is_uncertain())
             results.append({
                 "sink_id": sink_id, "destination_path": str(destination.absolute()),
                 "config_generation": self._destination_probe_generation,
@@ -246,6 +256,8 @@ class SpotImageCaptureWriter:
             else:
                 self._destination_probe_retry_at = None
                 self._destination_probe_retry_delay = 1.0
+            if self._destination_probe_manual_recovery:
+                self._destination_probe_retry_at = None
             self._destination_probe_results = tuple(results)
         return self.destination_probe_snapshot()
 
@@ -269,6 +281,10 @@ class SpotImageCaptureWriter:
         with self._destination_probe_lock:
             return tuple(dict(item) for item in self._destination_probe_results)
 
+    def probe_manual_recovery_required(self) -> bool:
+        with self._destination_probe_lock:
+            return self._destination_probe_manual_recovery
+
     def destination_probe_retry_snapshot(self) -> dict[str, Any]:
         with self._destination_probe_lock:
             return {"next_retry_at_monotonic": self._destination_probe_retry_at,
@@ -281,11 +297,15 @@ class SpotImageCaptureWriter:
             if generation == self._destination_probe_generation:
                 return
             self._destination_probe_generation = generation
+            if self._destination_probe_manual_recovery:
+                return  # Preserve the original failed destination and generation.
             self._destination_probe_results = ()
             self._destination_probe_retry_at = None
             self._destination_probe_retry_delay = 1.0
 
     def destination_probe_due(self, *, captured_at: float, now_monotonic: float) -> bool:
+        if self.probe_manual_recovery_required():
+            return False
         day = datetime.fromtimestamp(captured_at, timezone.utc)
         image_directory = self.capture_root / day.strftime("%Y") / day.strftime("%m") / day.strftime("%d")
         expected = {("image_fact", str(self.log_path.absolute())), ("image_jpeg", str(image_directory.absolute()))}
@@ -339,6 +359,8 @@ class SpotImageCaptureWriter:
         observation_snapshot: Optional[Mapping[str, Any]],
         capture_id: Optional[str] = None,
     ) -> dict[str, str]:
+        if self.probe_manual_recovery_required():
+            raise RuntimeError("SPOT image probe requires manual recovery")
         self._assert_fact_unchanged()
         sha256 = hashlib.sha256(image_bytes).hexdigest()
         captured_dt = datetime.fromtimestamp(captured_at, timezone.utc)
