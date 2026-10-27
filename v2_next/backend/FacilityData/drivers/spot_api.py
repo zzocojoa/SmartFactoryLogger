@@ -155,6 +155,8 @@ _img_downstream_request_count = 0
 _img_snapshot_downstream_request_count = 0
 _img_live_downstream_request_count = 0
 _img_upstream_request_count = 0
+_img_http_dispatch_count = 0
+_img_storage_suppressed_task_count = 0
 _img_cache_hit_count = 0
 _img_singleflight_leader_count = 0
 _img_coalesced_waiter_count = 0
@@ -1111,6 +1113,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
 def _reset_spot_image_request_state_for_tests() -> None:
     global _img_fetch_lock, _img_cache_entry, _img_refresh_task, _img_accepting_requests, _img_last_source
     global _img_downstream_request_count, _img_upstream_request_count, _img_cache_hit_count
+    global _img_http_dispatch_count, _img_storage_suppressed_task_count
     global _img_snapshot_downstream_request_count, _img_live_downstream_request_count
     global _img_singleflight_leader_count, _img_coalesced_waiter_count
     global _img_refresh_success_count, _img_refresh_failure_count
@@ -1131,6 +1134,8 @@ def _reset_spot_image_request_state_for_tests() -> None:
     _img_snapshot_downstream_request_count = 0
     _img_live_downstream_request_count = 0
     _img_upstream_request_count = 0
+    _img_http_dispatch_count = 0
+    _img_storage_suppressed_task_count = 0
     _img_cache_hit_count = 0
     _img_singleflight_leader_count = 0
     _img_coalesced_waiter_count = 0
@@ -2170,13 +2175,16 @@ async def _refresh_spot_diagnostics_safely(
 
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+    global _img_http_dispatch_count, _img_storage_suppressed_task_count
     request_started_at: Optional[float] = None
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
         async with _spot_device_request_lock:
             if _spot_image_storage_blocked():
+                _img_storage_suppressed_task_count += 1
                 raise SpotStoragePressureError
             request_started_at = time.monotonic()
+            _img_http_dispatch_count += 1
             response = await _request_spot_http_response(
                 client,
                 kind=SpotRequestKind.IMAGE,
@@ -3315,6 +3323,8 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         ),
         "image_live_downstream_request_count": int(_img_live_downstream_request_count),
         "image_upstream_request_count": int(_img_upstream_request_count),
+        "image_http_dispatch_count": int(_img_http_dispatch_count),
+        "image_storage_suppressed_task_count": int(_img_storage_suppressed_task_count),
         "image_cache_hit_count": int(_img_cache_hit_count),
         "image_singleflight_leader_count": int(_img_singleflight_leader_count),
         "image_coalesced_waiter_count": int(_img_coalesced_waiter_count),
@@ -3429,6 +3439,8 @@ def get_image_state_summary() -> Dict[str, Any]:
         "image_cache_fresh": _is_spot_image_cache_fresh(cache_entry),
         "image_refresh_in_flight": bool(_img_refresh_task is not None and not _img_refresh_task.done()),
         "image_upstream_request_count": int(_img_upstream_request_count),
+        "image_http_dispatch_count": int(_img_http_dispatch_count),
+        "image_storage_suppressed_task_count": int(_img_storage_suppressed_task_count),
         "image_downstream_request_count": int(_img_downstream_request_count),
         "image_url_present": bool(str(config.SPOT_IP or "").strip()),
         "total_bytes": len(cache_entry.image_bytes) if cache_entry is not None else 0,

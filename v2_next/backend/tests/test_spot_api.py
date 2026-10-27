@@ -4912,6 +4912,24 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(spot_api._img_refresh_task)
                 errors.assert_not_called()
                 self.assertEqual([call.args[0] for call in results.call_args_list], [503, 503])
+                diagnostics = spot_api.get_spot_diagnostics()
+                self.assertEqual(diagnostics.get('image_http_dispatch_count'), 0,
+                                 'actual image dispatch count is unavailable')
+                self.assertEqual(diagnostics.get('image_storage_suppressed_task_count'), 1)
+                self.assertEqual(diagnostics['image_upstream_request_count'], 1)
+                blocked.clear()
+                deadline = time.monotonic() + 5
+                while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                    await asyncio.sleep(.01)
+                self.assertEqual(monitor.snapshot().state, 'NORMAL')
+                resumed = await backend_app.spot_image(StarletteRequest(
+                    {'type': 'http', 'method': 'GET', 'path': '/api/spot/live_image.jpg', 'headers': []}))
+                self.assertEqual(resumed.status_code, 200)
+                diagnostics = spot_api.get_spot_diagnostics()
+                self.assertEqual(diagnostics['image_http_dispatch_count'], 1)
+                self.assertEqual(diagnostics['image_storage_suppressed_task_count'], 1)
+                self.assertEqual(diagnostics['image_upstream_request_count'], 2)
+                self.assertEqual(len(transport.requests), 1)
         finally:
             if spot_api._spot_device_request_lock.locked():
                 spot_api._spot_device_request_lock.release()
