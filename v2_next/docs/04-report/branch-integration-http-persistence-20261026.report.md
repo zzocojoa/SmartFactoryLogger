@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 1~5단계 일부. CSV/이미지 probe 정리 실패의 접수·종료·설정 세대 보존 및 idle 이미지 목적지 재확인 보완. 전체 required 상태/monitor 연결·7단계/17명세 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `70d92a80` 전체 health exit0; backend 1199중1198통과·1skip. 남은 구현 후 최종 빌드·새 설치본 검증 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `47d9c3b9` 전체 health exit0; backend 1203중1202통과·1skip. 남은 구현 후 최종 빌드·새 설치본 검증 미완료 |
 
 ## 보존과 통합
 
@@ -1233,3 +1233,17 @@ clean `7a03a789`의 최초 `npm.cmd run health`는 backend1195중1실패·1skip�
 clean `70d92a80`에서 `npm.cmd run health` **exit0**. 의존성15·Electron103·frontend Node9/Vitest460, lint/typecheck, backend **1199중1198통과·기존 F01자료1skip**(511.475초), QA 자체 검사까지 완료했다. 시작/종료 HEAD와 소스 해시가 같고, 운영 설치본·원본4문서·109경로·보호 stash를 재검산했다. 이전 health 실패나 과거 현장 판정은 재작성하지 않았다.
 
 이전 목표 턴은 검증 자료 커밋·원격 반영으로 PROGRESS, 이번 턴은 실제 구현/회귀 검증으로 PROGRESS다. 전체 required 파일/세대/단계 시각, 초기화·spool 경계와 합산 metadata 예산, 실제 monitor 연결·PRESSURED/NORMAL 제어, 화면/관측/판정 계약·전체17명세, 최종 빌드/설치본·master 통합은 계속 미완료다. 이번에는 서버·운영 태그·백업을 변경하지 않았다.
+
+
+## 2026-10-28 추적 목적지·마지막 공개 파일의 독립 확인
+
+- `f6a04f03`: 기존 CSV owner가 새 데이터/UI 요청 없이 idle 추적 폴더를 확인한다. pending 공개가 우선이며 정상1초·실패최대30초 간격과 별도 probe 실패 이력을 사용한다. 확인128byte도 예약하며 메모리 상태 조회는 파일 I/O를 하지 않는다.
+- `0eaffb8d`: 마지막 공개 segment의 파일 식별·크기·mtime과 실제 읽기 handle을 대조한다. 삭제·교체·변경은 수동 복구로 남고 폴더 성공으로 해제하지 않는다. 확인 작업은 원문을 생성·절단·재기록하지 않는다.
+- `89492096`: 신규 segment가 기존 파일 접근 장애나 probe 재시도 간격을 우회하지 못한다. 실제 접근 회복 뒤 원래 ID의 기록을 한 번만 공개하고 과거 실패는 보존한다.
+- `47d9c3b9`: 확인용 읽기 handle의 close 불확실은 handle 하나를 보유한 수동 복구로 남겨 추가 열기·접수·공개를 차단한다. fixture에서 남긴 handle은 시험 종료 시 명시 정리했다.
+
+4개 행동의 예상 RED와 관련 검사를 12실행·24로그로 보존했다. 최초 관련129시험, 마지막 파일 식별 관련24시험, 새 기록 재시도 trace23시험/CSV2시험, 마지막 close 처리 trace24시험이 통과했다. 직접 시험과 모듈을 함께 실행한 중간23회에는 같은 신규 시험의 중복 실행1회가 있으며 독립 시나리오 수로 합산하지 않는다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-idle-access/verification.json`.
+
+clean `47d9c3b9`에서 `npm.cmd run health` **exit0**. 의존성15·Electron103·frontend Node9/Vitest460, lint/typecheck, backend **1203중1202통과·기존 F01자료1skip**(518.427초), QA 자체 검사까지 완료했다. 시작/종료 HEAD·소스 해시가 일치하고 원본4문서·109경로·보호 stash·기존 운영 설치본을 재검산했다. 이전 실패를 삭제하지 않았다.
+
+이 확인은 마지막 공개 파일의 metadata·접근 범위다. 전체 과거 segment 내용 검산, 동일 metadata를 유지한 외부 내용 변경의 탐지, 추적 파일 전체 세대/단계 시각·서비스 교체 이력의 증명이 아니다. 전체 required 상태·monitor 실제 연결, PRESSURED/NORMAL 제어, 초기화/spool 경계·합산 예산·관측/판정 계약, 전체7단계/17명세와 최종 빌드/설치본·master 통합이 남는다. 직전 사용자 요청 감사는 구현 관점 NO_PROGRESS였으며 이번은 실제 구현·검증 PROGRESS다. 서버·운영 태그·백업은 변경하지 않았다.

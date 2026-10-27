@@ -206,6 +206,8 @@ IC02–IC04는 위 계약의 구현 체크리스트다. 새 정책·단계·시�
 
 2026-10-28 CSV/이미지 probe 수명 보완: 정리 실패를 수동 복구로 유지해 추가 확인 파일 생성·새 저장 접수·owner 교체·정상 마감으로 우회하지 못하게 했다. CSV OFF와 이미지 세대/날짜 변경에도 기존 문제를 보존하며, 정상 idle 이미지 목적지는 1초마다 재확인한다. 전체 health는 통과했지만 전체 required 상태·monitor/17명세는 미완료다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/probe-cleanup-owners/verification.json`.
 
+2026-10-28 추적 목적지 보완: 기존 CSV owner가 idle 추적 폴더와 마지막 공개 segment의 metadata/읽기 접근을 재확인한다. 새 기록은 기존 파일 실패와 재시도 시각을 우회하지 못하며 삭제·교체·정리/close 불확실은 수동 복구로 유지한다. 실제 공개 성공과 directory probe 성공의 범위를 구분한다. 전체 과거 추적 무결성·세대/단계 연결·monitor/17명세 완료는 아니다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-idle-access/verification.json`.
+
 **R06 — 실제 HTTP 취득 억제**
 
 - `_img_fetch_lock` 안에서 새 upstream refresh task를 생성하기 직전에 압력 상태와 양수 요청 간격을 검사한다. 이 검사는 FR02의 발송 직전 검사를 대체하지 않는다. 기존 최소 요청률 계산의 입력을 0으로 바꾸는 방식은 사용하지 않는다. single-flight waiter와 이미 dispatch한 공유 요청은 압력 변화만으로 강제 취소하지 않는다.
