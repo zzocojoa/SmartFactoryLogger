@@ -166,6 +166,54 @@ class CSVLoggerServiceTests(unittest.TestCase):
             self.assertEqual(records[1]["after_producer_seq"], first["producer_seq"] - 1)
             self.assertEqual(records[2]["final_producer_seq"], last["producer_seq"])
 
+    def test_producer_stop_boundary_excludes_post_stop_rejections(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, auto_save=True)
+            entered, release = threading.Event(), threading.Event()
+            original_open = Path.open
+            stop_results = []
+
+            def delayed_open(path, mode="r", *args, **kwargs):
+                if path.suffix == ".csv" and mode == "a":
+                    entered.set()
+                    if not release.wait(5):
+                        raise TimeoutError("CSV boundary test did not release writer")
+                return original_open(path, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", delayed_open):
+                service.start()
+                first = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                self.assertTrue(entered.wait(2))
+                stopper = threading.Thread(target=lambda: stop_results.append(service.stop(timeout_sec=5)))
+                stopper.start()
+                try:
+                    deadline = time.monotonic() + 2
+                    while service.running and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertFalse(service.running)
+                    late = service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.100", 31.0))
+                    self.assertEqual(late["status"], "REJECTED_CLOSED")
+                finally:
+                    release.set()
+                    stopper.join(6)
+            self.assertEqual(stop_results, [True])
+            first_records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                             for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            stop = next(record for record in first_records if record["kind"] == "producer_stop")
+            self.assertEqual(stop["final_producer_seq"], first["producer_seq"],
+                             "post-stop rejection changed the closed producer interval")
+            service.start()
+            second = service.enqueue_detailed(self.create_data("2026-03-09T07:21:25.000", 32.0))
+            self.assertTrue(service.stop(timeout_sec=5))
+            all_records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                           for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+            self.assertEqual(sorted(record["after_producer_seq"] for record in all_records
+                                    if record["kind"] == "producer_start"), [0, late["producer_seq"]])
+            self.assertEqual(sorted(record["final_producer_seq"] for record in all_records
+                                    if record["kind"] == "producer_stop"), [first["producer_seq"], second["producer_seq"]])
+            stored = [row for path in self.list_v1_files(tmp_dir) for row in self.read_rows(path)[1:]]
+            self.assertEqual(sorted(float(row[3]) for row in stored), [30.0, 32.0])
+
     def read_rows(self, path: Path) -> list[list[str]]:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             return list(csv.reader(handle))

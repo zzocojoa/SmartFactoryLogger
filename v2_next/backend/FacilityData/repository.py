@@ -461,6 +461,7 @@ class CSVLoggerService:
         self._sample_seq = 0
         self._producer_seq = 0
         self._trace_start_seq = 0
+        self._trace_stop_seq: Optional[int] = None
         self._persistence_trace: Optional[PersistenceTraceWriter] = None
         self._trace_boundary_failed = False
         self.logger_service_instance_id = str(uuid4())
@@ -519,6 +520,7 @@ class CSVLoggerService:
                 raise RuntimeError("CSV trace evidence remains unresolved for the previous generation.")
             with self._runtime_lock:
                 self._trace_start_seq = self._producer_seq
+            self._trace_stop_seq = None
             self._persistence_trace = None
             self._trace_boundary_failed = False
             self.thread = None
@@ -556,6 +558,9 @@ class CSVLoggerService:
                 self._finalize_spot_observation_manifest_on_stop = False
                 self._allow_spot_observation_late_drain_on_stop = True
             if self.running:
+                # Admission uses the same lifecycle lock; later CLOSED requests
+                # must not extend this producer generation's observed interval.
+                self._trace_stop_seq = self._producer_seq
                 self.running = False
                 try:
                     self.queue.put_nowait(None)
@@ -3164,7 +3169,7 @@ class CSVLoggerService:
         if trace is None:
             return True
         with self._runtime_lock:
-            final_sequence = self._producer_seq
+            final_sequence = self._trace_stop_seq if self._trace_stop_seq is not None else self._producer_seq
             pending_events = len(self._pending_events)
         token = trace.append({"kind": "producer_stop", "final_producer_seq": final_sequence,
                               "pending_event_count": pending_events, "coverage": "PRODUCER_BOUNDARIES_ONLY"})
