@@ -67,6 +67,52 @@ except Exception:
 
 
 class CSVLoggerServiceTests(unittest.TestCase):
+    def test_validator_rejects_terminal_sink_count_mismatch(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)
+            service.start()
+            try:
+                service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+            finally:
+                self.assertTrue(service.stop(timeout_sec=5))
+            paths = sorted(tmp_dir.rglob("*.trace.jsonl"))
+            self.assertEqual(validate_csv_persistence_trace(paths)["issues"], [])
+            original = {path: path.read_bytes() for path in paths}
+            changed = 0
+            for path in paths:
+                records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+                for record in records:
+                    if record.get("kind") == "admission_summary":
+                        totals = record["required_sink_outcomes"]
+                        totals["fully_committed_event_count"] -= 1
+                        totals["outstanding_event_count"] += 1
+                        totals["sinks"]["csv_v2"]["committed_count"] -= 1
+                        totals["sinks"]["csv_v2"]["outstanding_count"] += 1
+                        self.assertTrue(totals["counts_reconciled"])
+                        changed += 1
+                path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8", newline="")
+            self.assertEqual(changed, 1)
+            before = {path: path.read_bytes() for path in paths}
+            result = validate_csv_persistence_trace(paths)
+            self.assertEqual(result["status"], "INCOMPLETE", "terminal sink counts were not reconciled")
+            self.assertIn("terminal_output_counts_mismatch", result["issues"])
+            self.assertEqual({path: path.read_bytes() for path in paths}, before)
+            for changes, issue in [({"fully_committed_event_count": True}, "invalid_terminal_output_counts"),
+                                   ({"failed_event_count": -1}, "invalid_terminal_output_counts"),
+                                   ({"sinks": {}}, "invalid_terminal_output_counts"),
+                                   ({"coverage": "unknown"}, "missing_or_unsupported_terminal_output_summary"),
+                                   ({"counts_reconciled": False}, "terminal_output_counts_mismatch")]:
+                with self.subTest(changes=changes):
+                    for path, contents in original.items():
+                        records = [json.loads(line) for line in contents.splitlines()]
+                        for record in records:
+                            if record.get("kind") == "admission_summary":
+                                record["required_sink_outcomes"].update(changes)
+                        path.write_bytes(b"".join((json.dumps(record) + "\n").encode() for record in records))
+                    result = validate_csv_persistence_trace(paths)
+                    self.assertEqual(result["status"], "INCOMPLETE")
+                    self.assertIn(issue, result["issues"])
+
     def test_validator_requires_each_admitted_sink_result(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, True, csv_v1_enabled=True, csv_v2_enabled=True)

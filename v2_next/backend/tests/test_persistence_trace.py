@@ -11,6 +11,15 @@ from backend.FacilityData.persistence_validation import validate_csv_persistence
 
 
 class PersistenceTraceTests(unittest.TestCase):
+    @staticmethod
+    def terminal_outcomes(v1_committed=0):
+        return {"contract_version": "CSV_PERSISTENCE_OUTCOMES_V1", "coverage": "TERMINAL_REQUIRED_SINK_COUNTS",
+                "accepted_event_count": v1_committed, "fully_committed_event_count": v1_committed,
+                "failed_event_count": 0, "outstanding_event_count": 0, "counts_reconciled": True,
+                "sinks": {"csv_v1": {"accepted_count": v1_committed, "committed_count": v1_committed,
+                                     "failed_count": 0, "outstanding_count": 0},
+                          "csv_v2": {"accepted_count": 0, "committed_count": 0, "failed_count": 0, "outstanding_count": 0}}}
+
     def test_validator_rejects_missing_trace_segment(self):
         with tempfile.TemporaryDirectory() as folder:
             writer = PersistenceTraceWriter(Path(folder), "segment-run")
@@ -22,7 +31,7 @@ class PersistenceTraceTests(unittest.TestCase):
             writer.append({"kind": "admission_summary", "produced_count": 0, "accounted_count": 0,
                            "unaccounted_count": 0, "accepted_count": 0, "excluded_count": 0, "rejected_count": 0,
                            "after_producer_seq": 0, "last_producer_seq": 0, "outcome_counts": {},
-                           "details_incomplete": False})
+                           "details_incomplete": False, "required_sink_outcomes": self.terminal_outcomes()})
             self.assertTrue(writer.flush(force=True))
             paths = sorted(Path(folder).glob("*.trace.jsonl"))
             self.assertEqual(len(paths), 3)
@@ -63,7 +72,8 @@ class PersistenceTraceTests(unittest.TestCase):
                 {"kind": "admission_summary", "produced_count": 1000002, "accounted_count": 1000002,
                  "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 1000000, "rejected_count": 1,
                  "after_producer_seq": 0, "last_producer_seq": 1000002,
-                 "outcome_counts": {"ACCEPTED": 1, "DISABLED": 1000000, "INVALID": 1}, "details_incomplete": False},
+                 "outcome_counts": {"ACCEPTED": 1, "DISABLED": 1000000, "INVALID": 1}, "details_incomplete": False,
+                 "required_sink_outcomes": self.terminal_outcomes(1)},
                 {"kind": "csv_row_data", "producer_seq": 1, "sink_id": "csv_v1", "record_version": 1,
                  "config_generation": 1, "source_payload_hash": "0" * 64},
             ]
@@ -107,6 +117,22 @@ class PersistenceTraceTests(unittest.TestCase):
             result = validate_csv_persistence_trace([path])
             self.assertIn("overlapping_admission_identities", result["issues"])
             self.assertIn("admission_identity_totals_mismatch", result["issues"])
+            for failed in (True, False):
+                amended = [dict(record) for record in records if record["kind"] != "csv_row_data"]
+                totals = self.terminal_outcomes(1)
+                totals["fully_committed_event_count"] = 0
+                state = "failed" if failed else "outstanding"
+                totals[f"{state}_event_count"] = 1
+                totals["sinks"]["csv_v1"]["committed_count"] = 0
+                totals["sinks"]["csv_v1"][f"{state}_count"] = 1
+                next(record for record in amended if record["kind"] == "admission_summary")["required_sink_outcomes"] = totals
+                if failed:
+                    amended.insert(4, dict(records[1], kind="csv_processing_failure", contract_version="CSV_PROCESSING_FAILURE_V1",
+                                           sink_id="csv_v1", status="FAILED", reason="fixture_processing_failure"))
+                path.write_bytes(header + b"".join((json.dumps(record) + "\n").encode() for record in amended))
+                result = validate_csv_persistence_trace([path])
+                self.assertNotIn("terminal_output_counts_mismatch", result["issues"])
+                self.assertIn("recorded_csv_processing_failure" if failed else "missing_required_sink_evidence", result["issues"])
             path.write_bytes(original)
             with patch("backend.FacilityData.persistence_validation.sqlite3.connect",
                        side_effect=sqlite3.OperationalError("fixture workspace unavailable")):
@@ -125,7 +151,7 @@ class PersistenceTraceTests(unittest.TestCase):
             writer.append({"kind": "admission_summary", "produced_count": 0, "accounted_count": 0,
                            "unaccounted_count": 0, "accepted_count": 0, "excluded_count": 0, "rejected_count": 0,
                            "after_producer_seq": 0, "last_producer_seq": 0, "outcome_counts": {},
-                           "details_incomplete": False})
+                           "details_incomplete": False, "required_sink_outcomes": self.terminal_outcomes()})
             self.assertTrue(writer.flush(force=True))
             paths = sorted(Path(folder).glob("*.trace.jsonl"))
             self.assertEqual(len(paths), 3)
@@ -164,7 +190,7 @@ class PersistenceTraceTests(unittest.TestCase):
             writer.append({"kind": "admission_summary", "produced_count": 1, "accounted_count": 1,
                            "unaccounted_count": 0, "accepted_count": 1, "excluded_count": 0, "rejected_count": 0,
                            "after_producer_seq": 0, "last_producer_seq": 1, "outcome_counts": {"ACCEPTED": 1},
-                           "details_incomplete": False})
+                           "details_incomplete": False, "required_sink_outcomes": self.terminal_outcomes(1)})
             self.assertTrue(writer.flush(force=True))
             path = next(Path(folder).glob("*.trace.jsonl"))
             original = path.read_bytes()

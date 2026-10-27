@@ -143,6 +143,54 @@ def _required_sink_issues(database: sqlite3.Connection) -> set[str]:
     return {issue for issue, query in checks.items() if database.execute(query).fetchone() is not None}
 
 
+def _terminal_output_issues(database: sqlite3.Connection, summary: dict[str, Any]) -> set[str]:
+    reported = summary.get("required_sink_outcomes")
+    if (not isinstance(reported, dict) or reported.get("contract_version") != "CSV_PERSISTENCE_OUTCOMES_V1"
+            or reported.get("coverage") != "TERMINAL_REQUIRED_SINK_COUNTS"):
+        return {"missing_or_unsupported_terminal_output_summary"}
+    event_fields = ("accepted_event_count", "fully_committed_event_count", "failed_event_count", "outstanding_event_count")
+    sink_fields = ("accepted_count", "committed_count", "failed_count", "outstanding_count")
+    reported_sinks = reported.get("sinks")
+    if (any(type(reported.get(field)) is not int or reported[field] < 0 for field in event_fields)
+            or not isinstance(reported_sinks, dict) or set(reported_sinks) != {"csv_v1", "csv_v2"}
+            or any(not isinstance(counts, dict) or any(type(counts.get(field)) is not int or counts[field] < 0
+                                                     for field in sink_fields) for counts in reported_sinks.values())):
+        return {"invalid_terminal_output_counts"}
+    events: Counter[str] = Counter()
+    sinks: dict[str, Counter[str]] = {sink: Counter() for sink in ("csv_v1", "csv_v2")}
+    previous = None
+    states: list[str] = []
+
+    def finish_event() -> None:
+        if not states:
+            return
+        events["accepted_event_count"] += 1
+        field = ("fully_committed_event_count" if all(state == "committed" for state in states)
+                 else "outstanding_event_count" if "outstanding" in states else "failed_event_count")
+        events[field] += 1
+
+    rows = database.execute("""SELECT e.sequence, e.sink,
+        sum(CASE WHEN r.kind='csv_row_data' THEN 1 ELSE 0 END),
+        sum(CASE WHEN r.kind='csv_processing_failure' THEN 1 ELSE 0 END)
+        FROM required_outputs AS e LEFT JOIN sink_receipts AS r ON e.sequence=r.sequence AND e.sink=r.sink
+        GROUP BY e.sequence, e.sink ORDER BY e.sequence, e.sink""")
+    for sequence, sink, committed, failed in rows:
+        if previous != sequence:
+            finish_event()
+            states.clear()
+            previous = sequence
+        state = "committed" if committed == 1 and failed == 0 else "failed" if failed == 1 and committed == 0 else "outstanding"
+        states.append(state)
+        sinks[sink]["accepted_count"] += 1
+        sinks[sink][f"{state}_count"] += 1
+    finish_event()
+    if (reported.get("counts_reconciled") is not True
+            or any(reported[field] != events[field] for field in event_fields)
+            or any(reported_sinks[sink][field] != counts[field] for sink, counts in sinks.items() for field in sink_fields)):
+        return {"terminal_output_counts_mismatch"}
+    return set()
+
+
 def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> dict[str, Any]:
     """Read bounded segments without treating their presence as full data proof."""
     issues: set[str] = set()
@@ -235,6 +283,7 @@ def _validate_csv_trace(paths: Sequence[Path], database: sqlite3.Connection) -> 
             issues.add("noncontiguous_trace_segments")
     if terminal_summary is not None:
         issues.update(_admission_identity_issues(database, terminal_summary))
+        issues.update(_terminal_output_issues(database, terminal_summary))
     issues.update(_required_sink_issues(database))
     if paths and not unsupported:
         for kind, values in boundaries.items():
