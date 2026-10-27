@@ -122,6 +122,60 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertEqual(writer.written_count, 0)
 
+    def test_poll_reconfiguration_activates_image_owner_without_capture(self):
+        first, second = threading.Event(), threading.Event()
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        owners = []
+        changed_path = self.root / 'new-destination'
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            owners.append(threading.current_thread())
+            (second if writer.log_path == changed_path else first).set()
+            return result
+
+        async def exercise():
+            try:
+                await spot_api.start_spot_poll_loop()
+                await asyncio.sleep(.03)
+                self.assertIsNone(spot_api._spot_image_capture_thread)
+                with spot_api.config.PERSISTENCE_CONFIG_LOCK:
+                    spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = True
+                self.assertTrue(await asyncio.to_thread(first.wait, .8),
+                                'off-to-on storage did not activate the image owner')
+                owner = spot_api._spot_image_capture_thread
+                with spot_api.config.PERSISTENCE_CONFIG_LOCK:
+                    spot_api.config.LOG_PATH = changed_path
+                self.assertTrue(await asyncio.to_thread(second.wait, .8),
+                                'new destination was not prepared without a capture')
+                self.assertIs(spot_api._spot_image_capture_thread, owner)
+                self.assertEqual(len(set(owners)), 1)
+                self.assertEqual(spot_api._spot_image_capture_writer.log_path, changed_path)
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(len(owners), 2)
+            finally:
+                task = spot_api._spot_poll_task
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
+        with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_ENABLED', False), \
+                patch.object(spot_api.config, 'SPOT_OBSERVATION_FACT_ENABLED', False), \
+                patch.object(spot_api.config, 'SPOT_URL', ''), \
+                patch.object(spot_api.config, 'SPOT_INTERNAL_TEMPERATURE_URL', ''), \
+                patch.object(spot_api, '_get_http_client', return_value=None), \
+                patch.object(spot_api, '_spot_poll_interval_sec', return_value=.01), \
+                patch.object(spot_api, '_get_spot_diagnostic_request_journal', return_value=None), \
+                patch.object(spot_api, '_start_spot_http_transport'), \
+                patch.object(spot_api, '_spot_poll_task', None), \
+                patch.object(spot_api, '_spot_poll_running', False), \
+                patch.object(spot_api, '_img_accepting_requests', False), \
+                patch.object(spot_api, '_spot_diagnostic_journal_shutdown_started', False):
+            asyncio.run(exercise())
+
     def test_image_owner_publishes_probe_results_without_capture(self):
         started, release, completed = threading.Event(), threading.Event(), threading.Event()
         probe = SpotImageCaptureWriter.probe_storage_destinations

@@ -291,6 +291,7 @@ _spot_image_capture_writer_lock = threading.Lock()
 _spot_image_capture_thread: Optional[threading.Thread] = None
 _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
 _spot_image_capture_writer_signature: Optional[tuple[Path, Path, int, float]] = None
+_spot_image_storage_activation: Optional[tuple[str, tuple[Path, Path, int, float]]] = None
 _spot_image_capture_last_enqueue_at = 0.0
 _spot_image_capture_last_enqueue_monotonic: Optional[float] = None
 _spot_image_capture_last_write_at = 0.0
@@ -675,6 +676,20 @@ def _request_spot_image_manifest_initialization() -> None:
     _start_spot_image_capture_worker()
 
 
+def _activate_spot_image_storage() -> None:
+    """Schedule configuration changes; all destination I/O stays in the owner."""
+    global _spot_image_storage_activation
+    with config.PERSISTENCE_CONFIG_LOCK:
+        mode = _spot_image_capture_mode()
+        activation = None if mode == "off" else (mode, _spot_image_capture_config_signature())
+    with _spot_image_capture_lock:
+        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or activation == _spot_image_storage_activation:
+            return
+        _spot_image_storage_activation = activation
+    if activation is not None:
+        _request_spot_image_manifest_initialization()
+
+
 def _spot_image_capture_failure_evidence(
     event: _SpotImageCaptureEvent, error: Exception, *, stage: str, error_at: float, failure_count: int,
 ) -> Dict[str, Any]:
@@ -1018,6 +1033,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_last_enqueue_monotonic
     global _spot_image_capture_recovery, _spot_image_capture_retry_at, _spot_image_capture_retry_delay
     global _spot_image_capture_retry_error_count, _spot_image_capture_recovered_count
+    global _spot_image_storage_activation
     stop_spot_image_capture_writer(timeout_sec=0.5)
     if _spot_image_capture_recovery is not None:
         _spot_image_capture_recovery = None
@@ -1055,6 +1071,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_last_error_message = None
         _spot_image_capture_last_fact = None
         _spot_image_shutdown_baseline = None
+        _spot_image_storage_activation = None
     _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.clear()
     _SPOT_IMAGE_CAPTURE_STOP.clear()
     _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
@@ -3940,6 +3957,7 @@ async def _spot_poll_loop():
 
     while _spot_poll_running:
         try:
+            _activate_spot_image_storage()
             client = _get_http_client()
             if config.SPOT_URL:
                 try:
@@ -4026,10 +4044,7 @@ async def start_spot_poll_loop():
         _spot_shutdown_transport_stopped = False
         _spot_shutdown_started_monotonic = None
     await asyncio.to_thread(_get_spot_diagnostic_request_journal)
-    if _spot_image_capture_mode() != "off":
-        # The single image owner prepares history before any capture or UI
-        # request. Its file scan must never delay temperature polling.
-        _request_spot_image_manifest_initialization()
+    _activate_spot_image_storage()
     _start_spot_http_transport()
     _img_accepting_requests = True
     _spot_poll_running = True
