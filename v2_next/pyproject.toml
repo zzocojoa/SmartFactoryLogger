@@ -24,6 +24,7 @@ files = [
   "backend/FacilityData/repository.py",
   "backend/FacilityData/spot_observation_queue.py",
     "backend/FacilityData/persistence_payload.py",
+  "backend/FacilityData/persistence_trace.py",
   "backend/FacilityData/changeover_candidate_resolution_fact.py",
   "backend/FacilityData/process_phase.py",
   "backend/FacilityData/spot_observation_fact.py",
