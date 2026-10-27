@@ -152,6 +152,39 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     } finally { unmount(); vi.unstubAllGlobals(); }
   });
 
+  it('releases replaced pending URLs and restores the last displayed image after a pressure display failure', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    const alive = new Set<string>();
+    let serial = 0;
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => { const url = `blob:owned-${++serial}`; alive.add(url); return url; });
+      static revokeObjectURL = vi.fn((url: string) => { alive.delete(url); });
+    });
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementationOnce(async () => imageResponse(false))
+      .mockImplementation(async () => imageResponse(true));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      const displayedUrl = result.current.imageUrl;
+      act(() => { result.current.handleImageLoad(displayedUrl); result.current.refreshImage(); });
+      await act(async () => undefined);
+      for (let replacement = 0; replacement < 4; replacement += 1) {
+        const pendingUrl = result.current.imageUrl;
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+        expect(alive.has(pendingUrl)).toBe(false);
+        expect(alive).toEqual(new Set([displayedUrl, result.current.imageUrl]));
+      }
+      act(() => { result.current.handleImageError(result.current.imageUrl); });
+      expect(result.current.imageUrl).toBe(displayedUrl);
+      expect(alive).toEqual(new Set([displayedUrl]));
+      expect(result.current.diagnostics.error_count).toBe(1);
+      expect(result.current.diagnostics.automatic_retry_pending).toBe(true);
+    } finally { unmount(); vi.unstubAllGlobals(); }
+    expect(alive.size).toBe(0);
+  });
+
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);

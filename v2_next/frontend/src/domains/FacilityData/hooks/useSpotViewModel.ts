@@ -596,9 +596,14 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         const previousImageState = imageStateRef.current;
         const previousImageUrl = prevUrlRef.current;
 
+        if (pendingImageUrlRef.current) {
+          // Keep the last displayed fallback, not an unconfirmed response it replaced.
+          URL.revokeObjectURL(pendingImageUrlRef.current);
+        } else {
+          pendingPreviousImageStateRef.current = previousImageUrl ? previousImageState : null;
+        }
         prevUrlRef.current = nextImageUrl;
         pendingImageUrlRef.current = nextImageUrl;
-        pendingPreviousImageStateRef.current = previousImageUrl ? previousImageState : null;
         imageStateRef.current = {
           imageUrl: nextImageUrl,
           imageError: nextImageError,
