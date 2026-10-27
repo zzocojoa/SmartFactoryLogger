@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, ContextManager, Generator, Mapping, Optional, TextIO
 
 from backend.FacilityData.spot_observation_fact import build_spot_observation_key
-from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, csv_record_sizes
+from backend.FacilityData.persistence_payload import PayloadBudgetExceeded, csv_parser_field_limit, csv_record_sizes
 
 
 SPOT_IMAGE_FACT_COLUMNS = [
@@ -80,9 +80,10 @@ def _bounded_fact_rows(handle: TextIO) -> Generator[list[str], None, None]:
             remaining -= size
             yield line
 
-    for row in csv.reader(physical_lines(), strict=True):
-        remaining = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT
-        yield row
+    with csv_parser_field_limit(SPOT_IMAGE_FACT_ROW_BYTE_LIMIT):
+        for row in csv.reader(physical_lines(), strict=True):
+            remaining = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT
+            yield row
 
 
 @dataclass

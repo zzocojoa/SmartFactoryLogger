@@ -1589,6 +1589,25 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 self.assertEqual(list(csv.DictReader(handle)), [first, second])
             self.assertEqual(writer.fact_row_count, 2)
 
+    def test_image_allowed_long_field_survives_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8long-field\xff\xd9", captured_at=1782910800.0,
+                        source_url="http://synthetic.invalid/image.jpg", source="x" * 200_000 + "한" * 20_000 + "\ntail",
+                        image_age_ms=0.0, link_checked_at=None, observation_snapshot=None)
+            expected = writer.write_capture(**args)
+            original = writer.fact_path.read_bytes()
+            self.assertLess(len(original), 1024 * 1024)
+            parser_limit = csv.field_size_limit()
+            restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            self.assertTrue(restarted.try_manifest_stats()[2], "an admitted fact field could not be recovered")
+            self.assertEqual(restarted.write_capture(**args), expected)
+            self.assertEqual(writer.fact_path.read_bytes(), original)
+            self.assertEqual(restarted.fact_row_count, 1)
+            self.assertEqual(restarted.fact_sha256, hashlib.sha256(original).hexdigest())
+            self.assertEqual(csv.field_size_limit(), parser_limit)
+
     def test_image_fact_row_limit_counts_utf8_and_multiline(self) -> None:
         for label, value in (("ascii", "x" * 60_000), ("utf8", "한" * 20_000),
                              ("multiline", ("x" * 999 + "\n") * 60)):
