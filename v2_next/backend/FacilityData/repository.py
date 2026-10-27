@@ -453,6 +453,7 @@ class CSVLoggerService:
         # shared with their writer; retained digest bytes have an explicit charge.
         self._pending_csv_locations: dict[int, _CSVRowLocation] = {}
         self._uncertain_csv_paths: set[Path] = set()
+        self._unclosed_csv_handles: dict[int, TextIO] = {}
         self._csv_write_failure_count = 0
         self._last_csv_write_failure_reason: Optional[str] = None
         self._pending_row_copies: dict[int, list[str]] = {}
@@ -562,6 +563,8 @@ class CSVLoggerService:
             ):
                 raise RuntimeError("CSV trace evidence remains unresolved for the previous generation.")
             with self._runtime_lock:
+                if self._uncertain_csv_paths or self._unclosed_csv_handles:
+                    raise RuntimeError("CSV file state requires manual recovery before restart.")
                 self._trace_start_seq = self._producer_seq
             self._trace_stop_seq = None
             self._trace_config_generation = None
@@ -3025,7 +3028,8 @@ class CSVLoggerService:
                 raise _CSVRecordUncertain("csv_short_write")
             return written
         except _CSVRecordUncertain:
-            self._uncertain_csv_paths.add(path)
+            with self._runtime_lock:
+                self._uncertain_csv_paths.add(path)
             raise
         finally:
             payload = digest = None
@@ -3159,13 +3163,27 @@ class CSVLoggerService:
         with self._runtime_lock:
             self._last_write_at = time.time()
 
-    def _close_file(self, handle: Optional[TextIO]) -> None:
+    def _close_file(self, handle: Optional[TextIO]) -> bool:
         if handle is None:
-            return
+            return True
         try:
             handle.close()
+            with self._runtime_lock:
+                self._unclosed_csv_handles.pop(id(handle), None)
+            return True
         except Exception as exc:
+            with self._runtime_lock:
+                self._runtime_write_failure_observed = True
+                self._csv_write_failure_count += 1
+                self._last_csv_write_failure_reason = "csv_close_failed"
+                name = getattr(handle, "name", None)
+                if isinstance(name, (str, os.PathLike)):
+                    self._uncertain_csv_paths.add(Path(name))
+                if not handle.closed:
+                    # Preserve ownership if close did not release the resource.
+                    self._unclosed_csv_handles[id(handle)] = handle
             self.logger.warning("Failed to close CSV log file handle: %s", exc)
+            return False
 
     def _close_v2_file(
         self,
@@ -3182,6 +3200,8 @@ class CSVLoggerService:
             except Exception as exc:
                 closeout_succeeded = False
                 self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
+        if not self._close_file(handle):
+            closeout_succeeded = False
         observation_manifest_ready = self._finalize_spot_observation_manifest_on_stop
         if (
             not observation_manifest_ready
@@ -3271,7 +3291,6 @@ class CSVLoggerService:
                 self.logger.warning(
                     "Skipped SPOT observation fact manifest because writes did not drain."
                 )
-        self._close_file(handle)
         if csv_path is not None and csv_path not in self._deferred_observation_closeouts:
             csv_path_key = str(csv_path)
             with self._runtime_lock:
@@ -3367,6 +3386,8 @@ class CSVLoggerService:
             last_processing_failure_reason = self._last_processing_failure_reason
             csv_write_failure_count = self._csv_write_failure_count
             last_csv_write_failure_reason = self._last_csv_write_failure_reason
+            uncertain_csv_file_count = len(self._uncertain_csv_paths)
+            unclosed_csv_handle_count = len(self._unclosed_csv_handles)
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -3394,6 +3415,8 @@ class CSVLoggerService:
             "last_processing_failure_reason": last_processing_failure_reason,
             "csv_write_failure_count": csv_write_failure_count,
             "last_csv_write_failure_reason": last_csv_write_failure_reason,
+            "uncertain_csv_file_count": uncertain_csv_file_count,
+            "unclosed_csv_handle_count": unclosed_csv_handle_count,
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "persistence_trace": trace.snapshot() if trace is not None else None,
             "persistence_trace_coverage": "PRODUCER_AND_CONFIG_BOUNDARIES" if trace is not None else "NOT_EVALUATED",
@@ -3775,7 +3798,8 @@ class CSVLoggerService:
                 shutdown_flush_succeeded = False
         if not self._finish_persistence_trace():
             shutdown_flush_succeeded = False
-        self._close_file(f_handle)
+        if not self._close_file(f_handle):
+            shutdown_flush_succeeded = False
         if not self._close_v2_file(
             v2_handle,
             closeout_reason="shutdown",
@@ -3795,7 +3819,7 @@ class CSVLoggerService:
             self.logger.warning(
                 "Skipped SPOT image fact final manifest because image capture did not drain."
             )
-        self._shutdown_flush_succeeded = shutdown_flush_succeeded
+        self._shutdown_flush_succeeded = shutdown_flush_succeeded and not self._runtime_write_failure_observed
         del self._writer_context.settings
         self.logger.info("CSV logger thread stopped.")
 

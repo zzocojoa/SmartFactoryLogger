@@ -219,6 +219,53 @@ class CSVLoggerServiceTests(unittest.TestCase):
         self.assertFalse(result["closed"])
         self.assertEqual(result["state"]["pending_event_count"], 20)
 
+    def test_csv_close_failure_prevents_clean_shutdown(self) -> None:
+        original_open = Path.open
+
+        class CloseFailure:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+            def close(self):
+                if not leave_open:
+                    self.handle.close()
+                raise OSError("synthetic CSV close failure")
+
+        def failing_open(path, mode="r", *args, **kwargs):
+            handle = original_open(path, mode, *args, **kwargs)
+            if mode == "a" and path.name.startswith("Factory_Integrated_Log") and path.suffix == ".csv":
+                opened.append(handle)
+                return CloseFailure(handle)
+            return handle
+
+        for v2, leave_open in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(v2=v2, leave_open=leave_open), self.create_temp_dir() as tmp_dir:
+                opened = []
+                service = self.create_service(tmp_dir, True, csv_v1_enabled=not v2, csv_v2_enabled=v2)
+                try:
+                    with patch.object(Path, "open", failing_open):
+                        service.start()
+                        service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 30.0))
+                        service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.100", 31.0))
+                        closed = service.stop(timeout_sec=5)
+                    files = list(tmp_dir.glob("Factory_Integrated_Log*.csv"))
+                    self.assertEqual(len(files), 1)
+                    self.assertEqual(len(self.read_rows(files[0])), 3)
+                    self.assertFalse(closed, "CSV close failure was reported as clean shutdown")
+                    state = service.get_runtime_state()
+                    self.assertEqual(state["last_csv_write_failure_reason"], "csv_close_failed")
+                    self.assertGreaterEqual(state["csv_write_failure_count"], 1)
+                    self.assertEqual(state["uncertain_csv_file_count"], 1)
+                    self.assertEqual(state["unclosed_csv_handle_count"], int(leave_open))
+                    with self.assertRaisesRegex(RuntimeError, "CSV file state"):
+                        service.start()
+                finally:
+                    for handle in opened:
+                        handle.close()
+
     def test_trace_publish_failure_prevents_clean_csv_shutdown(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, auto_save=True)
