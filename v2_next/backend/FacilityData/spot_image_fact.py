@@ -177,7 +177,7 @@ class SpotImageCaptureWriter:
     _destination_probe_check_at: Optional[float] = field(default=None, init=False, repr=False)
     _destination_probe_retry_delay: float = field(default=1.0, init=False, repr=False)
     _destination_probe_failure_count: int = field(default=0, init=False, repr=False)
-    _destination_probe_generation: int = field(default=0, init=False, repr=False)
+    config_generation: int = field(default=0, repr=False)
     _destination_probe_manual_recovery: bool = field(default=False, init=False, repr=False)
     _destination_probe_lock: Any = field(default_factory=threading.Lock, init=False, repr=False)
 
@@ -214,7 +214,7 @@ class SpotImageCaptureWriter:
             try:
                 workspace_path = self.fact_path if sink_id == "image_fact" else destination
                 reservation = (self.payload_reservation(128, "destination_probe_byte_limit", sink_id,
-                                                       workspace_path, self._destination_probe_generation)
+                                                       workspace_path, self.config_generation)
                                if self.payload_reservation is not None else nullcontext())
                 with reservation:
                     try:
@@ -236,7 +236,7 @@ class SpotImageCaptureWriter:
             manual_recovery = probe_manual_recovery or (sink_id == "image_fact" and self._fact_append_is_uncertain())
             results.append({
                 "sink_id": sink_id, "destination_path": str(destination.absolute()),
-                "config_generation": self._destination_probe_generation,
+                "config_generation": self.config_generation,
                 "probe_scope": "directory_only", "probe_status": "blocked" if error_type else "available",
                 "probe_error_type": error_type, "probe_checked_monotonic": time.monotonic(),
                 "file_check_scope": file_scope, "file_check_error_type": file_error_type,
@@ -298,14 +298,14 @@ class SpotImageCaptureWriter:
             return {"next_retry_at_monotonic": self._destination_probe_retry_at,
                     "next_check_at_monotonic": self._destination_probe_check_at,
                     "retry_delay_sec": self._destination_probe_retry_delay,
-                    "config_generation": self._destination_probe_generation,
+                    "config_generation": self.config_generation,
                     "failure_count": self._destination_probe_failure_count}
 
     def bind_destination_probe_generation(self, generation: int) -> None:
         with self._destination_probe_lock:
-            if generation == self._destination_probe_generation:
+            if generation == self.config_generation:
                 return
-            self._destination_probe_generation = generation
+            self.config_generation = generation
             if self._destination_probe_manual_recovery:
                 return  # Preserve the original failed destination and generation.
             self._destination_probe_results = ()
@@ -448,7 +448,7 @@ class SpotImageCaptureWriter:
             # Verify the existing whole capture without allocating another JPEG.
             size = min(4096, max(1, len(expected)))
             reservation = (self.payload_reservation(size, "capture_verification_byte_limit", "image_jpeg",
-                                                   path.parent, self._destination_probe_generation)
+                                                   path.parent, self.config_generation)
                            if self.payload_reservation is not None else nullcontext())
             with reservation, memoryview(bytearray(size)) as window, memoryview(expected) as source:
                 offset = 0
@@ -702,7 +702,7 @@ class SpotImageCaptureWriter:
     def _read_fact_digest(self, digest: Any, offset: int, size: int) -> bytes:
         scratch = min(SPOT_IMAGE_FACT_DIGEST_BUFFER_BYTES, size)
         reservation = (self.payload_reservation(scratch, "fact_digest_byte_limit", "image_fact",
-                                               self.fact_path, self._destination_probe_generation)
+                                               self.fact_path, self.config_generation)
                        if self.payload_reservation is not None else nullcontext())
         last_byte = b""
         with reservation, memoryview(bytearray(scratch)) as window:

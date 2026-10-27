@@ -497,8 +497,36 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         clock = [1000.0]
         entered, release = self.block_write()
         new_root = self.root / 'next-generation'
+        reads = []
+        open_file = Path.open
+
         def key(path):
             return hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(path)))).hexdigest()
+
+        class Reader:
+            def __init__(self, handle, path):
+                self.handle, self.path = handle, path
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self.handle.__exit__(*exc)
+
+            def readinto(self, buffer):
+                destinations = spot.get_spot_image_capture_shutdown_status()['pending_destinations']
+                reads.append((self.path, {s['config_generation'] for s in destinations
+                                         if s['destination_key'] == key(self.path) and s['pending_bytes']}))
+                return self.handle.readinto(buffer)
+
+        def observed(path, mode='r', *args, **kwargs):
+            handle = open_file(path, mode, *args, **kwargs)
+            return Reader(handle, path) if path.name == 'spot_image_fact.csv' and mode == 'rb' else handle
+
+        self.stack.enter_context(patch.object(Path, 'open', observed))
         with patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]):
             self.assertTrue(self.enqueue().accepted)
             self.assertTrue(entered.wait(3))
@@ -530,6 +558,12 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             final = spot.get_spot_image_capture_shutdown_status()
             self.assertEqual(final['pending_destinations'], [])
             self.assertEqual(final['pending_payload_bytes'], 0)
+        self.assertEqual({path for path, _ in reads},
+                         {self.root / 'spot_image_fact.csv', new_root / 'spot_image_fact.csv'})
+        for path, generations in reads:
+            expected = old_fact if path.parent == self.root else new_fact
+            self.assertEqual(generations, {expected['config_generation']},
+                             'fact workspace did not retain the capture admission generation')
         for root in (self.root, new_root):
             self.assertEqual(len(list((root / 'images').rglob('*.jpg'))), 1)
             with (root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:

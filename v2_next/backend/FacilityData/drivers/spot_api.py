@@ -699,15 +699,20 @@ def _image_probe_manual_recovery_required() -> bool:
 
 def _get_spot_image_capture_writer(
     signature: Optional[tuple[Path, Path, int, float]] = None,
+    *, generation: Optional[int] = None,
 ) -> SpotImageCaptureWriter:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature
+    with config.PERSISTENCE_CONFIG_LOCK:
+        if signature is None:
+            signature = _spot_image_capture_config_signature()
+        if generation is None:
+            with _spot_image_capture_lock:
+                generation = _spot_image_storage_generation
     with _spot_image_capture_writer_lock:
         if _image_probe_manual_recovery_required():
             raise RuntimeError("SPOT image probe requires manual recovery before owner replacement")
         if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set():
             raise RuntimeError("SPOT image owner resource release is unconfirmed")
-        if signature is None:
-            signature = _spot_image_capture_config_signature()
         if _spot_image_capture_writer is None or _spot_image_capture_writer_signature != signature:
             _spot_image_capture_writer = SpotImageCaptureWriter(
                 log_path=signature[0],
@@ -715,8 +720,10 @@ def _get_spot_image_capture_writer(
                 retention_days=signature[2],
                 link_stale_threshold_ms=signature[3],
                 payload_reservation=_reserve_image_writer_payload,
+                config_generation=generation,
             )
             _spot_image_capture_writer_signature = signature
+        _spot_image_capture_writer.bind_destination_probe_generation(generation)
         return _spot_image_capture_writer
 
 
@@ -923,7 +930,10 @@ def _spot_image_capture_worker() -> None:
             decoded_snapshot = None
             processing_bytes = 0
             try:
-                current_writer = _get_spot_image_capture_writer(event.writer_signature)
+                with _spot_image_capture_lock:
+                    admitted_stage = _spot_image_capture_pending_stages.get(id(event))
+                    generation = admitted_stage.config_generation if admitted_stage is not None else 0
+                current_writer = _get_spot_image_capture_writer(event.writer_signature, generation=generation)
                 if writer is not None and writer is not current_writer:
                     writer.close_retention_scan()
                 writer = current_writer
