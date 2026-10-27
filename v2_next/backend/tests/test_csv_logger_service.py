@@ -2550,10 +2550,18 @@ class CSVLoggerServiceTests(unittest.TestCase):
                 with self.assertLogs(service.logger, level="ERROR"), patch.object(Path, "replace", failed_publish):
                     service.start()
                     try:
+                        # The producer_start segment may fail before any CSV
+                        # output is processed. Exercise that ordering explicitly.
+                        self.assertTrue(blocked.wait(10), "initial trace publish was not attempted")
                         receipt = service.enqueue_detailed(data)
                         self.assertEqual(receipt["status"], "ACCEPTED")
                         self.assertTrue(blocked.wait(10), "failure evidence publish was not attempted")
                         state = service.get_runtime_state()
+                        deadline = time.monotonic() + 10
+                        while (time.monotonic() < deadline
+                               and state["csv_processing_failure_evidence_pending_count"] != 2):
+                            time.sleep(0.02)
+                            state = service.get_runtime_state()
                         self.assertEqual(state["csv_processing_failure_evidence_pending_count"], 2)
                         self.assertEqual(state["pending_event_count"], 1)
                         self.assertGreater(state["pending_payload_bytes"], 0)
