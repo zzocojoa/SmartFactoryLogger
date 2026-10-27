@@ -167,6 +167,7 @@ class SpotImageCaptureWriter:
     _fact_append_uncertain: bool = field(default=False, init=False, repr=False)
     _fact_recovery_key: bytes = field(default=b"", init=False, repr=False)
     _retention_scan: Optional[Generator[None, None, None]] = field(default=None, init=False, repr=False)
+    _destination_probe_results: tuple[dict[str, Any], ...] = field(default=(), init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._fact_recovery_key = hashlib.sha256(
@@ -207,7 +208,12 @@ class SpotImageCaptureWriter:
                 "probe_scope": "directory_only", "probe_status": "blocked" if error_type else "available",
                 "probe_error_type": error_type, "probe_checked_monotonic": time.monotonic(),
             })
-        return tuple(results)
+        self._destination_probe_results = tuple(results)
+        return self.destination_probe_snapshot()
+
+    def destination_probe_snapshot(self) -> tuple[dict[str, Any], ...]:
+        """Memory-only copy; directory success does not establish file integrity."""
+        return tuple(dict(item) for item in self._destination_probe_results)
 
     @property
     def fact_row_count(self) -> int:

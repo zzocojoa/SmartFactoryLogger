@@ -122,6 +122,42 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertEqual(writer.written_count, 0)
 
+    def test_image_owner_publishes_probe_results_without_capture(self):
+        started, release, completed = threading.Event(), threading.Event(), threading.Event()
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        owners = []
+
+        def blocked(writer, *, captured_at):
+            owners.append(threading.current_thread())
+            started.set()
+            if not release.wait(5):
+                raise TimeoutError('test destination probe not released')
+            result = probe(writer, captured_at=captured_at)
+            completed.set()
+            return result
+
+        try:
+            with patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', blocked):
+                self.request_initializer()
+                self.assertTrue(started.wait(.5), 'image owner did not probe storage destinations')
+                writer = spot_api._spot_image_capture_writer
+                self.assertEqual(writer.destination_probe_snapshot(), ())
+                self.assertIsNot(owners[0], threading.current_thread())
+                release.set()
+                self.assertTrue(completed.wait(2))
+                with patch.object(Path, 'open', side_effect=AssertionError('snapshot opened a file')), \
+                        patch.object(Path, 'stat', side_effect=AssertionError('snapshot inspected a path')):
+                    snapshot = writer.destination_probe_snapshot()
+                self.assertEqual({item['sink_id'] for item in snapshot}, {'image_fact', 'image_jpeg'})
+                self.assertTrue(all(item['probe_status'] == 'available' for item in snapshot))
+                snapshot[0]['probe_status'] = 'caller changed its copy'
+                self.assertTrue(all(item['probe_status'] == 'available' for item in writer.destination_probe_snapshot()))
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(writer.written_count, 0)
+        finally:
+            release.set()
+            self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
     def test_destination_probe_success_does_not_clear_uncertain_history(self):
         log_path = self.root / 'fact'
         log_path.mkdir()

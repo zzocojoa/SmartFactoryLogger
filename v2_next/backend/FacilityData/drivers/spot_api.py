@@ -733,6 +733,10 @@ def _spot_image_capture_worker() -> None:
                     if writer is not None and writer is not current_writer:
                         writer.close_retention_scan()
                     writer = current_writer
+                    if (_spot_image_capture_mode() != "off" and _SPOT_IMAGE_CAPTURE_QUEUE.empty()
+                            and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
+                            and not _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()):
+                        writer.probe_storage_destinations(captured_at=time.time())
                 except Exception:
                     # Initialization is not an image capture. Keep its failure
                     # separate from the capture enqueue/write/failure equation.
