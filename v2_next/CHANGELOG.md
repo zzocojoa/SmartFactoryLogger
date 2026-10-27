@@ -4,6 +4,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+- Check image fact path identity before capture, the actual file handle
+  before append, and file ID/expected size after close. Keep detected
+  changes uncertain instead of adopting a replacement as the new
+  baseline; remaining concurrent I/O and metadata recovery are pending.
+
 - Preserve malformed image fact history across writer restart instead of
   appending to an incomplete tail or rolling an unknown schema aside.
   Scan for only the requested capture and retain one recent row, avoiding
