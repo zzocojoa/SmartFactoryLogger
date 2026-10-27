@@ -1792,6 +1792,63 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 recreated.write_capture(**args)
             self.assertEqual(writer.fact_path.read_bytes(), replacements[0])
 
+    def test_image_active_fact_change_guards(self) -> None:
+        for mutation in ("in_place", "truncate", "delete", "directory"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+                args = dict(image_bytes=b"\xff\xd8change-guards\xff\xd9", captured_at=1782910800.123456,
+                            source_url="http://synthetic.invalid/image.jpg", source="original-capture", image_age_ms=0.0,
+                            link_checked_at=None, observation_snapshot=None)
+                fact = writer.write_capture(**args)
+                self.assertEqual(writer.write_capture(**args), fact)
+                before = writer.fact_path.stat()
+                content = writer.fact_path.read_bytes()
+                if mutation == "in_place":
+                    writer.fact_path.write_bytes(content.replace(b"original-capture", b"external-capture", 1))
+                    os.utime(writer.fact_path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+                elif mutation == "truncate":
+                    writer.fact_path.write_bytes(content[:-13])
+                else:
+                    writer.fact_path.unlink()
+                    if mutation == "directory":
+                        writer.fact_path.mkdir()
+                originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+                with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                    writer.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+                self.assertFalse(writer.try_manifest_stats()[2])
+                self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+                self.assertEqual(writer.written_count, 1)
+
+    def test_image_initialization_change_is_not_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = dict(image_bytes=b"\xff\xd8init-race\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="original-capture", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            writer.write_capture(**args)
+            replacement = root / "replacement.csv"
+            replacement.write_bytes(writer.fact_path.read_bytes().replace(b"original-capture", b"external-capture", 1))
+            opened = Path.open
+            replaced = False
+
+            def replace_before_rows(path, mode="r", *open_args, **kwargs):
+                nonlocal replaced
+                if path == writer.fact_path and mode == "r" and not replaced:
+                    replacement.replace(path)
+                    replaced = True
+                return opened(path, mode, *open_args, **kwargs)
+
+            with patch.object(Path, "open", new=replace_before_rows):
+                restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            self.assertTrue(replaced)
+            originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            self.assertFalse(restarted.try_manifest_stats()[2])
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                restarted.write_capture(**args)
+            self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+
     def test_image_manifest_fails_closed_after_external_fact_append(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
