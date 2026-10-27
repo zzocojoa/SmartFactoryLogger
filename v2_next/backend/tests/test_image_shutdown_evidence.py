@@ -449,6 +449,48 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                     self.assertEqual(len(list(csv.DictReader(handle))), count)
             self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 3)
 
+    def test_pending_images_keep_admitted_destinations_after_config_change(self):
+        clock = [1000.0]
+        entered, release = self.block_write()
+        new_root = self.root / 'next-generation'
+        def key(path):
+            return hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(path)))).hexdigest()
+        with patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]):
+            self.assertTrue(self.enqueue().accepted)
+            self.assertTrue(entered.wait(3))
+            clock[0] = 1005.0
+            with patch.object(spot.config, 'LOG_PATH', str(new_root)):
+                self.assertTrue(self.enqueue().accepted)
+                pending = spot.get_spot_image_capture_shutdown_status()
+                destinations = pending.get('pending_destinations', [])
+                self.assertEqual(len(destinations), 4)
+                by_key = {item['destination_key']: item for item in destinations}
+                old_fact = by_key[key(self.root / 'spot_image_fact.csv')]
+                new_fact = by_key[key(new_root / 'spot_image_fact.csv')]
+                self.assertIsInstance(old_fact['config_generation'], int)
+                self.assertGreater(new_fact['config_generation'], old_fact['config_generation'])
+                self.assertEqual(old_fact['oldest_pending_monotonic'], 1000.0)
+                self.assertEqual(new_fact['oldest_pending_monotonic'], 1005.0)
+                self.assertEqual(old_fact['pending_count'], 1)
+                self.assertEqual(new_fact['pending_count'], 1)
+                for root, fact in ((self.root, old_fact), (new_root, new_fact)):
+                    jpeg = by_key[key(root / 'images' / '2026' / '09' / '29')]
+                    self.assertEqual(jpeg['config_generation'], fact['config_generation'])
+                    self.assertEqual(jpeg['stage_due_monotonic'], fact['oldest_pending_monotonic'])
+                    self.assertGreater(jpeg['pending_bytes'], 0)
+                with patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MODE', 'off'):
+                    spot._activate_spot_image_storage()
+                    self.assertEqual(spot.get_spot_image_capture_shutdown_status()['pending_destinations'], destinations)
+                    release.set()
+                    self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            final = spot.get_spot_image_capture_shutdown_status()
+            self.assertEqual(final['pending_destinations'], [])
+            self.assertEqual(final['pending_payload_bytes'], 0)
+        for root in (self.root, new_root):
+            self.assertEqual(len(list((root / 'images').rglob('*.jpg'))), 1)
+            with (root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+                self.assertEqual(len(list(csv.DictReader(handle))), 1)
+
     def test_transient_fact_open_failure_retries_owned_capture(self):
         image = io.BytesIO()
         Image.new('RGB', (2, 2), (3, 4, 5)).save(image, format='JPEG')

@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import math
+import os
 import queue
 import re
 import threading
@@ -312,6 +313,9 @@ class _SpotImageCaptureEvent:
 class _ImageCapturePendingStage:
     admitted_monotonic: float
     clock_domain: str
+    config_generation: int
+    destinations: tuple[tuple[str, str], ...]
+    payload_bytes: int
 
 
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
@@ -748,28 +752,36 @@ def _request_spot_image_manifest_initialization() -> None:
     _start_spot_image_capture_worker()
 
 
-def _activate_spot_image_storage() -> None:
-    """Schedule configuration changes; all destination I/O stays in the owner."""
+def _bind_spot_image_activation_locked(
+    activation: Optional[tuple[str, tuple[Path, Path, int, float]]],
+) -> bool:
+    """Caller holds configuration then image accounting locks; no file I/O."""
     global _spot_image_storage_activation, _spot_image_storage_generation
     global _spot_image_initialization_retry_at, _spot_image_initialization_retry_delay
+    changed = activation != _spot_image_storage_activation
+    if changed:
+        _spot_image_storage_activation = activation
+        _spot_image_storage_generation += 1
+        _spot_image_initialization_retry_at = None
+        _spot_image_initialization_retry_delay = 1.0
+        if activation is None:
+            _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
+    return changed
+
+
+def _activate_spot_image_storage() -> None:
+    """Schedule configuration changes; all destination I/O stays in the owner."""
     with config.PERSISTENCE_CONFIG_LOCK:
         mode = _spot_image_capture_mode()
         activation = None if mode == "off" else (mode, _spot_image_capture_config_signature())
-    with _spot_image_capture_lock:
-        if (_SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set()
-                or _image_probe_manual_recovery_required()):
-            return
-        changed = activation != _spot_image_storage_activation
-        if changed:
-            _spot_image_storage_activation = activation
-            _spot_image_storage_generation += 1
-            _spot_image_initialization_retry_at = None
-            _spot_image_initialization_retry_delay = 1.0
-            if activation is None:
-                _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
-        initialize = activation is not None and (
-            changed or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set())
-        pending = _SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks > 0
+        with _spot_image_capture_lock:
+            if (_SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set()
+                    or _image_probe_manual_recovery_required()):
+                return
+            changed = _bind_spot_image_activation_locked(activation)
+            initialize = activation is not None and (
+                changed or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set())
+            pending = _SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks > 0
     if initialize:
         _request_spot_image_manifest_initialization()
     elif pending:
@@ -1051,6 +1063,27 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
     )
 
 
+def _image_destination_key(path: Path) -> str:
+    return hashlib.sha256(os.fsencode(os.path.normcase(os.path.abspath(path)))).hexdigest()
+
+
+def _image_pending_destinations_locked() -> list[Dict[str, Any]]:
+    destinations: Dict[tuple[int, str, str], Dict[str, Any]] = {}
+    for stage in _spot_image_capture_pending_stages.values():
+        for sink, key in stage.destinations:
+            item = destinations.setdefault((stage.config_generation, sink, key), {
+                "sink_id": sink, "config_generation": stage.config_generation, "destination_key": key,
+                "pending_count": 0, "pending_bytes": 0, "clock_domain": stage.clock_domain,
+                "oldest_pending_monotonic": stage.admitted_monotonic,
+                "stage_due_monotonic": stage.admitted_monotonic,
+            })
+            item["pending_count"] += 1
+            item["pending_bytes"] += stage.payload_bytes
+            item["oldest_pending_monotonic"] = min(item["oldest_pending_monotonic"], stage.admitted_monotonic)
+            item["stage_due_monotonic"] = item["oldest_pending_monotonic"]
+    return list(destinations.values())
+
+
 def _image_shutdown_status_locked() -> Dict[str, Any]:
     # Outcome counters and task_done use this same lock order. No file I/O,
     # writer initialization or thread join is permitted in this snapshot.
@@ -1114,6 +1147,7 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "stage_due_monotonic": oldest,
         "clock_domain": clock_domain_id() if timing_known else None,
         "pending_clock_unknown": not timing_known,
+        "pending_destinations": _image_pending_destinations_locked(),
         "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
@@ -1629,11 +1663,18 @@ def _enqueue_spot_image_capture_locked(
             if len(snapshot_payload) > payload_bound:
                 raise ValueError("Image snapshot exceeded its preflight bound")
         payload_size = len(image_bytes) + (len(snapshot_payload) if snapshot_payload is not None else 0)
+        signature = _spot_image_capture_config_signature()
+        fact_key = _image_destination_key(signature[0] / SPOT_IMAGE_FACT_FILENAME)
+        try:
+            day = datetime.fromtimestamp(captured_at, timezone.utc)
+            jpeg_key = _image_destination_key(signature[1] / day.strftime('%Y/%m/%d'))
+        except (ValueError, OverflowError, OSError):
+            jpeg_key = ""  # Invalid legacy timestamp remains unknown until the writer rejects it.
         event = _SpotImageCaptureEvent(
             image_bytes=bytes(image_bytes), captured_at=captured_at, source_url=image_url,
             source=source, image_age_ms=image_age_ms, link_checked_at=link_checked_at,
             observation_snapshot=snapshot_payload, reserved_payload_bytes=payload_size,
-            writer_signature=_spot_image_capture_config_signature(), capture_id=capture_id,
+            writer_signature=signature, capture_id=capture_id,
             snapshot_text_storage_bytes=text_bytes,
         )
         with _spot_image_capture_lock:
@@ -1650,8 +1691,10 @@ def _enqueue_spot_image_capture_locked(
                 return ImageCaptureAdmissionResult("REJECTED_FULL", "queue_full", capture_id)
             transferred_bytes = payload_size
             admitted_monotonic = time.monotonic()
+            _bind_spot_image_activation_locked((mode, signature))
             _spot_image_capture_pending_stages[id(event)] = _ImageCapturePendingStage(
-                admitted_monotonic, clock_domain_id())
+                admitted_monotonic, clock_domain_id(), _spot_image_storage_generation,
+                (("image_fact", fact_key), ("image_jpeg", jpeg_key)), payload_size)
             _spot_image_capture_enqueued_count += 1
             _spot_image_capture_last_enqueue_at = time.time()
             _spot_image_capture_last_enqueue_monotonic = admitted_monotonic
