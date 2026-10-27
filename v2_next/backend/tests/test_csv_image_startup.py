@@ -6,6 +6,7 @@ import io
 import json
 import tempfile
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -516,6 +517,59 @@ class CsvImageStartupTests(unittest.TestCase):
         self.assertFalse(writer._manifest_state_ready)
         self.assertEqual(history.read_bytes(), before)
         self.assertEqual([path for path in self.root.rglob('*') if path.is_file()], [history])
+
+    def test_image_probe_manual_recovery_reaches_service_closeout(self):
+        unlink, retained = Path.unlink, []
+
+        def failed_cleanup(path, *args, **kwargs):
+            if path.name.startswith('.sfl-storage-probe-') and path.parent != self.root:
+                retained.append(path)
+                raise PermissionError('image owner probe cleanup denied')
+            return unlink(path, *args, **kwargs)
+
+        try:
+            with patch.object(Path, 'unlink', failed_cleanup):
+                self.request_initializer()
+                deadline = time.perf_counter() + 2
+                writer = None
+                while time.perf_counter() < deadline:
+                    writer = spot_api._spot_image_capture_writer
+                    if writer is not None and any(item['manual_recovery_required']
+                                                  for item in writer.destination_probe_snapshot()):
+                        break
+                    time.sleep(.01)
+                self.assertIsNotNone(writer)
+                self.assertEqual(len(retained), 1, 'the real image owner did not reach probe cleanup')
+                receipt = spot_api._maybe_enqueue_spot_image_capture(
+                    image_bytes=b'not admitted', captured_at=1793106000.0,
+                    image_url='http://spot.invalid/image.jpg', source='test')
+                self.assertEqual(receipt.status, 'REJECTED_UNAVAILABLE',
+                                 'image service accepted work after unresolved probe cleanup')
+                self.assertEqual(receipt.reason, 'image_probe_manual_recovery')
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(spot_api._spot_image_capture_dropped_count, 1)
+                self.assertEqual(spot_api._spot_image_capture_pending_payload_bytes, 0)
+                original = writer.destination_probe_snapshot()
+                with patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_MODE', 'off'):
+                    spot_api._activate_spot_image_storage()
+                self.request_initializer()
+                signature = spot_api._spot_image_capture_writer_signature
+                changed = (self.root / 'replacement', self.root / 'replacement-images', *signature[2:])
+                with self.assertRaisesRegex(RuntimeError, 'manual recovery'):
+                    spot_api._get_spot_image_capture_writer(changed)
+                self.assertIs(spot_api._spot_image_capture_writer, writer)
+                self.assertEqual(writer.destination_probe_snapshot(), original)
+                self.assertFalse(spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2))
+                state = spot_api.get_spot_image_capture_shutdown_status()
+                self.assertTrue(state['probe_manual_recovery_required'])
+                self.assertFalse(state['writes_drained'])
+                self.assertTrue(state['integrity_unresolved'])
+                self.assertEqual(state['enqueued_count'], 0)
+                self.assertEqual(len(retained), 1)
+                self.assertTrue(retained[0].exists())
+                self.assertFalse((self.root / 'replacement').exists())
+        finally:
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
 
     def test_image_probe_cleanup_failure_blocks_automatic_reuse(self):
         writer = SpotImageCaptureWriter(log_path=self.root / 'fact', capture_root=self.root / 'images')

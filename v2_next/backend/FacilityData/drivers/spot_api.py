@@ -666,11 +666,19 @@ def _reserve_image_writer_payload(size: int, reason: str) -> Iterator[None]:
             _spot_image_capture_pending_payload_bytes -= size
 
 
+def _image_probe_manual_recovery_required() -> bool:
+    """Memory-only; keep the existing owner as the unresolved resource holder."""
+    writer = _spot_image_capture_writer
+    return writer is not None and writer.probe_manual_recovery_required()
+
+
 def _get_spot_image_capture_writer(
     signature: Optional[tuple[Path, Path, int, float]] = None,
 ) -> SpotImageCaptureWriter:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature
     with _spot_image_capture_writer_lock:
+        if _image_probe_manual_recovery_required():
+            raise RuntimeError("SPOT image probe requires manual recovery before owner replacement")
         if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set():
             raise RuntimeError("SPOT image owner resource release is unconfirmed")
         if signature is None:
@@ -692,7 +700,7 @@ def _start_spot_image_capture_worker(*, force: bool = False) -> None:
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
         return
     with _spot_image_capture_lock:
-        if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set():
+        if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set() or _image_probe_manual_recovery_required():
             return
         if _spot_image_capture_thread is not None and _spot_image_capture_thread.is_alive():
             return
@@ -720,7 +728,8 @@ def _request_spot_image_manifest_initialization() -> None:
     # Reuse the owned, joined image worker even when no images are captured.
     # Otherwise a cold startup would merely move the historical scan to exit.
     with _spot_image_capture_lock:
-        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set():
+        if (_SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set()
+                or _image_probe_manual_recovery_required()):
             return
         _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.set()
     _start_spot_image_capture_worker()
@@ -734,7 +743,8 @@ def _activate_spot_image_storage() -> None:
         mode = _spot_image_capture_mode()
         activation = None if mode == "off" else (mode, _spot_image_capture_config_signature())
     with _spot_image_capture_lock:
-        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set():
+        if (_SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() or _SPOT_IMAGE_CAPTURE_STOP.is_set()
+                or _image_probe_manual_recovery_required()):
             return
         changed = activation != _spot_image_storage_activation
         if changed:
@@ -815,6 +825,10 @@ def _spot_image_capture_worker() -> None:
         while (not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty()
                or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
                or _spot_image_capture_recovery is not None):
+            if _image_probe_manual_recovery_required():
+                if _SPOT_IMAGE_CAPTURE_STOP.wait(.1):
+                    break
+                continue  # Preserve admitted work and the old owner; no file I/O.
             if _spot_image_capture_recovery is not None:
                 # The same single owner retains the original queue task and
                 # payload reservation. Shutdown must not schedule another try.
@@ -1014,6 +1028,7 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
     return (not _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
             and not _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
             and not _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set()
+            and not _image_probe_manual_recovery_required()
             and getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0) and not (
         thread is not None and thread.is_alive()
     )
@@ -1040,8 +1055,10 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
     initialization_pending = _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
     initialization_failed = _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
     owner_release_failed = _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set()
+    probe_manual_recovery = _image_probe_manual_recovery_required()
     writes_drained = (bool(baseline) and blocked and stopping and not alive and queued == 0
-                      and unfinished == 0 and accounting and not initialization_pending and not owner_release_failed)
+                      and unfinished == 0 and accounting and not initialization_pending
+                      and not owner_release_failed and not probe_manual_recovery)
     return {
         "shutdown_id": baseline.get("shutdown_id"),
         "requested_at": baseline.get("requested_at"),
@@ -1078,6 +1095,7 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "manifest_initialization_requested": initialization_pending,
         "manifest_initialization_failed": initialization_failed,
         "owner_release_failed": owner_release_failed,
+        "probe_manual_recovery_required": probe_manual_recovery,
         "writes_drained": writes_drained,
         # This is evidence of unresolved writes, not an image-loss estimate.
         "integrity_unresolved": failures > 0 or _spot_image_capture_retry_error_count > 0
@@ -1542,6 +1560,9 @@ def _enqueue_spot_image_capture_locked(
     with _spot_image_capture_lock:
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
             return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
+        if _image_probe_manual_recovery_required():
+            _spot_image_capture_dropped_count += 1
+            return ImageCaptureAdmissionResult("REJECTED_UNAVAILABLE", "image_probe_manual_recovery", capture_id)
         if (min_interval_sec > 0.0 and _spot_image_capture_last_enqueue_monotonic is not None
                 and monotonic_now - _spot_image_capture_last_enqueue_monotonic < min_interval_sec):
             return ImageCaptureAdmissionResult("DISABLED", "policy_skipped_interval", capture_id)
@@ -1592,6 +1613,9 @@ def _enqueue_spot_image_capture_locked(
         with _spot_image_capture_lock:
             if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
                 return ImageCaptureAdmissionResult("REJECTED_CLOSED", "persistence_closed", capture_id)
+            if _image_probe_manual_recovery_required():
+                _spot_image_capture_dropped_count += 1
+                return ImageCaptureAdmissionResult("REJECTED_UNAVAILABLE", "image_probe_manual_recovery", capture_id)
             try:
                 _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
             except queue.Full:
