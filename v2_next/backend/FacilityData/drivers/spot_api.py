@@ -290,6 +290,7 @@ _SPOT_IMAGE_CAPTURE_STOP = threading.Event()
 _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED = threading.Event()
 _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED = threading.Event()
 _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED = threading.Event()
+_SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED = threading.Event()
 _spot_image_capture_lock = threading.Lock()
 # Historical fact hashing/row scans must not block producer accounting or
 # memory-only shutdown snapshots. Writer construction has its own lock.
@@ -651,6 +652,8 @@ def _get_spot_image_capture_writer(
 ) -> SpotImageCaptureWriter:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature
     with _spot_image_capture_writer_lock:
+        if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set():
+            raise RuntimeError("SPOT image owner resource release is unconfirmed")
         if signature is None:
             signature = _spot_image_capture_config_signature()
         if _spot_image_capture_writer is None or _spot_image_capture_writer_signature != signature:
@@ -670,6 +673,8 @@ def _start_spot_image_capture_worker(*, force: bool = False) -> None:
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
         return
     with _spot_image_capture_lock:
+        if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set():
+            return
         if _spot_image_capture_thread is not None and _spot_image_capture_thread.is_alive():
             return
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
@@ -966,7 +971,11 @@ def _spot_image_capture_worker() -> None:
 
     finally:
         if writer is not None:
-            writer.close_retention_scan()
+            try:
+                writer.close_retention_scan()
+            except Exception:
+                _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.set()
+                _logger.exception("SPOT image owner resource release is unconfirmed")
 
 
 def flush_spot_image_capture_queue(timeout_sec: float = 2.0) -> bool:
@@ -985,6 +994,7 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
         thread.join(timeout=max(0.0, timeout_sec))
     return (not _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
             and not _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
+            and not _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set()
             and getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0) and not (
         thread is not None and thread.is_alive()
     )
@@ -1010,8 +1020,9 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
     stopping = _SPOT_IMAGE_CAPTURE_STOP.is_set()
     initialization_pending = _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
     initialization_failed = _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set()
+    owner_release_failed = _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set()
     writes_drained = (bool(baseline) and blocked and stopping and not alive and queued == 0
-                      and unfinished == 0 and accounting and not initialization_pending)
+                      and unfinished == 0 and accounting and not initialization_pending and not owner_release_failed)
     return {
         "shutdown_id": baseline.get("shutdown_id"),
         "requested_at": baseline.get("requested_at"),
@@ -1047,6 +1058,7 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "accounting_consistent": accounting,
         "manifest_initialization_requested": initialization_pending,
         "manifest_initialization_failed": initialization_failed,
+        "owner_release_failed": owner_release_failed,
         "writes_drained": writes_drained,
         # This is evidence of unresolved writes, not an image-loss estimate.
         "integrity_unresolved": failures > 0 or _spot_image_capture_retry_error_count > 0
@@ -1160,6 +1172,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     _SPOT_IMAGE_CAPTURE_STOP.clear()
     _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
     _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.clear()
+    _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.clear()
 
 
 def _reset_spot_image_request_state_for_tests() -> None:
@@ -1282,6 +1295,7 @@ def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str
             "fact_manifest_state_ready": fact_manifest_state_ready,
             "manifest_initialization_requested": _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set(),
             "manifest_initialization_failed": _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set(),
+            "owner_release_failed": _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set(),
             "dropped_count": _spot_image_capture_dropped_count,
             "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
             "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
@@ -1313,6 +1327,8 @@ def get_spot_image_capture_manifest_stats(
     fact_path: Path,
     wait_for_manifest: bool = True,
 ) -> Dict[str, Any] | None:
+    if _SPOT_IMAGE_CAPTURE_OWNER_RELEASE_FAILED.is_set():
+        raise RuntimeError("SPOT image owner resource release is unconfirmed")
     if _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set():
         raise RuntimeError("SPOT image manifest initialization failed")
     if not wait_for_manifest:

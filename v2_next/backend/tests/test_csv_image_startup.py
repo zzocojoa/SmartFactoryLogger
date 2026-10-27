@@ -902,6 +902,53 @@ class CsvImageStartupTests(unittest.TestCase):
                 patch.object(spot_api, '_spot_diagnostic_journal_shutdown_started', False):
             asyncio.run(exercise())
 
+    def test_failed_owner_cleanup_blocks_initializer_replacement(self):
+        cleaning = threading.Event()
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        close = SpotImageCaptureWriter.close_retention_scan
+        clock, probes, uncaught = [100.0], [], []
+
+        def fail_first_probe(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            probes.append(threading.current_thread())
+            if len(probes) == 1:
+                raise OSError('initializer error before owner cleanup')
+            return result
+
+        def fail_cleanup(writer):
+            close(writer)
+            cleaning.set()
+            raise OSError('owner resource release could not be confirmed')
+
+        try:
+            with patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', fail_first_probe), \
+                    patch.object(SpotImageCaptureWriter, 'close_retention_scan', fail_cleanup), \
+                    patch.object(threading, 'excepthook', side_effect=lambda args: uncaught.append(args.exc_type)), \
+                    patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
+                    patch.object(spot_api.time, 'monotonic', side_effect=lambda: clock[0]):
+                spot_api._activate_spot_image_storage()
+                self.assertTrue(cleaning.wait(.8))
+                owner = spot_api._spot_image_capture_thread
+                owner.join(.5)
+                self.assertFalse(owner.is_alive())
+                clock[0] = 101
+                spot_api._activate_spot_image_storage()
+                self.assertIs(spot_api._spot_image_capture_thread, owner,
+                              'new owner started despite unconfirmed resource cleanup')
+                spot_api._start_spot_image_capture_worker(force=True)
+                self.assertIs(spot_api._spot_image_capture_thread, owner)
+                self.assertFalse(spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=.1))
+                status = spot_api.get_spot_image_capture_shutdown_status()
+                self.assertTrue(status['owner_release_failed'])
+                self.assertFalse(status['writes_drained'])
+                self.assertTrue(status['integrity_unresolved'])
+                with self.assertRaisesRegex(RuntimeError, 'owner resource release'):
+                    spot_api.get_spot_image_capture_manifest_stats(
+                        fact_path=self.root / spot_image_fact.SPOT_IMAGE_FACT_FILENAME)
+                self.assertEqual(uncaught, [])
+        finally:
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
+
     def test_initialization_failure_is_not_counted_as_a_lost_capture(self):
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
                 patch.object(SpotImageCaptureWriter, '_initialize_manifest_state',
