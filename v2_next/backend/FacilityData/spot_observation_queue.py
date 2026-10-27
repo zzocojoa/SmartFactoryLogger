@@ -122,6 +122,7 @@ class SpotObservationQueue:
             "initialization_retry_delay_sec": 1.0,
             "initialization_failure_count": 0,
             "initialization_manual_recovery": False,
+            "storage_probe_manual_recovery": False,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
         self._thread.start()
@@ -138,7 +139,8 @@ class SpotObservationQueue:
         except (TypeError, ValueError, OverflowError):
             return self._reject("INVALID", "snapshot_serialization_failed", observation_key)
         with self._lock:
-            if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
+            if (self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]
+                    or self._state["storage_probe_manual_recovery"]):
                 return self._reject_locked("REJECTED_UNAVAILABLE", "file_manual_recovery", observation_key)
             if self._state["initialization_state"] == "failed" and not self._stop.is_set():
                 return self._reject_locked("REJECTED_UNAVAILABLE", "initialization_failed", observation_key)
@@ -220,6 +222,7 @@ class SpotObservationQueue:
             and state["spool_pending_count"] == 0 and state["spool_failure_count"] == 0
             and not state["required_file_manual_recovery"]
             and not state["spool_manual_recovery"]
+            and not state["storage_probe_manual_recovery"]
         )
         return state
 
@@ -427,6 +430,9 @@ class SpotObservationQueue:
                     probe["probe_failure_count"] += 1
                     probe["next_probe_monotonic"] = None if manual else checked + probe["retry_delay_sec"]
                     probe["retry_delay_sec"] = min(30.0, 2 * probe["retry_delay_sec"])
+                    if manual:
+                        self._state["storage_probe_manual_recovery"] = True
+                        self._state["accepting"] = False
                 else:
                     probe.update(last_probe_success_monotonic=checked,
                                  next_probe_monotonic=checked + 1.0, retry_delay_sec=1.0)
@@ -522,10 +528,10 @@ class SpotObservationQueue:
             self._probe_storage_destinations()
             with self._lock:
                 self._state["initialization_state"] = "ready"
-                self._state["accepting"] = not self._stop.is_set()
+                self._state["accepting"] = not (self._stop.is_set() or self._state["storage_probe_manual_recovery"])
                 self._state["initialization_duration_ms"] = (time.monotonic()-started)*1000
             self._probe_required_file_access(writer)
-            if self._state["required_file_manual_recovery"]:
+            if self._state["required_file_manual_recovery"] or self._state["storage_probe_manual_recovery"]:
                 return
         except Exception:
             with self._lock:
@@ -540,6 +546,8 @@ class SpotObservationQueue:
             return  # Accepted-but-unwritten items remain visible; never claim clean.
         while not self._stop.is_set() or not self._queue.empty():
             self._probe_storage_destinations()
+            if self._state["storage_probe_manual_recovery"]:
+                break
             self._recover_spool_if_due(writer)
             if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
                 break

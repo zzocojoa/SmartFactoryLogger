@@ -1278,6 +1278,53 @@ class FactQueueTests(unittest.TestCase):
                 threading.Event().wait(.1)
                 self.assertEqual(len(attempts), before)
 
+    def test_changed_destination_probe_requires_manual_recovery(self):
+        original_replace = os.replace
+        clock, changed = [100.0], []
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = SpotObservationFactWriter(Path(tmp) / 'facts.csv')
+            self.assertTrue(writer.ensure_initialized())
+            original_fact = writer.output_path.read_bytes()
+            spool_directory = writer.spool_write_directory
+
+            def replace_probe(source, target):
+                original_replace(source, target)
+                if Path(target).parent == spool_directory:
+                    foreign = spool_directory / 'foreign-file'
+                    foreign.write_bytes(b'preserve a file owned by someone else')
+                    original_replace(foreign, target)
+                    changed.append(Path(target))
+
+            with patch('os.replace', side_effect=replace_probe), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    deadline = time.perf_counter() + 2
+                    while time.perf_counter() < deadline:
+                        state = owner.snapshot()
+                        if state['initialization_state'] == 'ready':
+                            break
+                        threading.Event().wait(.01)
+                    spool = next(item for item in state['storage_destinations']
+                                 if item['sink_id'] == 'temperature_spool')
+                    self.assertTrue(spool['manual_recovery_required'])
+                    self.assertEqual(spool['probe_status'], 'blocked')
+                    self.assertFalse(state['writes_drained'],
+                                     'uncertain probe ownership was reported as a clean closeout')
+                    self.assertFalse(state['accepting'])
+                    self.assertEqual(owner.enqueue_detailed(observation()).status, 'REJECTED_UNAVAILABLE')
+                    with self.assertRaises(FactPersistencePending):
+                        owner.manifest_summary()
+                    clock[0] = 1000.0
+                    threading.Event().wait(.1)
+                    self.assertEqual(len(changed), 1, 'manual recovery restarted automatic probes')
+                    self.assertEqual(changed[0].read_bytes(), b'preserve a file owned by someone else')
+                    self.assertEqual(writer.output_path.read_bytes(), original_fact)
+                    self.assertEqual(owner.snapshot()['pending_payload_bytes'], 0)
+                finally:
+                    closed = owner.close(3)
+            self.assertFalse(closed)
+
     def test_required_fact_access_retry_is_bounded_and_stops_on_close(self):
         original_open = Path.open
         clock, attempts = [100.0], []
