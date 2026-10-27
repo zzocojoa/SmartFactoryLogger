@@ -347,6 +347,8 @@ class CSVLoggerServiceTests(unittest.TestCase):
                                         service.apply_config(log_path=new_dir)
                                     timestamp = "2026-03-10T07:20:25.000" if change == "date" else "2026-03-09T07:20:26.000"
                                     second = service.enqueue_detailed(self.create_data(timestamp, 31.0))
+                                    queued = [second, *(service.enqueue_detailed(self.create_data(timestamp, value))
+                                                        for value in (32.0, 33.0))]
                                     release.set()
                                     self.assertTrue(failed.wait(2))
                                     deadline = time.monotonic() + 2
@@ -358,7 +360,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
                                     release.set()
                                     closed = service.stop(timeout_sec=5)
                             self.assertEqual(first["status"], "ACCEPTED")
-                            self.assertEqual(second["status"], "ACCEPTED")
+                            self.assertTrue(all(receipt["status"] == "ACCEPTED" for receipt in queued))
                             self.assertEqual(len(opened_paths), 1, "CSV rollover bypassed unresolved close ownership")
                             self.assertEqual(len(list(tmp_dir.rglob("Factory_Integrated_Log*.csv"))), 1)
                             self.assertEqual(len(self.read_rows(opened_paths[0])), 2)
@@ -367,8 +369,21 @@ class CSVLoggerServiceTests(unittest.TestCase):
                             self.assertFalse(closed)
                             state = service.get_runtime_state()
                             self.assertTrue(state["csv_manual_recovery_required"])
-                            self.assertEqual(state["pending_event_count"], 1)
+                            self.assertEqual(state["pending_event_count"], len(queued))
                             self.assertEqual(state["unclosed_csv_handle_count"], int(leave_open))
+                            records = [json.loads(line) for path in tmp_dir.rglob("*.trace.jsonl")
+                                       for line in path.read_text(encoding="utf-8").splitlines()[1:]]
+                            admissions = [record for record in records if record.get("kind") == "csv_admission"]
+                            self.assertEqual({record["producer_seq"] for record in admissions},
+                                             {receipt["producer_seq"] for receipt in (first, *queued)},
+                                             "terminal trace lost accepted IDs blocked before writer adoption")
+                            self.assertEqual(len(admissions), len(queued) + 1)
+                            retained = next(record for record in admissions if record["producer_seq"] == second["producer_seq"])
+                            self.assertEqual(retained["config_generation"], second["config_generation"])
+                            self.assertEqual(Path(retained["admitted_log_dir"]), new_dir if change == "destination" else old_dir)
+                            summary = next(record for record in records if record.get("kind") == "admission_summary")
+                            self.assertEqual(summary["required_sink_outcomes"]["outstanding_event_count"], len(queued))
+                            self.assertEqual(summary["data_integrity_status"], "NOT_EVALUATED")
                         finally:
                             for handle in opened:
                                 handle.close()

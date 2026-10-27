@@ -3629,9 +3629,10 @@ class CSVLoggerService:
         for sequence, sink in keys:
             with self._runtime_lock:
                 reason, token = self._pending_csv_failure_evidence[(sequence, sink)]
-                envelope = self._pending_events[sequence][0]
             if token is not None:
                 continue
+            with self._runtime_lock:
+                envelope = self._pending_events[sequence][0]
             settings = envelope.write_config
             token = trace.append({
                 "kind": "csv_processing_failure", "contract_version": "CSV_PROCESSING_FAILURE_V1",
@@ -3640,6 +3641,7 @@ class CSVLoggerService:
                 "required_sinks": settings.required_sinks, "sink_id": sink,
                 "admitted_log_dir": str(settings.log_dir), "status": "FAILED", "reason": reason,
             })
+            del envelope  # Drop the temporary payload owner before acknowledging committed receipts.
             if token is None:
                 break  # Keep the same identity and reason when the segment budget is full.
             with self._runtime_lock:
@@ -3661,6 +3663,22 @@ class CSVLoggerService:
         if trace is None:
             return True
         self._record_persistence_trace_stop()
+        with self._runtime_lock:
+            retained_envelopes = tuple(event for event, _ in self._pending_events.values())
+        # Close/rollover uncertainty may prevent an already accepted event from
+        # ever reaching the row builder. Preserve its contract without writing data.
+        for envelope in retained_envelopes:
+            while True:
+                previous_commit = trace.snapshot()["committed_segment_seq"]
+                if self._record_csv_admission(envelope):
+                    break
+                if not trace.flush(force=True):
+                    return False
+                if trace.snapshot()["committed_segment_seq"] == previous_commit:
+                    return False  # An unpublishable record must not spin at shutdown.
+        if retained_envelopes:
+            del envelope
+        del retained_envelopes  # Failure receipt commits may retire these payload reservations next.
         while True:
             previous_commit = trace.snapshot()["committed_segment_seq"]
             if not self._drain_csv_processing_failures(force=True):
