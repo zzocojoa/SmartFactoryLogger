@@ -761,7 +761,8 @@ def _spot_image_capture_worker() -> None:
                     _SPOT_IMAGE_CAPTURE_STOP.wait(min(remaining, 0.1))
                     continue
                 event = _spot_image_capture_recovery
-            elif _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set():
+            elif (_SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set()
+                  and _SPOT_IMAGE_CAPTURE_QUEUE.empty()):
                 _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
                 try:
                     current_writer = _get_spot_image_capture_writer()

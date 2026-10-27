@@ -1,5 +1,7 @@
 """CSV startup must not wait for historical image-manifest initialization."""
 import asyncio
+import csv
+import io
 import json
 import tempfile
 import threading
@@ -9,6 +11,8 @@ from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
+
+from PIL import Image
 
 from backend.FacilityData.drivers import spot_api
 from backend.FacilityData.repository import CSVLoggerService
@@ -445,6 +449,50 @@ class CsvImageStartupTests(unittest.TestCase):
         finally:
             release.set()
             spot_api._reset_spot_image_capture_state_for_tests()
+
+    def test_pending_capture_drains_before_new_destination_initialization(self):
+        started, release = threading.Event(), threading.Event()
+        initialize = SpotImageCaptureWriter._initialize_manifest_state
+        image_buffer = io.BytesIO()
+        Image.new('RGB', (2, 2), color=(1, 2, 3)).save(image_buffer, format='JPEG')
+        payload = image_buffer.getvalue()
+        new_root = self.root / 'next-generation'
+        written_when_initializing = []
+
+        def observe_initialization(writer):
+            if writer.log_path == new_root:
+                written_when_initializing.append(spot_api._spot_image_capture_written_count)
+                started.set()
+                if not release.wait(5):
+                    raise TimeoutError('new destination initializer was not released')
+            initialize(writer)
+
+        try:
+            # Delay only worker scheduling so a real admission precedes the change.
+            with patch.object(spot_api, '_start_spot_image_capture_worker'), \
+                    patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', False):
+                admission = spot_api._maybe_enqueue_spot_image_capture(
+                    image_bytes=payload, captured_at=1793100000.0,
+                    image_url='http://fixture/image', source='fixture')
+                self.assertEqual(admission.status, 'ACCEPTED')
+            with patch.object(spot_api.config, 'LOG_PATH', new_root), \
+                    patch.object(SpotImageCaptureWriter, '_initialize_manifest_state', observe_initialization):
+                self.request_initializer()
+                self.assertTrue(started.wait(2))
+                self.assertEqual(written_when_initializing, [1],
+                                 'new destination initialized before the admitted capture drained')
+                self.assertEqual(spot_api._SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks, 0)
+                with (self.root / spot_image_fact.SPOT_IMAGE_FACT_FILENAME).open(newline='', encoding='utf-8-sig') as handle:
+                    self.assertEqual(len(list(csv.DictReader(handle))), 1)
+                images = list((self.root / 'spot_images').rglob('*.jpg'))
+                self.assertEqual(len(images), 1)
+                self.assertEqual(images[0].read_bytes(), payload)
+                release.set()
+                self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+                self.assertEqual(spot_api._spot_image_capture_writer.log_path, new_root)
+        finally:
+            release.set()
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
 
     def test_initialization_failure_is_not_counted_as_a_lost_capture(self):
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
