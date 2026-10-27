@@ -674,9 +674,13 @@ def _start_spot_image_capture_worker(*, force: bool = False) -> None:
             return
         if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
             return
-        if _spot_image_initialization_retry_at is not None and (
+        retry_deadlines = [deadline for deadline in (
+            _spot_image_initialization_retry_at,
+            _spot_image_capture_retry_at if _spot_image_capture_recovery is not None else None,
+        ) if deadline is not None]
+        if retry_deadlines and (
             _SPOT_IMAGE_CAPTURE_STOP.is_set() or force
-            or time.monotonic() < _spot_image_initialization_retry_at
+            or time.monotonic() < max(retry_deadlines)
         ):
             return
         _SPOT_IMAGE_CAPTURE_STOP.clear()
@@ -718,8 +722,13 @@ def _activate_spot_image_storage() -> None:
                 _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.clear()
         initialize = activation is not None and (
             changed or _SPOT_IMAGE_MANIFEST_INITIALIZATION_REQUESTED.is_set())
+        pending = _SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks > 0
     if initialize:
         _request_spot_image_manifest_initialization()
+    elif pending:
+        # Disabling future captures must not abandon an admitted old-generation
+        # event when its initializer owner exited. Its own deadline still applies.
+        _start_spot_image_capture_worker()
 
 
 def _spot_image_capture_failure_evidence(
@@ -949,6 +958,11 @@ def _spot_image_capture_worker() -> None:
                         "error_type": failure_evidence["error_type"],
                     },
                 )
+            if retain_for_retry and failure_stage == "writer_initialization":
+                _SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.set()
+                # Keep the same event, queue task and payload reservation for
+                # the replacement owner; the service tick cannot overlap us.
+                break
 
     finally:
         if writer is not None:

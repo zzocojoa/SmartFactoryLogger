@@ -699,6 +699,65 @@ class CsvImageStartupTests(unittest.TestCase):
         finally:
             spot_api.stop_spot_image_capture_writer(timeout_sec=2)
 
+    def test_pending_capture_survives_initializer_restart_when_storage_turns_off(self):
+        failed = threading.Event()
+        resolve = Path.resolve
+        fact_path = self.root / spot_image_fact.SPOT_IMAGE_FACT_FILENAME
+        unavailable, clock = [True], [100.0]
+        image_buffer = io.BytesIO()
+        Image.new('RGB', (2, 2), color=(1, 2, 3)).save(image_buffer, format='JPEG')
+        payload = image_buffer.getvalue()
+        changed_path = self.root / 'new-destination'
+
+        def resolve_path(path, *args, **kwargs):
+            if path == fact_path and unavailable[0]:
+                failed.set()
+                raise PermissionError('accepted capture initializer is temporarily unavailable')
+            return resolve(path, *args, **kwargs)
+
+        try:
+            with patch.object(Path, 'resolve', resolve_path), \
+                    patch.object(spot_api.time, 'monotonic', side_effect=lambda: clock[0]), \
+                    patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', False):
+                admission = spot_api._maybe_enqueue_spot_image_capture(
+                    image_bytes=payload, captured_at=1793100000.0,
+                    image_url='http://fixture/image', source='fixture',
+                    capture_id='spotimg_20261027T112000000000Z_' + 'a' * 32)
+                self.assertEqual(admission.status, 'ACCEPTED')
+                self.assertTrue(failed.wait(.8))
+                first_owner = spot_api._spot_image_capture_thread
+                first_owner.join(.5)
+                self.assertFalse(first_owner.is_alive(), 'pending capture initializer owner remained alive')
+                event = spot_api._spot_image_capture_recovery
+                self.assertEqual(event.capture_id, admission.capture_id)
+                self.assertEqual(event.image_bytes, payload)
+                self.assertGreater(spot_api._spot_image_capture_pending_payload_bytes, 0)
+                unavailable[0] = False
+                with patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_ENABLED', False), \
+                        patch.object(spot_api.config, 'LOG_PATH', changed_path):
+                    clock[0] = 100.99
+                    spot_api._activate_spot_image_storage()
+                    self.assertIs(spot_api._spot_image_capture_thread, first_owner)
+                    self.assertIs(spot_api._spot_image_capture_recovery, event)
+                    clock[0] = 101.0
+                    spot_api._activate_spot_image_storage()
+                    self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2))
+                self.assertIsNot(spot_api._spot_image_capture_thread, first_owner)
+                self.assertEqual(spot_api._spot_image_capture_pending_payload_bytes, 0)
+                self.assertEqual(spot_api._spot_image_capture_written_count, 1)
+                self.assertEqual(spot_api._spot_image_capture_recovered_count, 1)
+                self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
+                self.assertTrue(spot_api._SPOT_IMAGE_MANIFEST_INITIALIZATION_FAILED.is_set())
+                self.assertFalse(changed_path.exists())
+                with fact_path.open(newline='', encoding='utf-8-sig') as handle:
+                    rows = list(csv.DictReader(handle))
+                self.assertEqual([row['spot_image_capture_id'] for row in rows], [admission.capture_id])
+                images = list((self.root / 'spot_images').rglob('*.jpg'))
+                self.assertEqual(len(images), 1)
+                self.assertEqual(images[0].read_bytes(), payload)
+        finally:
+            spot_api.stop_spot_image_capture_writer(timeout_sec=2)
+
     def test_initialization_failure_is_not_counted_as_a_lost_capture(self):
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
                 patch.object(SpotImageCaptureWriter, '_initialize_manifest_state',
