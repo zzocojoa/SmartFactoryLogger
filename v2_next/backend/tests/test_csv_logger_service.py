@@ -135,7 +135,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
             Billet_Cycle_ID="C1",
         )
 
-    def test_partial_csv_batch_retry_preserves_each_row_once(self) -> None:
+    def capture_partial_csv_batch(self, change_file=None):
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, auto_save=True)
             original_open = Path.open
@@ -143,6 +143,7 @@ class CSVLoggerServiceTests(unittest.TestCase):
             failed = False
             writes = 0
             rows_at_failure = []
+            failure_bytes = b""
 
             class PartialBatchFile:
                 def __init__(self, handle, path):
@@ -152,13 +153,16 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     return getattr(self.handle, name)
 
                 def write(self, text):
-                    nonlocal failed, writes
+                    nonlocal failed, writes, failure_bytes
                     writes += 1
                     if writes == 9 and not failed:  # Header and seven real data rows.
                         failed = True
                         self.handle.flush()
                         with original_open(self.path, "r", newline="", encoding="utf-8-sig") as reader:
                             rows_at_failure.extend(list(csv.reader(reader))[1:])
+                        if change_file is not None:
+                            change_file(self.path)
+                        failure_bytes = self.path.read_bytes()
                         raise OSError("synthetic CSV write failure after seven rows")
                     return self.handle.write(text)
 
@@ -187,15 +191,33 @@ class CSVLoggerServiceTests(unittest.TestCase):
             files = self.list_v1_files(tmp_dir)
             self.assertEqual(len(files), 1)
             rows = self.read_rows(files[0])[1:]
-            self.assertEqual([float(row[3]) for row in rows], list(range(20)),
-                             "partial CSV batch retry duplicated persisted rows")
-            self.assertEqual(rows[:7], rows_at_failure)
-            self.assertFalse(closed, "recovery must not erase the write failure")
-            state = service.get_runtime_state()
-            self.assertEqual(state["pending_event_count"], 0)
-            self.assertEqual(state["pending_payload_bytes"], 0)
-            self.assertEqual(state["csv_write_failure_count"], 1)
-            self.assertEqual(state["last_csv_write_failure_reason"], "csv_write_or_readback_failed")
+            return {"rows": rows, "prefix": rows_at_failure, "closed": closed,
+                    "state": service.get_runtime_state(), "before_retry": failure_bytes,
+                    "after_retry": files[0].read_bytes()}
+
+    def test_partial_csv_batch_retry_preserves_each_row_once(self) -> None:
+        result = self.capture_partial_csv_batch()
+        self.assertEqual([float(row[3]) for row in result["rows"]], list(range(20)),
+                         "partial CSV batch retry duplicated persisted rows")
+        self.assertEqual(result["rows"][:7], result["prefix"])
+        self.assertFalse(result["closed"], "recovery must not erase the write failure")
+        state = result["state"]
+        self.assertEqual(state["pending_event_count"], 0)
+        self.assertEqual(state["pending_payload_bytes"], 0)
+        self.assertEqual(state["csv_write_failure_count"], 1)
+        self.assertEqual(state["last_csv_write_failure_reason"], "csv_write_or_readback_failed")
+
+    def test_csv_retry_does_not_restore_unexpectedly_removed_rows(self) -> None:
+        def remove_written_rows(path):
+            with path.open("r+b") as handle:
+                header_length = len(handle.readline())
+                handle.truncate(header_length)
+
+        result = self.capture_partial_csv_batch(remove_written_rows)
+        self.assertEqual(result["after_retry"], result["before_retry"],
+                         "CSV retry silently restored unexpectedly removed rows")
+        self.assertFalse(result["closed"])
+        self.assertEqual(result["state"]["pending_event_count"], 20)
 
     def test_trace_publish_failure_prevents_clean_csv_shutdown(self) -> None:
         with self.create_temp_dir() as tmp_dir:

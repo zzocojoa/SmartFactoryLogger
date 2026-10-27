@@ -339,7 +339,7 @@ CSV_ROW_READBACK_BYTES = 4096
 CSV_ROW_DIGEST_BYTES = 32
 
 
-@dataclass(frozen=True)
+@dataclass
 class _CSVRowLocation:
     path: Path
     device: int
@@ -347,6 +347,7 @@ class _CSVRowLocation:
     offset: int
     length: int
     digest: bytes
+    write_completed: bool = False
 
 
 class _CSVRecordOutput:
@@ -388,6 +389,7 @@ class _ReservedCSVWriter:
             try:
                 result = writer.writerow(values)
                 self._handle.flush()
+                self._owner._mark_csv_record_write_completed(row)
                 return result
             finally:
                 # csv.writer retains its largest UCS4 record until destroyed.
@@ -2941,6 +2943,12 @@ class CSVLoggerService:
     def _filename_timestamp(self, timestamp: datetime) -> str:
         return self._to_local_timestamp(timestamp).strftime("%Y%m%d_%H%M%S")
 
+    def _mark_csv_record_write_completed(self, row: Iterable[Any]) -> None:
+        with self._runtime_lock:
+            location = self._pending_csv_locations.get(id(row))
+            if location is not None:
+                location.write_completed = True
+
     def _csv_record_exists(self, location: _CSVRowLocation, handle: TextIO) -> bool:
         current = os.fstat(handle.fileno())
         identity = (location.device, location.inode)
@@ -2951,6 +2959,8 @@ class CSVLoggerService:
             if (before.st_dev, before.st_ino) != identity:
                 raise _CSVRecordUncertain("csv_file_identity_changed")
             if before.st_size == location.offset:
+                if location.write_completed:
+                    raise _CSVRecordUncertain("csv_previously_written_record_missing")
                 return False  # Confirmed absent, with no partial bytes to overwrite.
             if before.st_size < location.offset + location.length:
                 raise _CSVRecordUncertain("csv_partial_or_missing_record")
