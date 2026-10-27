@@ -212,6 +212,55 @@ class CsvImageStartupTests(unittest.TestCase):
             release.set()
             self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
 
+    def test_image_owner_retries_failed_destination_with_bounded_backoff(self):
+        image_path = self.root / 'blocked-image-path'
+        image_path.write_bytes(b'fixture blocks directory creation')
+        probe = SpotImageCaptureWriter.probe_storage_destinations
+        clock = [100.0]
+        calls = []
+        condition = threading.Condition()
+
+        def observed(writer, *, captured_at):
+            result = probe(writer, captured_at=captured_at)
+            with condition:
+                calls.append((clock[0], threading.current_thread(), result))
+                condition.notify_all()
+            return result
+
+        def wait_for_count(count, timeout=.8):
+            with condition:
+                return condition.wait_for(lambda: len(calls) >= count, timeout=timeout)
+
+        try:
+            with patch.object(spot_api.config, 'SPOT_IMAGE_CAPTURE_PATH', str(image_path)), \
+                    patch.object(SpotImageCaptureWriter, 'probe_storage_destinations', observed), \
+                    patch.object(spot_image_fact.time, 'monotonic', side_effect=lambda: clock[0]):
+                self.request_initializer()
+                self.assertTrue(wait_for_count(1))
+                due = clock[0]
+                for count, delay in enumerate((1, 2, 4, 8, 16, 30, 30), start=2):
+                    due += delay
+                    clock[0] = due - .01
+                    self.assertFalse(wait_for_count(count, timeout=.15), 'probe ran before its backoff deadline')
+                    clock[0] = due
+                    self.assertTrue(wait_for_count(count), 'owner did not retry the failed destination')
+                writer = spot_api._spot_image_capture_writer
+                self.assertEqual([call[0] for call in calls], [100, 101, 103, 107, 115, 131, 161, 191])
+                self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 8)
+                image_path.unlink()  # Remove only this test's deliberate blocking file.
+                clock[0] = due + 30
+                self.assertTrue(wait_for_count(9))
+                self.assertTrue(all(item['probe_status'] == 'available' for item in calls[-1][2]))
+                self.assertIsNone(writer.destination_probe_retry_snapshot()['next_retry_at_monotonic'])
+                self.assertEqual(writer.destination_probe_retry_snapshot()['failure_count'], 8)
+                clock[0] += 100
+                self.assertFalse(wait_for_count(10, timeout=.2))
+                self.assertEqual(len({call[1] for call in calls}), 1)
+                self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
+                self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
+        finally:
+            self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
+
     def test_destination_probe_success_does_not_clear_uncertain_history(self):
         log_path = self.root / 'fact'
         log_path.mkdir()

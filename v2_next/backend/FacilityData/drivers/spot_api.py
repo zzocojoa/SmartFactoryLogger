@@ -719,6 +719,14 @@ def _spot_image_capture_failure_evidence(
     }
 
 
+def _probe_spot_image_storage_if_due(writer: SpotImageCaptureWriter) -> None:
+    if (_spot_image_capture_mode() != "off" and _SPOT_IMAGE_CAPTURE_QUEUE.empty()
+            and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
+            and not _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()
+            and writer.destination_probe_due(now_monotonic=time.monotonic())):
+        writer.probe_storage_destinations(captured_at=time.time())
+
+
 def _spot_image_capture_worker() -> None:
     global _spot_image_capture_failure_count, _spot_image_capture_last_fact
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
@@ -748,10 +756,7 @@ def _spot_image_capture_worker() -> None:
                     if writer is not None and writer is not current_writer:
                         writer.close_retention_scan()
                     writer = current_writer
-                    if (_spot_image_capture_mode() != "off" and _SPOT_IMAGE_CAPTURE_QUEUE.empty()
-                            and not _SPOT_IMAGE_CAPTURE_STOP.is_set()
-                            and not _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()):
-                        writer.probe_storage_destinations(captured_at=time.time())
+                    _probe_spot_image_storage_if_due(writer)
                 except Exception:
                     # Initialization is not an image capture. Keep its failure
                     # separate from the capture enqueue/write/failure equation.
@@ -769,6 +774,7 @@ def _spot_image_capture_worker() -> None:
                             writer = None
                         else:
                             writer._cleanup_retention(time.time(), allow_start=False)
+                            _probe_spot_image_storage_if_due(writer)
                     continue
             fact: Optional[Dict[str, str]] = None
             capture_error: Optional[Exception] = None

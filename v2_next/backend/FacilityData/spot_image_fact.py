@@ -168,6 +168,10 @@ class SpotImageCaptureWriter:
     _fact_recovery_key: bytes = field(default=b"", init=False, repr=False)
     _retention_scan: Optional[Generator[None, None, None]] = field(default=None, init=False, repr=False)
     _destination_probe_results: tuple[dict[str, Any], ...] = field(default=(), init=False, repr=False)
+    _destination_probe_retry_at: Optional[float] = field(default=None, init=False, repr=False)
+    _destination_probe_retry_delay: float = field(default=1.0, init=False, repr=False)
+    _destination_probe_failure_count: int = field(default=0, init=False, repr=False)
+    _destination_probe_lock: Any = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._fact_recovery_key = hashlib.sha256(
@@ -208,12 +212,39 @@ class SpotImageCaptureWriter:
                 "probe_scope": "directory_only", "probe_status": "blocked" if error_type else "available",
                 "probe_error_type": error_type, "probe_checked_monotonic": time.monotonic(),
             })
-        self._destination_probe_results = tuple(results)
+        with self._destination_probe_lock:
+            previous = {(item["sink_id"], item["destination_path"]): item["probe_status"]
+                        for item in self._destination_probe_results}
+            if any(item["probe_status"] == "blocked" for item in results):
+                self._destination_probe_failure_count += 1
+                progress = any(item["probe_status"] == "available"
+                               and previous.get((item["sink_id"], item["destination_path"])) == "blocked"
+                               for item in results)
+                if progress:
+                    self._destination_probe_retry_delay = 1.0
+                self._destination_probe_retry_at = time.monotonic() + self._destination_probe_retry_delay
+                self._destination_probe_retry_delay = min(30.0, self._destination_probe_retry_delay * 2.0)
+            else:
+                self._destination_probe_retry_at = None
+                self._destination_probe_retry_delay = 1.0
+            self._destination_probe_results = tuple(results)
         return self.destination_probe_snapshot()
 
     def destination_probe_snapshot(self) -> tuple[dict[str, Any], ...]:
         """Memory-only copy; directory success does not establish file integrity."""
-        return tuple(dict(item) for item in self._destination_probe_results)
+        with self._destination_probe_lock:
+            return tuple(dict(item) for item in self._destination_probe_results)
+
+    def destination_probe_retry_snapshot(self) -> dict[str, Any]:
+        with self._destination_probe_lock:
+            return {"next_retry_at_monotonic": self._destination_probe_retry_at,
+                    "retry_delay_sec": self._destination_probe_retry_delay,
+                    "failure_count": self._destination_probe_failure_count}
+
+    def destination_probe_due(self, *, now_monotonic: float) -> bool:
+        with self._destination_probe_lock:
+            return (not self._destination_probe_results or (
+                self._destination_probe_retry_at is not None and now_monotonic >= self._destination_probe_retry_at))
 
     @property
     def fact_row_count(self) -> int:
