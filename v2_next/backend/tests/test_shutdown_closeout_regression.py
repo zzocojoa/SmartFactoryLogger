@@ -1477,6 +1477,31 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
             self.assertEqual(list(root.glob("*.schema-mismatch.csv")), [])
 
+    def test_image_oversized_history_row_blocks_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = dict(image_bytes=b"\xff\xd8bounded-row\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="test", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            expected = writer.write_capture(**args)
+            valid = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            self.assertEqual(valid.write_capture(**args), expected)
+            self.assertTrue(valid.try_manifest_stats()[2])
+            oversized = dict(expected)
+            for column in SPOT_IMAGE_FACT_COLUMNS[-12:]:
+                oversized[column] = "x" * 100_000
+            with writer.fact_path.open("a", encoding="utf-8", newline="") as handle:
+                csv.DictWriter(handle, fieldnames=SPOT_IMAGE_FACT_COLUMNS).writerow(oversized)
+            self.assertGreater(writer.fact_path.stat().st_size, 1024 * 1024)
+            originals = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+            restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            self.assertFalse(restarted.try_manifest_stats()[2], "oversized fact row was accepted as ready")
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                restarted.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+            self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+
     def test_image_history_lookup_has_bounded_memory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -12,7 +12,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, ContextManager, Generator, Mapping, Optional
+from typing import Any, Callable, ContextManager, Generator, Mapping, Optional, TextIO
 
 from backend.FacilityData.spot_observation_fact import build_spot_observation_key
 
@@ -54,6 +54,7 @@ SPOT_IMAGE_FACT_COLUMNS = [
 ]
 SPOT_IMAGE_FACT_FILENAME = "spot_image_fact.csv"
 SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
+SPOT_IMAGE_FACT_ROW_BYTE_LIMIT = 1024 * 1024
 
 _MANAGED_IMAGE_EXTENSIONS = {".jpg", ".png", ".gif", ".bmp", ".webp", ".bin"}
 _SPOT_IMAGE_FACT_FILE_LOCK = threading.RLock()
@@ -62,6 +63,24 @@ _SPOT_IMAGE_FACT_FILE_LOCK = threading.RLock()
 _SPOT_IMAGE_UNCERTAIN_FACT_KEYS: set[bytes] = set()
 _SPOT_IMAGE_UNCERTAIN_FACT_KEY_LIMIT = 4096
 _SPOT_IMAGE_UNCERTAIN_FACT_KEYS_OVERFLOW = False
+
+
+def _bounded_fact_rows(handle: TextIO) -> Generator[list[str], None, None]:
+    """Bound each logical CSV record, including quoted physical newlines."""
+    remaining = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT
+
+    def physical_lines() -> Generator[str, None, None]:
+        nonlocal remaining
+        while line := handle.readline(remaining + 1):
+            size = len(line.encode("utf-8"))
+            if size > remaining:
+                raise csv.Error("SPOT image fact row exceeds the recovery byte limit")
+            remaining -= size
+            yield line
+
+    for row in csv.reader(physical_lines(), strict=True):
+        remaining = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT
+        yield row
 
 
 @dataclass
@@ -345,7 +364,7 @@ class SpotImageCaptureWriter:
             return True
         try:
             with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                existing_header = next(csv.reader(handle), [])
+                existing_header = next(_bounded_fact_rows(handle), [])
         except (UnicodeError, csv.Error):
             existing_header = []
         if existing_header == SPOT_IMAGE_FACT_COLUMNS:
@@ -372,13 +391,14 @@ class SpotImageCaptureWriter:
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
                 with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = csv.DictReader(handle, strict=True)
-                    if reader.fieldnames != SPOT_IMAGE_FACT_COLUMNS:
+                    reader = _bounded_fact_rows(handle)
+                    if next(reader, []) != SPOT_IMAGE_FACT_COLUMNS:
                         raise csv.Error("SPOT image fact history has an unsupported header")
-                    for row in reader:
-                        if None in row or any(value is None for value in row.values()):
+                    for values in reader:
+                        if len(values) != len(SPOT_IMAGE_FACT_COLUMNS):
                             raise csv.Error("SPOT image fact history contains an incomplete row")
                         row_count += 1
+                        row = dict(zip(SPOT_IMAGE_FACT_COLUMNS, values))
                         if row["spot_image_capture_id"] == requested_id:
                             if requested_id in facts_by_id:
                                 raise csv.Error("SPOT image fact history duplicates the requested capture")
@@ -397,7 +417,7 @@ class SpotImageCaptureWriter:
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
                 with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = csv.reader(handle, strict=True)
+                    reader = _bounded_fact_rows(handle)
                     header = next(reader, [])
                     if header == SPOT_IMAGE_FACT_COLUMNS:
                         for row in reader:
