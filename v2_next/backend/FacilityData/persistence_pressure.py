@@ -10,7 +10,7 @@ from backend.FacilityData.freshness import clock_domain_id, finite_number
 @dataclass(frozen=True)
 class StoragePressureSample:
     sink_id: str
-    config_generation: int
+    config_generation: int | None
     destination_key: str
     enabled: bool
     availability: str
@@ -64,10 +64,17 @@ class StoragePressureController:
             return self._last_decision
         active = [sample for sample in samples
                   if sample.enabled or sample.has_pending or sample.manual_recovery_required]
+        binding_unknown = any(
+            not sample.sink_id or not sample.destination_key
+            or not isinstance(sample.config_generation, int) or isinstance(sample.config_generation, bool)
+            or sample.config_generation < 0 for sample in active
+        )
         availability = ("blocked" if any(sample.availability == "blocked" for sample in active)
-                        else "unknown" if any(sample.availability != "available" for sample in active)
+                        else "unknown" if binding_unknown or any(sample.availability != "available" for sample in active)
                         else "available")
         reasons = set() if availability == "available" else {"storage_" + availability}
+        if binding_unknown:
+            reasons.add("destination_binding_unavailable")
         occupancy = max((max(sample.pending_count / sample.count_limit, sample.pending_bytes / sample.byte_limit,
                              sample.spool_bytes / sample.spool_limit) for sample in active), default=0.0)
         pending_times = []

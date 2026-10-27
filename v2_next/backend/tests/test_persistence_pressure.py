@@ -14,6 +14,25 @@ class StoragePressureTests(unittest.TestCase):
                                          count_limit=128, byte_limit=128 * 1024**2, spool_limit=64 * 1024**2)
         return replace(baseline, **changes)
 
+    def test_unbound_required_destination_cannot_be_healthy(self):
+        for changes in ({"config_generation": None}, {"config_generation": -1},
+                        {"config_generation": True}, {"destination_key": ""}):
+            with self.subTest(changes=changes):
+                unbound = self.sample(**changes)
+                decision = StoragePressureController().evaluate([unbound], now_monotonic=100.0)
+                self.assertEqual(decision.state, "PERSISTENCE_BLOCKED",
+                                 "unbound required destination was treated as healthy")
+                self.assertEqual(decision.current_storage_availability, "unknown")
+                self.assertIn("destination_binding_unavailable", decision.reasons)
+                excluded = StoragePressureController().evaluate([replace(unbound, enabled=False)],
+                                                                 now_monotonic=100.0)
+                self.assertEqual(excluded.state, "NORMAL")
+        bound = StoragePressureController().evaluate([self.sample(config_generation=0)], now_monotonic=100.0)
+        self.assertEqual(bound.state, "NORMAL")
+        blocked = StoragePressureController().evaluate(
+            [self.sample(config_generation=None), self.sample(availability="blocked")], now_monotonic=100.0)
+        self.assertEqual(blocked.current_storage_availability, "blocked")
+
     def test_unknown_active_sink_blocks_with_an_empty_queue(self):
         sample = self.sample(availability="unknown")
         decision = StoragePressureController().evaluate([sample], now_monotonic=100.0)
