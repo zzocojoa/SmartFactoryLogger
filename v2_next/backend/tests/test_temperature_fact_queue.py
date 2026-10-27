@@ -334,6 +334,66 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_spooled_fact_recovers_on_idle_owner_with_backoff(self):
+        original_open = Path.open
+        clock, attempts, fail = [100.0], [], [True]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def failed_append(target, mode="r", *args, **kwargs):
+                if target == path and mode == "a":
+                    attempts.append((clock[0], threading.current_thread()))
+                    if fail[0]:
+                        raise PermissionError("synthetic append lock; read/write access remains possible")
+                return original_open(target, mode, *args, **kwargs)
+
+            def wait_value(owner, key, value):
+                for _ in range(150):
+                    if owner.snapshot().get(key) == value:
+                        return owner.snapshot()
+                    threading.Event().wait(.01)
+                self.fail(f"{key} did not become {value}: {owner.snapshot()}")
+
+            with patch.object(Path, "open", failed_append), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    wait_value(owner, "required_file_availability", "available")
+                    self.assertTrue(owner.enqueue(observation(1)))
+                    owner._queue.join()
+                    self.assertEqual(owner.snapshot()["spool_pending_count"], 1)
+                    spool = writer._active_spool_segment
+                    self.assertIsNotNone(spool)
+                    original = spool.read_bytes()
+                    clock[0] = 100.99
+                    threading.Event().wait(.08)
+                    self.assertEqual(len(attempts), 1)
+                    clock[0] = 101.0
+                    state = wait_value(owner, "spool_recovery_failure_count", 1)
+                    self.assertEqual(state["spool_next_recovery_monotonic"], 103.0)
+                    self.assertEqual(spool.read_bytes(), original)
+                    self.assertEqual(writer._spool_read_offsets.get(spool, 0), 0)
+                    clock[0] = 102.99
+                    threading.Event().wait(.08)
+                    self.assertEqual(len(attempts), 2)
+                    fail[0] = False
+                    clock[0] = 103.0
+                    state = wait_value(owner, "spool_recovered_count", 1)
+                    self.assertEqual(state["spool_pending_count"], 0)
+                    self.assertEqual(state["write_failure_count"], 1)
+                    self.assertEqual(state["spool_recovery_failure_count"], 1)
+                    self.assertEqual(state["required_file_availability"], "available")
+                    self.assertIsNone(state["spool_next_recovery_monotonic"])
+                    self.assertEqual(state["accepted_count"], 1)
+                    self.assertEqual(state["completed_count"], 1)
+                    self.assertFalse(state["writes_drained"], "recovery erased the historical write failure")
+                    self.assertEqual(attempts, [(100.0, owner._thread), (101.0, owner._thread), (103.0, owner._thread)])
+                finally:
+                    owner.close(2)
+            self.assertEqual([row["spot_poll_seq"] for row in self.read_rows(path)], ["1"])
+
     def test_write_failure_invalidates_prior_fact_access(self):
         original_open = Path.open
         clock, locked, probes = [100.0], [False], []

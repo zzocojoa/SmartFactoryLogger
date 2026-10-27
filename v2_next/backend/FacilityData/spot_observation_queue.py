@@ -86,6 +86,8 @@ class SpotObservationQueue:
         self._required_file_identity: tuple[int, int, int, int] | None = None
         self._required_file_probe_at: float | None = 0.0
         self._required_file_probe_delay = 1.0
+        self._spool_recovery_at: float | None = None
+        self._spool_recovery_delay = 1.0
         self._state: dict[str, Any] = {
             "queue_capacity": capacity, "accepted_count": 0, "completed_count": 0,
             "rejected_count": 0, "write_failure_count": 0, "spool_failure_count": 0,
@@ -102,6 +104,9 @@ class SpotObservationQueue:
             "required_file_checked_monotonic": None, "required_file_last_success_monotonic": None,
             "required_file_next_probe_monotonic": None,
             "required_file_manual_recovery": False,
+            "spool_next_recovery_monotonic": None, "spool_recovery_failure_count": 0,
+            "spool_recovered_count": 0, "spool_recovery_error_type": None,
+            "spool_manual_recovery": False,
         }
         self._thread = threading.Thread(target=self._run, name="SPOT-ObservationFact", daemon=True)
         self._thread.start()
@@ -118,7 +123,7 @@ class SpotObservationQueue:
         except (TypeError, ValueError, OverflowError):
             return self._reject("INVALID", "snapshot_serialization_failed", observation_key)
         with self._lock:
-            if self._state["required_file_manual_recovery"]:
+            if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
                 return self._reject_locked("REJECTED_UNAVAILABLE", "file_manual_recovery", observation_key)
             if self._state["initialization_state"] == "failed" and not self._stop.is_set():
                 return self._reject_locked("REJECTED_UNAVAILABLE", "initialization_failed", observation_key)
@@ -193,6 +198,7 @@ class SpotObservationQueue:
             and state["write_failure_count"] == 0 and state["rejected_count"] == 0
             and state["spool_pending_count"] == 0 and state["spool_failure_count"] == 0
             and not state["required_file_manual_recovery"]
+            and not state["spool_manual_recovery"]
         )
         return state
 
@@ -205,18 +211,21 @@ class SpotObservationQueue:
             )
             self._state["last_error_code"] = code
             self._state["last_failed_observation_key"] = observation_key
-            if (code in ("fact_or_spool_write_failed", "writer_state_unavailable")
-                    and not self._state["required_file_manual_recovery"]):
-                if self._state["required_file_availability"] == "available":
-                    self._state["required_file_availability"] = "unknown"
-                # New arrivals or repeated failures cannot postpone a retry
-                # already owned by this writer.
-                if self._required_file_probe_at is None:
-                    self._required_file_probe_at = time.monotonic() + self._required_file_probe_delay
-                self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
+            if code in ("fact_or_spool_write_failed", "writer_state_unavailable"):
+                self._invalidate_required_file_locked()
         _logger.error("SPOT fact processing failed", extra={
             "observation_key": observation_key, "reason": code,
         })
+
+    def _invalidate_required_file_locked(self) -> None:
+        if self._state["required_file_manual_recovery"]:
+            return
+        if self._state["required_file_availability"] == "available":
+            self._state["required_file_availability"] = "unknown"
+        # New arrivals or repeated failures cannot postpone an owned retry.
+        if self._required_file_probe_at is None:
+            self._required_file_probe_at = time.monotonic() + self._required_file_probe_delay
+        self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
 
     @contextmanager
     def _reserve_writer_payload(self, size: int, reason: str) -> Iterator[None]:
@@ -282,6 +291,12 @@ class SpotObservationQueue:
             self._state["spool_failure_count"] = writer.spool_failure_count
             self._state["spool_last_error_code"] = writer.spool_last_error_code
             self._state["spool_pending_count"] = pending
+            if pending == 0:
+                self._spool_recovery_at = None
+                self._spool_recovery_delay = 1.0
+            elif self._spool_recovery_at is None:
+                self._spool_recovery_at = time.monotonic() + self._spool_recovery_delay
+            self._state["spool_next_recovery_monotonic"] = self._spool_recovery_at
             self._state["existing_fact_hash_ms"] = writer.existing_fact_hash_ms
             self._state["existing_fact_index_ms"] = writer.existing_fact_index_ms
 
@@ -327,6 +342,51 @@ class SpotObservationQueue:
                 self._required_file_probe_delay = 1.0
             self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
 
+    def _recover_spool_if_due(self, writer: SpotObservationFactWriter) -> None:
+        if (self._stop.is_set() or self._spool_recovery_at is None
+                or time.monotonic() < self._spool_recovery_at
+                or self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]):
+            return
+        # Check the original file identity before any retry writes. A scheduled
+        # access retry keeps its own backoff; recovery cannot bypass it.
+        if self._required_file_probe_at is None:
+            self._required_file_probe_at = time.monotonic()
+        self._probe_required_file_access(writer)
+        if self._required_file_probe_at is not None or self._state["required_file_availability"] != "available":
+            return
+        before = self._state["spool_pending_count"]
+        error: Exception | None = None
+        try:
+            writer._flush_spool()  # Existing owner-bounded 20-row/1 MiB batch.
+        except Exception as exc:
+            error = exc
+        try:
+            self._refresh_state(writer)
+        except Exception as exc:
+            error = exc
+        with self._lock:
+            recovered = max(0, before - self._state["spool_pending_count"])
+            self._state["spool_recovered_count"] += recovered
+            if error is not None:
+                self._state["spool_recovery_failure_count"] += 1
+                self._state["spool_recovery_error_type"] = type(error).__name__
+                if isinstance(error, (OSError, FactPayloadBudgetExceeded)):
+                    self._spool_recovery_delay = 1.0 if recovered else min(30.0, 2 * self._spool_recovery_delay)
+                    self._spool_recovery_at = time.monotonic() + self._spool_recovery_delay
+                    if isinstance(error, OSError):
+                        self._invalidate_required_file_locked()
+                else:
+                    self._state["spool_manual_recovery"] = True
+                    self._state["accepting"] = False
+                    self._spool_recovery_at = None
+            else:
+                self._state["spool_recovery_error_type"] = None
+                self._spool_recovery_delay = 1.0
+                self._spool_recovery_at = (time.monotonic() + 1.0 if self._state["spool_pending_count"] else None)
+                if recovered:
+                    self._state["last_success_at"] = time.time()
+            self._state["spool_next_recovery_monotonic"] = self._spool_recovery_at
+
     def _run(self) -> None:
         started = time.monotonic()
         try:
@@ -354,8 +414,9 @@ class SpotObservationQueue:
             try:
                 event = self._queue.get(timeout=.05)
             except queue.Empty:
+                self._recover_spool_if_due(writer)
                 self._probe_required_file_access(writer)
-                if self._state["required_file_manual_recovery"]:
+                if self._state["required_file_manual_recovery"] or self._state["spool_manual_recovery"]:
                     break
                 continue
             started = time.monotonic()
