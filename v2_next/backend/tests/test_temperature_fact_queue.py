@@ -1325,6 +1325,49 @@ class FactQueueTests(unittest.TestCase):
                     closed = owner.close(3)
             self.assertFalse(closed)
 
+    def test_failed_probe_cleanup_stops_automatic_retries(self):
+        original_unlink = Path.unlink
+        clock, retained = [100.0], []
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = SpotObservationFactWriter(Path(tmp) / 'facts.csv')
+            self.assertTrue(writer.ensure_initialized())
+            original_fact = writer.output_path.read_bytes()
+            spool_directory = writer.spool_write_directory
+
+            def failed_cleanup(path, *args, **kwargs):
+                if path.parent == spool_directory and path.name.startswith('.sfl-storage-probe-'):
+                    retained.append(path)
+                    raise PermissionError('probe cleanup denied')
+                return original_unlink(path, *args, **kwargs)
+
+            with patch.object(Path, 'unlink', failed_cleanup), \
+                    patch('backend.FacilityData.spot_observation_queue.time.monotonic', side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    deadline = time.perf_counter() + 2
+                    while time.perf_counter() < deadline:
+                        state = owner.snapshot()
+                        if state['initialization_state'] == 'ready':
+                            break
+                        threading.Event().wait(.01)
+                    spool = next(item for item in state['storage_destinations']
+                                 if item['sink_id'] == 'temperature_spool')
+                    self.assertTrue(spool['manual_recovery_required'],
+                                    'unremoved probe files must not be retried as ordinary access failures')
+                    self.assertIsNone(spool['next_probe_monotonic'])
+                    self.assertFalse(state['writes_drained'])
+                    before = tuple(retained)
+                    self.assertEqual(len(before), 1)
+                    clock[0] = 1000.0
+                    threading.Event().wait(.12)
+                    self.assertEqual(tuple(retained), before)
+                    self.assertTrue(retained[0].exists())
+                    self.assertEqual(writer.output_path.read_bytes(), original_fact)
+                    self.assertEqual(owner.snapshot()['pending_payload_bytes'], 0)
+                finally:
+                    closed = owner.close(3)
+            self.assertFalse(closed)
+
     def test_required_fact_access_retry_is_bounded_and_stops_on_close(self):
         original_open = Path.open
         clock, attempts = [100.0], []

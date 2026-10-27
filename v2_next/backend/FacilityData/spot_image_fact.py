@@ -120,7 +120,10 @@ def _probe_storage_directory(destination: Path) -> None:
             except (OSError, RuntimeError) as exc:
                 cleanup_error = exc
         if cleanup_error is not None:
-            raise cleanup_error
+            # Unlike an access failure before creation, incomplete cleanup
+            # leaves owned resources unresolved. Repeating the probe could
+            # accumulate files indefinitely; the owner must retain this state.
+            raise RuntimeError("storage probe cleanup unconfirmed") from cleanup_error
 
 
 def _bounded_fact_rows(handle: TextIO) -> Generator[list[str], None, None]:
