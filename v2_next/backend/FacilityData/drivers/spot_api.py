@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -353,6 +353,7 @@ _spot_image_capture_dropped_payload_limit_count = 0
 _spot_image_capture_dropped_invalid_count = 0
 _spot_image_capture_pending_payload_bytes = 0
 _spot_image_capture_pending_stages: Dict[int, _ImageCapturePendingStage] = {}
+_spot_image_workspace_stages: Dict[object, _ImageCapturePendingStage] = {}
 _spot_image_capture_failure_count = 0
 _spot_image_capture_recovery: Optional[_SpotImageCaptureEvent] = None
 _spot_image_capture_retry_at: Optional[float] = None
@@ -931,6 +932,9 @@ def _spot_image_capture_worker() -> None:
                             raise PayloadBudgetExceeded
                         _spot_image_capture_pending_payload_bytes += required
                         processing_bytes = required
+                        admitted_stage = _spot_image_capture_pending_stages.get(id(event))
+                        if admitted_stage is not None:
+                            _spot_image_workspace_stages[id(event)] = replace(admitted_stage, payload_bytes=required)
                     decoded_snapshot = json.loads(event.observation_snapshot)
                     retained = decoded_string_bytes(decoded_snapshot)
                     if retained > required:
@@ -938,6 +942,8 @@ def _spot_image_capture_worker() -> None:
                     with _spot_image_capture_lock:
                         _spot_image_capture_pending_payload_bytes -= processing_bytes - retained
                         processing_bytes = retained
+                        if admitted_stage is not None:
+                            _spot_image_workspace_stages[id(event)] = replace(admitted_stage, payload_bytes=retained)
                 else:
                     decoded_snapshot = event.observation_snapshot
                 failure_stage = "write_capture"
@@ -979,6 +985,7 @@ def _spot_image_capture_worker() -> None:
                 # transition. Shutdown can therefore never observe a recorded
                 # failure while the same capture still appears unfinished.
                 with _spot_image_capture_lock:
+                    _spot_image_workspace_stages.pop(event_token, None)
                     if not retain_for_retry:
                         _spot_image_capture_pending_stages.pop(event_token, None)
                     # Remove the stage before this object's id can be reused
@@ -1069,7 +1076,10 @@ def _image_destination_key(path: Path) -> str:
 
 def _image_pending_destinations_locked() -> list[Dict[str, Any]]:
     destinations: Dict[tuple[int, str, str], Dict[str, Any]] = {}
-    for token, stage in _spot_image_capture_pending_stages.items():
+    stages: list[tuple[object, _ImageCapturePendingStage, bool]] = [
+        (token, stage, True) for token, stage in _spot_image_capture_pending_stages.items()]
+    stages.extend((token, stage, False) for token, stage in _spot_image_workspace_stages.items())
+    for token, stage, is_capture in stages:
         for sink, key in stage.destinations:
             item = destinations.setdefault((stage.config_generation, sink, key), {
                 "sink_id": sink, "config_generation": stage.config_generation, "destination_key": key,
@@ -1078,9 +1088,9 @@ def _image_pending_destinations_locked() -> list[Dict[str, Any]]:
                 "oldest_pending_monotonic": stage.admitted_monotonic,
                 "stage_due_monotonic": stage.admitted_monotonic,
             })
-            item["pending_count"] += 1
+            item["pending_count"] += int(is_capture)
             item["pending_bytes"] += stage.payload_bytes
-            item["pending_recovery"] += int(token == id(_spot_image_capture_recovery))
+            item["pending_recovery"] += int(is_capture and token == id(_spot_image_capture_recovery))
             item["oldest_pending_monotonic"] = min(item["oldest_pending_monotonic"], stage.admitted_monotonic)
             item["stage_due_monotonic"] = item["oldest_pending_monotonic"]
     return list(destinations.values())
@@ -1152,6 +1162,7 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "pending_destinations": _image_pending_destinations_locked(),
         "pending_stage_count": len(stages),
         "pending_capture_payload_bytes": sum(stage.payload_bytes for stage in stages),
+        "pending_workspace_payload_bytes": sum(stage.payload_bytes for stage in _spot_image_workspace_stages.values()),
         "pending_payload_byte_limit": _SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
@@ -1241,7 +1252,8 @@ def get_spot_image_storage_pressure_samples() -> tuple[StoragePressureSample, ..
             budget_pending_count=state["unfinished_tasks"], budget_pending_bytes=state["pending_payload_bytes"],
         ))
     unbound_count = state["unfinished_tasks"] - state["pending_stage_count"]
-    unbound_bytes = state["pending_payload_bytes"] - state["pending_capture_payload_bytes"]
+    unbound_bytes = (state["pending_payload_bytes"] - state["pending_capture_payload_bytes"]
+                     - state["pending_workspace_payload_bytes"])
     if unbound_count or unbound_bytes or state["pending_clock_unknown"]:
         # Legacy direct events and unbound processing reservations must not
         # borrow the latest capture's clock or a different destination's probe.
@@ -1314,6 +1326,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_dropped_invalid_count = 0
         _spot_image_capture_pending_payload_bytes = 0
         _spot_image_capture_pending_stages.clear()
+        _spot_image_workspace_stages.clear()
         _spot_image_capture_failure_count = 0
         _spot_image_capture_retry_at = None
         _spot_image_capture_retry_delay = 1.0

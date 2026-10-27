@@ -877,6 +877,18 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
 
     def test_image_snapshot_decode_remains_in_pending_budget(self):
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
+        clock = [100.0]
+        self.stack.enter_context(patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]))
+        self.stack.enter_context(patch.object(spot.time, 'time', return_value=1790640000.))
+        spot._activate_spot_image_storage()
+        deadline = time.perf_counter() + 3
+        while time.perf_counter() < deadline:
+            samples = spot.get_spot_image_storage_pressure_samples()
+            if len(samples) == 2 and all(s.availability == 'available' for s in samples):
+                break
+            time.sleep(.01)
+        else:
+            self.fail('image destinations were not initialized')
         snapshot = {'spot_service_instance_id': 'decode-fixture', 'spot_poll_seq': 1,
                     'spot_last_poll_completed_at': '2026-09-29T00:00:01Z',
                     'diagnostic_text': 'x' * (2 * 1024**2)}
@@ -888,6 +900,20 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 self.assertTrue(entered.wait(3))
                 allocated, _ = tracemalloc.get_traced_memory()
                 pending = spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes']
+                clock[0] = 103.25
+                samples = spot.get_spot_image_storage_pressure_samples()
+                self.assertNotIn('image_pending_unbound', {s.sink_id for s in samples},
+                                 'decoded snapshot reservation lost its admitted destination')
+                decision = StoragePressureController().evaluate(samples, now_monotonic=clock[0])
+                self.assertEqual(decision.state, 'PRESSURED')
+                self.assertEqual(decision.max_stage_overdue_seconds, 3.25)
+                self.assertEqual(decision.max_occupancy_ratio, max(1 / 128, pending / (128 * 1024**2)))
+                bindings = {(s.config_generation, s.destination_key) for s in samples}
+                with patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MODE', 'off'):
+                    spot._activate_spot_image_storage()
+                    retained = spot.get_spot_image_storage_pressure_samples()
+                    self.assertEqual({(s.config_generation, s.destination_key) for s in retained}, bindings)
+                    self.assertTrue(all(not s.enabled for s in retained))
             finally:
                 tracemalloc.stop()
                 release.set()
@@ -898,6 +924,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(final['written_count'], 1)
         self.assertEqual(final['pending_payload_bytes'], 0)
         self.assertTrue(final['accounting_consistent'])
+        self.assertTrue(all(s.pending_bytes == 0 for s in spot.get_spot_image_storage_pressure_samples()))
         self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 1)
         with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
             rows = list(csv.DictReader(handle))
