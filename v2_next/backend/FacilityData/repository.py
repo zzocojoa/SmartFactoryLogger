@@ -63,6 +63,7 @@ from backend.FacilityData.spot_config_provenance import build_spot_configuration
 from backend.FacilityData.spot_image_fact import (
     SPOT_IMAGE_FACT_FILENAME,
     SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME,
+    _probe_storage_directory,
     build_spot_image_fact_manifest,
 )
 from backend.FacilityData.temperature_operational import (
@@ -472,6 +473,10 @@ class CSVLoggerService:
         # Only the current v1/v2 handles own live extent records. Committed
         # boundaries reside in bounded trace segments, not a file-history list.
         self._csv_file_extents: dict[int, dict[str, Any]] = {}
+        # Only current and still-admitted generations retain probe metadata.
+        self._csv_storage_probes: dict[tuple[int, str], dict[str, Any]] = {}
+        self._csv_probe_failure_count = 0
+        self._csv_probe_workspace_bytes = 0
         self._uncertain_csv_paths: set[Path] = set()
         self._unclosed_csv_handles: dict[int, TextIO] = {}
         self._csv_manual_recovery_required = False
@@ -624,6 +629,7 @@ class CSVLoggerService:
             self._allow_spot_observation_late_drain_on_stop = False
             with self._runtime_lock:
                 self._csv_next_flush_monotonic = time.monotonic() + CSV_FLUSH_INTERVAL_SECONDS
+                self._csv_storage_probes.clear()
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
@@ -880,17 +886,21 @@ class CSVLoggerService:
         return data
 
     @contextmanager
-    def _reserve_csv_output(self, size: int) -> Iterator[None]:
+    def _reserve_csv_output(self, size: int, *, probe: bool = False) -> Iterator[None]:
         with self._runtime_lock:
             if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
                     + size > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
                 raise CSVOutputBudgetExceeded("csv_output_byte_limit")
             self._pending_processing_payload_bytes += size
+            if probe:
+                self._csv_probe_workspace_bytes += size
         try:
             yield
         finally:
             with self._runtime_lock:
                 self._pending_processing_payload_bytes -= size
+                if probe:
+                    self._csv_probe_workspace_bytes -= size
 
     def _record_csv_processing_failure(self, envelope: CSVEventEnvelope, reason: str,
                                        sink: Optional[str] = None) -> None:
@@ -3835,6 +3845,64 @@ class CSVLoggerService:
                 "outstanding_event_count": len(self._pending_events), "sinks": sinks,
                 "counts_reconciled": reconciled, "data_integrity_status": "NOT_EVALUATED"}
 
+    def _csv_storage_targets_locked(self, current: CSVWriteConfig) -> dict[tuple[int, str], Path]:
+        targets = {(current.generation, sink): current.log_dir for sink in current.required_sinks}
+        for envelope, sinks in self._pending_events.values():
+            for sink in sinks:
+                targets[(envelope.write_config.generation, sink)] = envelope.write_config.log_dir
+        return targets
+
+    @staticmethod
+    def _new_csv_probe_state(generation: int, sink: str, directory: Path) -> dict[str, Any]:
+        return {"sink_id": sink, "config_generation": generation,
+                "destination_key": hashlib.sha256(str(directory).encode("utf-8")).hexdigest(),
+                "probe_scope": "directory_only", "probe_status": "unknown", "probe_error": None,
+                "probe_failure_count": 0, "last_probe_monotonic": None,
+                "last_probe_success_monotonic": None, "next_probe_monotonic": 0.0,
+                "retry_delay_sec": 1.0, "clock_domain": clock_domain_id()}
+
+    def _csv_storage_snapshot_locked(self, current: CSVWriteConfig) -> list[dict[str, Any]]:
+        return [dict(self._csv_storage_probes.get(key) or self._new_csv_probe_state(*key, directory))
+                for key, directory in self._csv_storage_targets_locked(current).items()]
+
+    def _refresh_csv_storage_probe(self) -> None:
+        """One bounded directory probe on the existing writer, never on readers."""
+        if not self.running:
+            return
+        with self._config_lock:
+            current = self._capture_write_config_locked()
+        now = time.monotonic()
+        with self._runtime_lock:
+            targets = self._csv_storage_targets_locked(current)
+            self._csv_storage_probes = {key: self._csv_storage_probes.get(key)
+                                       or self._new_csv_probe_state(*key, directory)
+                                       for key, directory in targets.items()}
+            due = [(state["next_probe_monotonic"], key) for key, state in self._csv_storage_probes.items()
+                   if now >= state["next_probe_monotonic"]]
+            if not due:
+                return
+            _, key = min(due)
+            state = dict(self._csv_storage_probes[key])
+        error = None
+        try:
+            with self._reserve_csv_output(128, probe=True):
+                _probe_storage_directory(targets[key])
+        except Exception as exc:
+            error = type(exc).__name__
+        finished = time.monotonic()
+        state.update(last_probe_monotonic=finished, probe_error=error,
+                     probe_status="blocked" if error else "available")
+        if error:
+            state["probe_failure_count"] += 1
+            state["next_probe_monotonic"] = finished + state["retry_delay_sec"]
+            state["retry_delay_sec"] = min(30.0, state["retry_delay_sec"] * 2)
+        else:
+            state.update(last_probe_success_monotonic=finished, retry_delay_sec=1.0,
+                         next_probe_monotonic=finished + 1.0)
+        with self._runtime_lock:
+            self._csv_storage_probes[key] = state
+            self._csv_probe_failure_count += int(error is not None)
+
     def _csv_pending_data_stages_locked(self) -> list[dict[str, Any]]:
         """In-memory data-stage clocks, independent of later evidence confirmation.
 
@@ -3870,6 +3938,7 @@ class CSVLoggerService:
 
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
+            current_settings = self._capture_write_config_locked()
             auto_save = self.auto_save
             csv_v1_enabled = self.csv_v1_enabled
             log_path = str(self.active_log_dir)
@@ -3885,6 +3954,9 @@ class CSVLoggerService:
             last_write_at = self._last_write_at
             payload_bytes_ema = self._payload_bytes_ema
             pending_event_count = len(self._pending_events)
+            csv_storage_destinations = self._csv_storage_snapshot_locked(current_settings)
+            csv_probe_failure_count = self._csv_probe_failure_count
+            csv_probe_workspace_bytes = self._csv_probe_workspace_bytes
             csv_pending_data_stages = self._csv_pending_data_stages_locked()
             pending_source_payload_bytes = self._pending_source_payload_bytes
             pending_processing_payload_bytes = self._pending_processing_payload_bytes
@@ -3925,6 +3997,9 @@ class CSVLoggerService:
             "payload_bytes_ema": payload_bytes_ema,
             "estimated_queue_bytes": estimated_queue_bytes,
             "pending_event_count": pending_event_count,
+            "csv_storage_destinations": csv_storage_destinations,
+            "csv_probe_failure_count": csv_probe_failure_count,
+            "csv_probe_workspace_bytes": csv_probe_workspace_bytes,
             "csv_pending_data_stages": csv_pending_data_stages,
             "admission_summary": admission_summary,
             "csv_persistence_outcomes": persistence_outcomes,
@@ -3985,6 +4060,7 @@ class CSVLoggerService:
             row = None
             v2_row = None
             try:
+                self._refresh_csv_storage_probe()
                 self._drain_csv_processing_failures()
                 self._drain_admission_rejections()
                 item: Optional[FactoryData] = None

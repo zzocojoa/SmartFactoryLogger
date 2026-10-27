@@ -1715,7 +1715,8 @@ class CSVLoggerServiceTests(unittest.TestCase):
                             time.sleep(.01)
                         self.assertEqual(after["pending_event_count"], 0, "recovered evidence did not release CSV events")
                         self.assertEqual(after["csv_data_written_evidence_pending_count"], 0)
-                        self.assertEqual(after["pending_payload_bytes"], 0)
+                        self.assertEqual(after["pending_payload_bytes"], after["csv_probe_workspace_bytes"],
+                                         "released events still own payload reservations")
                         self.assertGreaterEqual(after["persistence_trace"]["failure_count"], 1)
                     finally:
                         allow_publish.set()
@@ -2308,6 +2309,64 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     release.set()
                     closed = service.stop(timeout_sec=5)
             self.assertTrue(closed)
+
+    def test_csv_storage_probe_recovers_without_arrivals(self) -> None:
+        clock = [100.0]
+        attempts = []
+        original_replace = os.replace
+        blocked = [True]
+        with self.create_temp_dir() as tmp_dir:
+            log_dir = tmp_dir / "csv"
+            log_dir.mkdir()
+            original_file = log_dir / "retained.csv"
+            original_file.write_bytes(b"original historical bytes\n")
+            service = self.create_service(log_dir, True)
+
+            def replace(source, target, *args, **kwargs):
+                if Path(source).parent == log_dir and Path(source).name.startswith(".sfl-storage-probe-"):
+                    attempts.append((clock[0], threading.current_thread().name))
+                    if blocked[0]:
+                        raise PermissionError("injected CSV directory replacement denial")
+                return original_replace(source, target, *args, **kwargs)
+
+            def state_matching(predicate):
+                deadline = time.perf_counter() + 3
+                destinations = []
+                while time.perf_counter() < deadline:
+                    destinations = service.get_runtime_state().get("csv_storage_destinations", [])
+                    if len(destinations) == 1 and predicate(destinations[0]):
+                        return destinations[0]
+                    time.sleep(0.01)
+                self.fail(f"CSV destination state missing or not updated: {destinations}")
+
+            with patch.object(os, "replace", replace), \
+                    patch("backend.FacilityData.repository.time.monotonic", side_effect=lambda: clock[0]):
+                service.start()
+                try:
+                    failed = state_matching(lambda state: state["probe_status"] == "blocked")
+                    self.assertEqual(failed["next_probe_monotonic"], 101.0)
+                    self.assertEqual(failed["probe_failure_count"], 1)
+                    self.assertEqual(failed["sink_id"], "csv_v1")
+                    self.assertEqual(failed["probe_scope"], "directory_only")
+                    self.assertEqual(attempts, [(100.0, "CSVLogger")])
+                    blocked[0] = False
+                    clock[0] = 100.5
+                    time.sleep(0.25)
+                    self.assertEqual(len(attempts), 1, "probe bypassed its retry deadline")
+                    clock[0] = 101.0
+                    recovered = state_matching(lambda state: state["probe_status"] == "available")
+                    self.assertEqual(recovered["probe_failure_count"], 1)
+                    self.assertEqual(recovered["last_probe_success_monotonic"], 101.0)
+                    self.assertEqual(recovered["retry_delay_sec"], 1.0)
+                    with patch.object(Path, "open", side_effect=AssertionError("snapshot opened a file")), \
+                            patch.object(Path, "stat", side_effect=AssertionError("snapshot stated a file")):
+                        self.assertEqual(service.get_runtime_state()["csv_storage_destinations"], [recovered])
+                    self.assertEqual(service.get_runtime_state()["pending_event_count"], 0)
+                finally:
+                    closed = service.stop(timeout_sec=5)
+            self.assertTrue(closed)
+            self.assertEqual(original_file.read_bytes(), b"original historical bytes\n")
+            self.assertEqual(list(log_dir.glob(".sfl-storage-probe-*")), [])
 
     def test_csv_pending_deadline_survives_queue_and_config_change(self) -> None:
         entered, release = threading.Event(), threading.Event()
