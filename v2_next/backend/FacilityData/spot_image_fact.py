@@ -301,6 +301,15 @@ class SpotImageCaptureWriter:
             append_started = False
             try:
                 with self.fact_path.open("ab") as handle:
+                    opened = os.fstat(handle.fileno())
+                    opened_identity = (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+                    if (
+                        (self._fact_identity is not None and opened_identity != self._fact_identity)
+                        or (self._fact_identity is None and opened.st_size != 0)
+                        or self._fact_identity_snapshot() != opened_identity
+                    ):
+                        self._mark_fact_append_uncertain()
+                        raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
                     append_started = True
                     if handle.write(payload) != len(payload):
                         raise OSError("SPOT image fact append was truncated")

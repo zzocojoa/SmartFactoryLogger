@@ -591,6 +591,9 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             def __init__(self, handle):
                 self.handle = handle
 
+            def fileno(self):
+                return self.handle.fileno()
+
             def __enter__(self):
                 return self
 

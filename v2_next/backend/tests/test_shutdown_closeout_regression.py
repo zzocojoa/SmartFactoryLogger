@@ -1313,6 +1313,9 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                         def __init__(self, handle):
                             self.handle = handle
 
+                        def fileno(self):
+                            return self.handle.fileno()
+
                         def __enter__(self):
                             return self
 
@@ -1602,6 +1605,9 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 def __init__(self, handle):
                     self.handle = handle
 
+                def fileno(self):
+                    return self.handle.fileno()
+
                 def __enter__(self):
                     return self
 
@@ -1709,6 +1715,39 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
                 writer.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
             self.assertEqual({path: path.read_bytes() for path in root.rglob("*") if path.is_file()}, originals)
+
+    def test_image_fact_replacement_during_append_open_preserves_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / "images", retention_days=0)
+            args = dict(image_bytes=b"\xff\xd8open-race\xff\xd9", captured_at=1782910800.123456,
+                        source_url="http://synthetic.invalid/image.jpg", source="original-capture", image_age_ms=0.0,
+                        link_checked_at=None, observation_snapshot=None)
+            writer.write_capture(**args)
+            original = writer.fact_path.read_bytes()
+            replacement_bytes = original.replace(b"original-capture", b"external-capture", 1)
+            self.assertNotEqual(replacement_bytes, original)
+            replacement = root / "replacement.csv"
+            replacement.write_bytes(replacement_bytes)
+            opened = Path.open
+            replaced = False
+
+            def replace_before_open(path, mode="r", *open_args, **kwargs):
+                nonlocal replaced
+                if path == writer.fact_path and mode == "ab" and not replaced:
+                    replacement.replace(path)
+                    replaced = True
+                return opened(path, mode, *open_args, **kwargs)
+
+            with patch.object(Path, "open", new=replace_before_open):
+                with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                    writer.write_capture(**dict(args, captured_at=args["captured_at"] + 1))
+            self.assertTrue(replaced)
+            self.assertEqual(writer.fact_path.read_bytes(), replacement_bytes)
+            self.assertEqual(writer.written_count, 1)
+            self.assertFalse(writer.try_manifest_stats()[2])
+            with self.assertRaisesRegex(RuntimeError, "uncertain; manual recovery required"):
+                writer.write_capture(**args)
 
     def test_image_manifest_fails_closed_after_external_fact_append(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
