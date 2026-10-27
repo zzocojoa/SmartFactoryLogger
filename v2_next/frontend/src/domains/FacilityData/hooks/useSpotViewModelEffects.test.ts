@@ -7,22 +7,15 @@ import { useSpotViewModel } from './useSpotViewModel';
 
 const service = vi.hoisted(() => ({
   config: vi.fn<() => Promise<SpotConfig>>(),
-  image: vi.fn<() => Promise<Response>>(),
+  image: vi.fn<(url: string) => Promise<Response>>(),
 }));
 
 vi.mock('./useSpotViewModel.service', () => ({
   fetchSpotConfig: () => service.config(),
-  fetchSpotImageResponse: () => service.image(),
+  fetchSpotImageResponse: (url: string) => service.image(url),
   controlSpotAction: vi.fn(),
   controlSpotFocus: vi.fn(),
   controlSpotActuator: vi.fn(),
-}));
-
-vi.mock('../../../shared/utils/dashboardPollingLeader', () => ({
-  clearDashboardLeaderLock: vi.fn(),
-  readDashboardLeaderLock: vi.fn(() => null),
-  readOrCreateDashboardTabId: vi.fn(() => 'test-tab'),
-  writeDashboardLeaderLock: vi.fn(),
 }));
 
 const SPOT_CONFIG: SpotConfig = {
@@ -52,7 +45,8 @@ const imageResponse = (suppressed: boolean, retry = '2'): Response => new Respon
   new Uint8Array([0xff, 0xd8, ...Array<number>(16).fill(0), 0xff, 0xd9]), {
     headers: {
       'Content-Type': 'image/jpeg',
-      'X-Spot-Image-Captured-At': new Date(Date.now() - 30000).toISOString(),
+      'X-Spot-Image-At': String((Date.now() - 30000) / 1000),
+      'X-Spot-Image-Age-Ms': '30000',
       'X-Spot-Image-Source': suppressed ? 'cache' : 'camera',
       'X-Spot-Image-Upstream-Suppressed': suppressed ? '1' : '0',
       ...(suppressed ? { 'X-Spot-Image-Suppression-Reason': 'storage_pressure', 'Retry-After': retry } : {}),
@@ -221,6 +215,35 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     } finally { unmount(); }
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(service.image).toHaveBeenCalledTimes(3);
+  });
+
+  it('discards a response owned by the old configuration and fetches the new source after draining it', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('visible');
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:new-source');
+      static revokeObjectURL = vi.fn();
+    });
+    let finishOld!: (response: Response) => void;
+    let finishNew!: (response: Response) => void;
+    service.config.mockResolvedValue(SPOT_CONFIG);
+    service.image.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishNew = resolve; }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => undefined);
+      service.config.mockResolvedValue({ ...SPOT_CONFIG, image_url: '/api/spot/new-image.jpg' });
+      await act(async () => { await result.current.refreshConfig(); });
+      expect(service.image).toHaveBeenCalledTimes(1);
+      await act(async () => { finishOld(imageResponse(true)); });
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(service.image).toHaveBeenCalledTimes(2);
+      expect(service.image).toHaveBeenLastCalledWith('/api/spot/new-image.jpg');
+      await act(async () => { finishNew(imageResponse(false)); });
+      expect(result.current.imageUrl).toBe('blob:new-source');
+      expect(result.current.diagnostics.error_count).toBe(0);
+      expect(result.current.lastSuccessAt).toBe(Date.now() - 30000);
+    } finally { unmount(); vi.unstubAllGlobals(); }
   });
 
   it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {

@@ -200,6 +200,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const storagePressureTimerRef = useRef<number | null>(null);
   const runSpotFetchRef = useRef<(reason: string) => Promise<void>>(async () => undefined);
   const configRef = useRef<SpotConfig | null>(null);
+  const imageRequestGenerationRef = useRef(0);
   const imageStateRef = useRef<SpotImageState>({
     imageUrl: '',
     imageError: null,
@@ -373,8 +374,25 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         return;
       }
       if (previousConfig?.image_url !== nextConfig.image_url) {
+        imageRequestGenerationRef.current += 1;
         cancelNormalImageRefresh();
+        cancelStoragePressureRecheck();
         resetImageRecovery();
+        if (previousConfig) {
+          const urls = new Set([prevUrlRef.current, pendingImageUrlRef.current,
+            pendingPreviousImageStateRef.current?.imageUrl]);
+          urls.forEach((url) => { if (url) URL.revokeObjectURL(url); });
+          prevUrlRef.current = null;
+          pendingImageUrlRef.current = null;
+          pendingPreviousImageStateRef.current = null;
+          hasImageRef.current = false;
+          imageStateRef.current = { imageUrl: '', imageError: null, lastSuccessAt: null, metadata: null };
+          setImageUrl('');
+          setImageError(null);
+          setLastSuccessAt(null);
+          setMetadata(null);
+          syncDashboardSpotImageState('', false, null, null, null);
+        }
       } else if (
         previousConfig?.image_refresh_interval !== nextConfig.image_refresh_interval ||
         previousConfig?.refresh_interval !== nextConfig.refresh_interval
@@ -407,9 +425,11 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     },
     [
       cancelNormalImageRefresh,
+      cancelStoragePressureRecheck,
       resetImageRecovery,
       scheduleNormalImageRefresh,
       setDashboardSpotConfig,
+      syncDashboardSpotImageState,
     ]
   );
 
@@ -491,6 +511,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       cancelStoragePressureRecheck();
 
       const startedAt = Date.now();
+      const requestGeneration = imageRequestGenerationRef.current;
       const currentImageState = imageStateRef.current;
       let latestResponseMetadata: SpotImageResponseMetadata | null = null;
       let pressureRecheck: SpotImageResponseMetadata | null = null;
@@ -531,6 +552,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         latestResponseMetadata = responseMetadata;
         if (response.status === 503 && responseMetadata.image_upstream_suppressed === true &&
           responseMetadata.suppression_reason === 'storage_pressure') {
+          await response.arrayBuffer();
+          if (requestGeneration !== imageRequestGenerationRef.current || shutdownRef.current) return;
           pressureRecheck = responseMetadata;
           cancelPendingImageRetry();
           const nextMetadata = { ...imageStateRef.current.metadata, ...responseMetadata };
@@ -543,6 +566,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         }
         if (!response.ok) {
           const detail = await resolveSpotImageErrorDetail(response);
+          if (requestGeneration !== imageRequestGenerationRef.current || shutdownRef.current) return;
           if (isSpotImagePayloadRejectionCode(detail?.code)) {
             throw new SpotImagePayloadValidationError(
               toPayloadRejectionValidationCode(detail?.code),
@@ -570,6 +594,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         }
 
         const rawPayload = new Uint8Array(await response.arrayBuffer());
+        if (requestGeneration !== imageRequestGenerationRef.current || shutdownRef.current) return;
         const validatedPayload = validateSpotImagePayload({
           bytes: rawPayload,
           status: response.status,
@@ -618,6 +643,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         setMetadata(responseMetadata);
         syncDashboardSpotImageState(nextImageUrl, false, nextImageError, effectiveAt, responseMetadata);
       } catch (error) {
+        if (requestGeneration !== imageRequestGenerationRef.current || shutdownRef.current) {
+          console.error('Image fetch failed', error);
+          return;
+        }
         if (error instanceof SpotImagePayloadValidationError) {
           console.error('Spot image payload validation failed', buildSpotImageValidationLog(error));
           publishImageFailure(error.message, latestResponseMetadata, false);
@@ -640,7 +669,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           last_fetch_latency_ms: completedAt - startedAt,
         }));
         for (const resolve of imageDrainWaitersRef.current.splice(0)) resolve();
-        if (pressureRecheck) scheduleStoragePressureRecheck(pressureRecheck);
+        if (requestGeneration !== imageRequestGenerationRef.current) {
+          void runSpotFetchRef.current('config-changed');
+        } else if (pressureRecheck) scheduleStoragePressureRecheck(pressureRecheck);
       }
     },
     [cancelNormalImageRefresh, cancelPendingImageRetry, cancelStoragePressureRecheck,
