@@ -205,6 +205,15 @@ class SpotObservationQueue:
             )
             self._state["last_error_code"] = code
             self._state["last_failed_observation_key"] = observation_key
+            if (code in ("fact_or_spool_write_failed", "writer_state_unavailable")
+                    and not self._state["required_file_manual_recovery"]):
+                if self._state["required_file_availability"] == "available":
+                    self._state["required_file_availability"] = "unknown"
+                # New arrivals or repeated failures cannot postpone a retry
+                # already owned by this writer.
+                if self._required_file_probe_at is None:
+                    self._required_file_probe_at = time.monotonic() + self._required_file_probe_delay
+                self._state["required_file_next_probe_monotonic"] = self._required_file_probe_at
         _logger.error("SPOT fact processing failed", extra={
             "observation_key": observation_key, "reason": code,
         })

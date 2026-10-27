@@ -334,6 +334,54 @@ def observation(seq=1):
 
 
 class FactQueueTests(unittest.TestCase):
+    def test_write_failure_invalidates_prior_fact_access(self):
+        original_open = Path.open
+        clock, locked, probes = [100.0], [False], []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facts.csv"
+            writer = SpotObservationFactWriter(path)
+            self.assertTrue(writer.ensure_initialized())
+
+            def failed_access(target, mode="r", *args, **kwargs):
+                if target == path and mode == "r+b":
+                    probes.append(clock[0])
+                if target == path and locked[0] and mode in ("a", "r+b"):
+                    raise PermissionError("synthetic destination lock after startup")
+                return original_open(target, mode, *args, **kwargs)
+
+            with patch.object(Path, "open", failed_access), \
+                    patch("backend.FacilityData.spot_observation_queue.time.monotonic", side_effect=lambda: clock[0]):
+                owner = SpotObservationQueue(lambda: writer)
+                try:
+                    for _ in range(100):
+                        if owner.snapshot()["required_file_availability"] == "available":
+                            break
+                        threading.Event().wait(.01)
+                    self.assertEqual(owner.snapshot()["required_file_availability"], "available")
+                    locked[0] = True
+                    self.assertTrue(owner.enqueue(observation()))
+                    owner._queue.join()
+                    state = owner.snapshot()
+                    self.assertEqual(state["write_failure_count"], 1)
+                    self.assertEqual(state["spool_pending_count"], 1)
+                    self.assertEqual(state["required_file_availability"], "unknown",
+                                     "old access success survived an actual write failure")
+                    self.assertEqual(state["required_file_last_success_monotonic"], 100.0)
+                    self.assertEqual(state["required_file_next_probe_monotonic"], 101.0)
+                    clock[0] = 100.99
+                    threading.Event().wait(.08)
+                    self.assertEqual(probes, [100.0])
+                    clock[0] = 101.0
+                    for _ in range(100):
+                        if owner.snapshot()["required_file_availability"] == "blocked":
+                            break
+                        threading.Event().wait(.01)
+                    self.assertEqual(owner.snapshot()["required_file_availability"], "blocked")
+                    self.assertEqual(owner.snapshot()["write_failure_count"], 1)
+                    self.assertFalse(owner.snapshot()["writes_drained"])
+                finally:
+                    owner.close(2)
+
     def test_required_fact_access_retry_is_bounded_and_stops_on_close(self):
         original_open = Path.open
         clock, attempts = [100.0], []
