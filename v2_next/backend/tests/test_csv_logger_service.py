@@ -135,6 +135,68 @@ class CSVLoggerServiceTests(unittest.TestCase):
             Billet_Cycle_ID="C1",
         )
 
+    def test_partial_csv_batch_retry_preserves_each_row_once(self) -> None:
+        with self.create_temp_dir() as tmp_dir:
+            service = self.create_service(tmp_dir, auto_save=True)
+            original_open = Path.open
+            entered, release = threading.Event(), threading.Event()
+            failed = False
+            writes = 0
+            rows_at_failure = []
+
+            class PartialBatchFile:
+                def __init__(self, handle, path):
+                    self.handle, self.path = handle, path
+
+                def __getattr__(self, name):
+                    return getattr(self.handle, name)
+
+                def write(self, text):
+                    nonlocal failed, writes
+                    writes += 1
+                    if writes == 9 and not failed:  # Header and seven real data rows.
+                        failed = True
+                        self.handle.flush()
+                        with original_open(self.path, "r", newline="", encoding="utf-8-sig") as reader:
+                            rows_at_failure.extend(list(csv.reader(reader))[1:])
+                        raise OSError("synthetic CSV write failure after seven rows")
+                    return self.handle.write(text)
+
+            def partial_open(path, mode="r", *args, **kwargs):
+                handle = original_open(path, mode, *args, **kwargs)
+                if path.suffix == ".csv" and mode == "a":
+                    entered.set()
+                    if not release.wait(5):
+                        handle.close()
+                        raise TimeoutError("CSV partial batch test did not release writer")
+                    return PartialBatchFile(handle, path)
+                return handle
+
+            with patch.object(Path, "open", partial_open):
+                service.start()
+                try:
+                    receipts = [service.enqueue_detailed(self.create_data("2026-03-09T07:20:25.000", 0.0))]
+                    self.assertTrue(entered.wait(2))
+                    receipts.extend(service.enqueue_detailed(self.create_data(
+                        f"2026-03-09T07:20:25.{index:03d}", float(index))) for index in range(1, 20))
+                finally:
+                    release.set()
+                    closed = service.stop(timeout_sec=10)
+            self.assertTrue(all(receipt["status"] == "ACCEPTED" for receipt in receipts))
+            self.assertEqual([float(row[3]) for row in rows_at_failure], list(range(7)))
+            files = self.list_v1_files(tmp_dir)
+            self.assertEqual(len(files), 1)
+            rows = self.read_rows(files[0])[1:]
+            self.assertEqual([float(row[3]) for row in rows], list(range(20)),
+                             "partial CSV batch retry duplicated persisted rows")
+            self.assertEqual(rows[:7], rows_at_failure)
+            self.assertFalse(closed, "recovery must not erase the write failure")
+            state = service.get_runtime_state()
+            self.assertEqual(state["pending_event_count"], 0)
+            self.assertEqual(state["pending_payload_bytes"], 0)
+            self.assertEqual(state["csv_write_failure_count"], 1)
+            self.assertEqual(state["last_csv_write_failure_reason"], "csv_write_or_readback_failed")
+
     def test_trace_publish_failure_prevents_clean_csv_shutdown(self) -> None:
         with self.create_temp_dir() as tmp_dir:
             service = self.create_service(tmp_dir, auto_save=True)
@@ -358,13 +420,15 @@ class CSVLoggerServiceTests(unittest.TestCase):
                     service.enqueue_detailed(self.create_data("2026-03-09T07:20:26.000", 31.0))
                 finally:
                     release.set()
-                    self.assertTrue(service.stop(timeout_sec=5))
+                    self.assertFalse(service.stop(timeout_sec=5), "recovery must retain the original write failure")
             self.assertTrue(failed.is_set())
             self.assertEqual(len(self.list_v1_files(new_dir)), 1)
             old_rows = self.read_rows(self.list_v1_files(old_dir)[0])
             new_rows = self.read_rows(self.list_v1_files(new_dir)[0])
             self.assertEqual([float(row[3]) for row in old_rows[1:]], [30.0])
             self.assertEqual([float(row[3]) for row in new_rows[1:]], [31.0])
+            self.assertEqual(service.get_runtime_state()["csv_write_failure_count"], 1)
+            self.assertEqual(service.get_runtime_state()["pending_payload_bytes"], 0)
 
     def test_csv_pending_limit_includes_inflight_and_both_outputs(self) -> None:
         started, release = threading.Event(), threading.Event()

@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import math
+import os
 import queue
 import threading
 import time
@@ -330,6 +331,37 @@ class CSVOutputBudgetExceeded(RuntimeError):
     pass
 
 
+class _CSVRecordUncertain(OSError):
+    """An admitted row cannot safely be appended or considered persisted."""
+
+
+CSV_ROW_READBACK_BYTES = 4096
+CSV_ROW_DIGEST_BYTES = 32
+
+
+@dataclass(frozen=True)
+class _CSVRowLocation:
+    path: Path
+    device: int
+    inode: int
+    offset: int
+    length: int
+    digest: bytes
+
+
+class _CSVRecordOutput:
+    def __init__(self, owner: "CSVLoggerService", handle: TextIO, path: Path, row: Iterable[Any]):
+        self.owner, self.handle, self.path, self.row = owner, handle, path, row
+
+    def write(self, text: str) -> int:
+        try:
+            return self.owner._write_csv_record(self.handle, self.path, self.row, text)
+        finally:
+            # Exception tracebacks must not outlive the output reservation with
+            # an extra serialized row still attached to this frame.
+            text = ""
+
+
 def _csv_output_workspace(values: tuple[str, ...]) -> int:
     characters, encoded, width = csv_record_sizes(values)
     # A single empty field is quoted by the excel dialect.
@@ -337,20 +369,22 @@ def _csv_output_workspace(values: tuple[str, ...]) -> int:
         characters += 2
         encoded += 2
     record_buffer = (characters // 32768 + 1) * 32768 * 4
-    return 2 * record_buffer + characters * width + 2 * encoded + 3 + io.DEFAULT_BUFFER_SIZE
+    return (2 * record_buffer + characters * width + 2 * encoded + 3 + io.DEFAULT_BUFFER_SIZE
+            + CSV_ROW_READBACK_BYTES + 2 * CSV_ROW_DIGEST_BYTES)
 
 
 class _ReservedCSVWriter:
     """Keep a file open without retaining an unaccounted C CSV record buffer."""
 
-    def __init__(self, owner: "CSVLoggerService", handle: TextIO):
+    def __init__(self, owner: "CSVLoggerService", handle: TextIO, path: Path):
         self._owner = owner
         self._handle = handle
+        self._path = path
 
     def writerow(self, row: Iterable[Any], /) -> Any:
         values = tuple("" if value is None else str(value) for value in row)
         with self._owner._reserve_csv_output(_csv_output_workspace(values)):
-            writer = csv.writer(self._handle)
+            writer = csv.writer(_CSVRecordOutput(self._owner, self._handle, self._path, row))
             try:
                 result = writer.writerow(values)
                 self._handle.flush()
@@ -413,6 +447,12 @@ class CSVLoggerService:
         self.queue: queue.Queue[Optional[CSVEventEnvelope]] = queue.Queue(maxsize=CSV_PENDING_EVENT_LIMIT)
         self._pending_events: dict[int, tuple[CSVEventEnvelope, set[str]]] = {}
         self._pending_row_events: dict[int, tuple[list, int]] = {}
+        # Locations live only while the admitted rows remain pending. Paths are
+        # shared with their writer; retained digest bytes have an explicit charge.
+        self._pending_csv_locations: dict[int, _CSVRowLocation] = {}
+        self._uncertain_csv_paths: set[Path] = set()
+        self._csv_write_failure_count = 0
+        self._last_csv_write_failure_reason: Optional[str] = None
         self._pending_row_copies: dict[int, list[str]] = {}
         self._pending_source_payload_bytes = 0
         self._pending_processing_payload_bytes = 0
@@ -700,6 +740,10 @@ class CSVLoggerService:
     def _complete_pending_rows(self, rows: list[Tuple[list, datetime]], sink: str) -> None:
         with self._runtime_lock:
             for row, _ in rows:
+                location = self._pending_csv_locations.pop(id(row), None)
+                if location is not None:
+                    del location
+                    self._pending_processing_payload_bytes -= CSV_ROW_DIGEST_BYTES
                 binding = self._pending_row_events.pop(id(row), None)
                 if binding is None:
                     continue  # Direct legacy flush callers have no admitted envelope.
@@ -1015,7 +1059,7 @@ class CSVLoggerService:
         handle = None
         try:
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
-            writer = _ReservedCSVWriter(self, handle)
+            writer = _ReservedCSVWriter(self, handle, full_path)
             if handle.tell() == 0 and settings.v1_header:
                 writer.writerow(settings.v1_header)
                 handle.flush()
@@ -1030,7 +1074,7 @@ class CSVLoggerService:
                 try:
                     self._ensure_dir(settings.fallback_log_dir)
                     handle = fallback_path.open("a", newline="", encoding="utf-8-sig")
-                    writer = _ReservedCSVWriter(self, handle)
+                    writer = _ReservedCSVWriter(self, handle, fallback_path)
                     if handle.tell() == 0 and settings.v1_header:
                         writer.writerow(settings.v1_header)
                         handle.flush()
@@ -1122,7 +1166,7 @@ class CSVLoggerService:
                             return None, None
 
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
-            writer = _ReservedCSVWriter(self, handle)
+            writer = _ReservedCSVWriter(self, handle, full_path)
             if handle.tell() == 0:
                 writer.writerow(list(contract.columns))
                 handle.flush()
@@ -2897,6 +2941,89 @@ class CSVLoggerService:
     def _filename_timestamp(self, timestamp: datetime) -> str:
         return self._to_local_timestamp(timestamp).strftime("%Y%m%d_%H%M%S")
 
+    def _csv_record_exists(self, location: _CSVRowLocation, handle: TextIO) -> bool:
+        current = os.fstat(handle.fileno())
+        identity = (location.device, location.inode)
+        if (current.st_dev, current.st_ino) != identity:
+            raise _CSVRecordUncertain("csv_file_identity_changed")
+        with location.path.open("rb", buffering=0) as reader:
+            before = os.fstat(reader.fileno())
+            if (before.st_dev, before.st_ino) != identity:
+                raise _CSVRecordUncertain("csv_file_identity_changed")
+            if before.st_size == location.offset:
+                return False  # Confirmed absent, with no partial bytes to overwrite.
+            if before.st_size < location.offset + location.length:
+                raise _CSVRecordUncertain("csv_partial_or_missing_record")
+            reader.seek(location.offset)
+            digest = hashlib.sha256()
+            remaining = location.length
+            while remaining:
+                block = reader.read(min(remaining, CSV_ROW_READBACK_BYTES))
+                if not block:
+                    raise _CSVRecordUncertain("csv_record_read_incomplete")
+                digest.update(block)
+                remaining -= len(block)
+                del block
+            after = os.fstat(reader.fileno())
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise _CSVRecordUncertain("csv_file_changed_during_readback")
+            if digest.digest() != location.digest:
+                raise _CSVRecordUncertain("csv_record_content_changed")
+        return True
+
+    def _write_csv_record(self, handle: TextIO, path: Path, row: Iterable[Any], text: str) -> int:
+        row_key = id(row)
+        with self._runtime_lock:
+            admitted = row_key in self._pending_row_events
+            location = self._pending_csv_locations.get(row_key)
+        payload = digest = None
+        reserved = False
+        try:
+            if path in self._uncertain_csv_paths:
+                raise _CSVRecordUncertain("csv_path_requires_manual_recovery")
+            if admitted:
+                if location is None:
+                    handle.flush()
+                    offset = handle.tell()
+                    info = os.fstat(handle.fileno())
+                    if offset != info.st_size or not info.st_ino:
+                        raise _CSVRecordUncertain("csv_append_position_unconfirmed")
+                    with self._runtime_lock:
+                        if (self._pending_source_payload_bytes + self._pending_processing_payload_bytes
+                                + CSV_ROW_DIGEST_BYTES > CSV_PENDING_PAYLOAD_BYTE_LIMIT):
+                            raise CSVOutputBudgetExceeded("csv_row_digest_byte_limit")
+                        self._pending_processing_payload_bytes += CSV_ROW_DIGEST_BYTES
+                        reserved = True
+                else:
+                    offset = location.offset
+                payload = text.encode("utf-8-sig" if offset == 0 else "utf-8")
+                digest = hashlib.sha256(payload).digest()
+                if location is None:
+                    location = _CSVRowLocation(path, info.st_dev, info.st_ino, offset, len(payload), digest)
+                    with self._runtime_lock:
+                        self._pending_csv_locations[row_key] = location
+                    reserved = False  # The pending row now owns this charge.
+                else:
+                    if location.path != path:
+                        raise _CSVRecordUncertain("csv_row_destination_changed")
+                    if (len(payload), digest) != (location.length, location.digest):
+                        raise _CSVRecordUncertain("csv_row_content_conflict")
+                    if self._csv_record_exists(location, handle):
+                        return len(text)
+            written = handle.write(text)
+            if written != len(text):
+                raise _CSVRecordUncertain("csv_short_write")
+            return written
+        except _CSVRecordUncertain:
+            self._uncertain_csv_paths.add(path)
+            raise
+        finally:
+            payload = digest = None
+            text = ""
+            if reserved:
+                with self._runtime_lock:
+                    self._pending_processing_payload_bytes -= CSV_ROW_DIGEST_BYTES
+
     def _write_csv_rows(self, writer: _CSVWriter, rows: list[Tuple[list, datetime]],
                         sink: str) -> list[Tuple[list, datetime]]:
         written = []
@@ -2914,6 +3041,13 @@ class CSVLoggerService:
                 if envelope is None:
                     raise  # Legacy direct callers have no admitted identity.
                 self._record_csv_processing_failure(envelope, "csv_output_byte_limit", sink)
+            except (OSError, ValueError) as exc:
+                with self._runtime_lock:
+                    self._runtime_write_failure_observed = True
+                    self._csv_write_failure_count += 1
+                    self._last_csv_write_failure_reason = (
+                        str(exc) if isinstance(exc, _CSVRecordUncertain) else "csv_write_or_readback_failed")
+                raise
             else:
                 written.append((row, timestamp))
         return written
@@ -3221,6 +3355,8 @@ class CSVLoggerService:
             processing_failure_count = self._processing_failure_count
             last_processing_failure_seq = self._last_processing_failure_seq
             last_processing_failure_reason = self._last_processing_failure_reason
+            csv_write_failure_count = self._csv_write_failure_count
+            last_csv_write_failure_reason = self._last_csv_write_failure_reason
         now = time.time()
         queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
         writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
@@ -3246,6 +3382,8 @@ class CSVLoggerService:
             "processing_failure_count": processing_failure_count,
             "last_processing_failure_seq": last_processing_failure_seq,
             "last_processing_failure_reason": last_processing_failure_reason,
+            "csv_write_failure_count": csv_write_failure_count,
+            "last_csv_write_failure_reason": last_csv_write_failure_reason,
             "pending_payload_byte_limit": CSV_PENDING_PAYLOAD_BYTE_LIMIT,
             "persistence_trace": trace.snapshot() if trace is not None else None,
             "persistence_trace_coverage": "PRODUCER_AND_CONFIG_BOUNDARIES" if trace is not None else "NOT_EVALUATED",
