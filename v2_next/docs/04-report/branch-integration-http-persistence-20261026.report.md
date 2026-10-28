@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | CSV/추적·온도 원장/임시 저장·이미지의 실제 목적지/세대/대기 상태 표본 연결. 이미지 작업 공간·sidecar·실제 monitor 수명 연결 등 7단계/17명세 전체는 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `3f41d7c1` backend 1211중1210통과·1skip, backend lint/typecheck·QA 자체 검사 exit0. 단일 전체 health의 마지막 실행은 c6901ab5. 최종 빌드·새 설치본 검증 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 기존 상태 표본에 이미지 decode·probe·digest/재읽기 작업 공간과 접수 세대를 연결. 예약 밖 초기화/쓰기·이전 owner 상태·sidecar·monitor 수명 등 전체 구현은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `2b78c443` backend 1212중1211통과·1skip, backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증 미완료 |
 
 ## 보존과 통합
 
@@ -1296,3 +1296,20 @@ clean `3f41d7c1`에서 **backend lint·typecheck·전체 unittest·QA 자체 검
 파일 I/O 없는 조회, 잠금 순서, payload 없는 제한된 metadata, 객체 ID 재사용 전 제거, 해시 식별자·unknown 보존을 직접 검토했다. 전용 보안 검토 도구는 없어 전체 보안 감사로 확대하지 않는다. 앞 목표 턴은 읽기 감사로 구현 NO_PROGRESS, 이번은 구현·검증 PROGRESS다. 진행 기록 생성기 준비 중 따옴표 구문 오류는 실행 전 발견·수정했으며 제품 코드/시험 실패로 집계하지 않는다.
 
 남은 범위: 이미지 초기화/probe/decode/append 작업 공간의 목적지·시각, 이전 owner/세대 및 sidecar 상태, 전체 파일 무결성과 spool append/close/unlink, 합산 metadata 예산·접수 전 시각, monitor 실제 시작/종료, PRESSURED 감속·NORMAL 온도 우선/간격, 전체 fact/JPEG·관측/화면/판정 계약,7단계/17명세·최종 빌드/설치본·master 통합. 미결합 작업 공간은 unknown/BLOCKED로 보존하며 monitor는 실제 서비스에 연결하지 않았다. 서버·운영 태그·설정·백업은 변경하지 않았다.
+
+
+## 2026-10-28 이미지 작업 공간의 목적지·시각·세대 연결
+
+- `df0475f6`: 연결된 온도 snapshot 해석 메모리를 원래 capture의 목적지·세대·시각과 결합한다. 해석 뒤 실제 보유량으로 줄이고 종결/재시도 전 임시 사본을 버린 뒤 같은 잠금 안에서 예약과 metadata를 해제한다. 파일 저장 지연·OFF에서 원래 binding과 합산 상한을 유지한다.
+- `454751cc`: image writer의 probe128 bytes·JPEG 재읽기 최대4096 bytes·원장 digest 버퍼 예약에 실제 sink/경로 해시/세대와 단조 시작 시각을 붙인다. idle JPEG 폴더 확인을 지연하고 OFF로 바꿔도 원래 목적지의 3.25초 지연을 PRESSURED로 판정하며, 끝나면 예약·확인 파일이 정리된다. capture 건수를 작업 공간 수만큼 늘리지 않는다.
+- `2b78c443`: writer 생성 이전 및 이전/새 경로의 실제 원장 읽기에 접수 당시 세대를 전달한다. 현재 설정이나 기본 세대0으로 기존 작업을 재분류하지 않는다. 외부 I/O 전에 설정/접수 상태만 복사하고 잠금을 해제한다.
+
+3개 행동 RED를 확인한 뒤 순서대로 구현·관련 검증·커밋했다. decode 관련97시험과 최종2시험, probe/세대 관련162시험씩 통과했다. 중복 실행 수를 17명세 통과 개수로 합산하지 않는다. 첫 probe 시험은 삽입 위치 들여쓰기 오류로 실행되지 않아 RED로 세지 않고, 수정한 `red-r2`의 행동 실패를 사용했다. decode 타입 검사1건은 object/int token 목록 타입을 명시한 뒤 최종 통과했다. 모든 원래 결과를 보존했다.
+
+clean `2b78c443`에서 **backend lint·typecheck·전체 unittest·QA 자체 검사 모두 exit0**. backend **1212중1211통과·기존 F01자료1skip**(515.707초). 변경4파일의 시작/종료 SHA와 HEAD가 일치한다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-workspace-join/verification.json`. frontend/Electron/의존성은 마지막 단일 전체 health `c6901ab5` 이후 변경하지 않아 그 근거를 재사용하며 새 전체 health·설치본 검증을 주장하지 않는다. 원문4문서·원래109경로·보호 stash도 보존을 재확인했다.
+
+수동 검토: 원본 payload를 metadata에 넣지 않음, 예산 초과 시 예약/metadata 없음, finally와 terminal 잠금의 원자적 해제, config→accounting 잠금 순서 및 I/O 이전 잠금 해제, 해시 목적지 식별과 상태 조회의 파일 I/O 없음. 전용 보안 검토 도구는 없어 이 범위의 직접 검토로 제한한다. 직전·이번 목표 턴 모두 구현/검증 PROGRESS다.
+
+남은 범위: 기존 예약 밖의 이미지 초기화·append 단계, 이전 owner/세대 가용성·sidecar, 전체 파일 무결성·spool append/close/unlink·metadata 합산 예산·접수 전 시각, monitor 실제 시작/종료와 PRESSURED 감속·NORMAL 온도 우선/간격, fact/JPEG 대조·관측 참조·공개 상태/판정 계약,7단계/17명세·최종 빌드/설치본·master 통합. monitor 실제 연결과 서버 변경은 하지 않았다. 운영본·태그·설정·기존 실패 원문은 유지한다.
+
+다음 구현 위치를 확인했다. `SpotImageCaptureWriter._append_fact()`의 StringIO/UTF-8 사본은 아직 예약 없이 생성하며, `_load_fact_row_count()`와 `_check_fact_access()`는 digest/probe 버퍼 예약 바깥에서 파일을 읽거나 연다. 이 단계의 합산 메모리·최초 시각과 실패/close 경계를 먼저 검증해야 실제 monitor를 연결해도 정상 작업의 거짓 BLOCKED 또는 누락된 지연을 방지할 수 있다. 이번 변경의 완료 범위에 포함하지 않았다.
