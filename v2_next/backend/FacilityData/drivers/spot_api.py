@@ -4412,6 +4412,7 @@ async def _stop_spot_image_refresh_for_shutdown(
 _spot_poll_task: Optional[asyncio.Task] = None
 _internal_temperature_task: Optional[asyncio.Task] = None
 _spot_poll_running = False
+_spot_poll_lifecycle_lock = asyncio.Lock()
 _spot_shutdown_state_lock = threading.Lock()
 _spot_shutdown_task_states: dict[str, str] = {
     "diagnostics": "not_started",
@@ -4488,6 +4489,13 @@ async def _spot_poll_loop():
 async def start_spot_poll_loop(
     *, storage_sample_provider: Callable[[], Iterable[StoragePressureSample]] | None = None,
 ):
+    async with _spot_poll_lifecycle_lock:
+        await _start_spot_poll_loop(storage_sample_provider=storage_sample_provider)
+
+
+async def _start_spot_poll_loop(
+    *, storage_sample_provider: Callable[[], Iterable[StoragePressureSample]] | None = None,
+):
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
     global _img_accepting_requests, _spot_poll_task, _spot_poll_running
     global _spot_shutdown_image_refresh_stopped, _spot_shutdown_started_monotonic
@@ -4544,6 +4552,11 @@ async def start_spot_poll_loop(
 
 
 async def stop_spot_poll_loop() -> bool:
+    async with _spot_poll_lifecycle_lock:
+        return await _stop_spot_poll_loop()
+
+
+async def _stop_spot_poll_loop() -> bool:
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
     global _internal_temperature_task, _spot_poll_task, _spot_poll_running, _spot_diagnostics_task
     global _spot_shutdown_image_refresh_stopped, _spot_shutdown_started_monotonic

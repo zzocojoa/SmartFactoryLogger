@@ -243,6 +243,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._reset_spot_image_request_state_for_tests()
         spot_api._reset_spot_diagnostics_request_state_for_tests()
         spot_api._spot_device_request_lock = asyncio.Lock()
+        spot_api._spot_poll_lifecycle_lock = asyncio.Lock()
         backend_app._spot_connection_test_lock = asyncio.Lock()
         backend_app._spot_connection_test_next_allowed_at = 0.0
         spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
@@ -3417,6 +3418,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                                     SPOT_REFRESH_INTERVAL=0.2, SPOT_OBSERVATION_FACT_ENABLED=False,
                                     SPOT_IMAGE_CAPTURE_ENABLED=False).items():
                 stack.enter_context(patch.object(spot_api.config, name, value))
+            for name in ('_spot_observation_queue', '_spot_observation_queue_path', '_spot_observation_fact_writer'):
+                stack.enter_context(patch.object(spot_api, name, None))
             try:
                 yield Path(tmp), url, requests
             finally:
@@ -3446,6 +3449,53 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await spot_api.stop_spot_poll_loop())
             self.assertIn('monitor_stopped', monitor.snapshot().reasons)
             self.assertTrue(spot_api.get_spot_poll_shutdown_status()['complete'])
+
+    async def test_concurrent_poll_start_uses_one_monitor_for_real_storage_owners(self):
+        async with self.storage_lifecycle_fixture() as (root, url, requests):
+            self.configure_image_capture(root)
+            spot_api.config.SPOT_OBSERVATION_FACT_ENABLED = True
+            logger = CSVLoggerService()
+            logger.apply_config(log_path=root, auto_save=True, csv_v1_enabled=False, csv_v2_enabled=True)
+            logger.start()
+            try:
+                results = await asyncio.gather(*(
+                    spot_api.start_spot_poll_loop(storage_sample_provider=logger.get_storage_pressure_samples)
+                    for _ in range(2)), return_exceptions=True)
+                self.assertEqual(results, [None, None], 'concurrent start must reuse the live lifecycle')
+                monitor = spot_api._storage_pressure_monitor
+                self.assertIsNotNone(monitor)
+                for _ in range(400):
+                    if monitor.snapshot().state == 'NORMAL':
+                        break
+                    await asyncio.sleep(.02)
+                self.assertEqual(monitor.snapshot().state, 'NORMAL', monitor.sample_provider())
+                samples = monitor.sample_provider()
+                self.assertTrue({'csv_v2', 'temperature_fact', 'temperature_spool', 'image_fact', 'image_jpeg'}
+                                <= {sample.sink_id for sample in samples})
+                self.assertTrue(all(s.availability == 'available' for s in samples if s.enabled))
+                await spot_api.start_spot_poll_loop(storage_sample_provider=logger.get_storage_pressure_samples)
+                self.assertIs(spot_api._storage_pressure_monitor, monitor)
+                body = await spot_api._request_spot_image(
+                    spot_api._get_http_client(), url + '/image.jpg', profile='operator_live')
+                self.assertEqual(body, _BASE_TEST_JPEG)
+                self.assertTrue(await asyncio.to_thread(logger.stop, timeout_sec=3))
+                for _ in range(150):
+                    if 'writer_stopped' in monitor.snapshot().reasons:
+                        break
+                    await asyncio.sleep(.02)
+                self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+                self.assertIn('writer_stopped', monitor.snapshot().reasons)
+                before = spot_api._spot_poll_seq
+                await asyncio.sleep(.6)
+                self.assertGreater(spot_api._spot_poll_seq, before)
+                with self.assertRaises(spot_api.SpotStoragePressureError):
+                    await spot_api._request_spot_image(spot_api._get_http_client(), url + '/image.jpg')
+                self.assertEqual(requests.count('/image.jpg'), 1)
+                self.assertTrue(await spot_api.stop_spot_poll_loop())
+                self.assertTrue(spot_api.get_spot_poll_shutdown_status()['pressure_monitor_stopped'])
+            finally:
+                await spot_api.stop_spot_poll_loop()
+                await asyncio.to_thread(logger.stop, timeout_sec=3)
 
     async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
         self,
