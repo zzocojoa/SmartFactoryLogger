@@ -3497,6 +3497,41 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 await spot_api.stop_spot_poll_loop()
                 await asyncio.to_thread(logger.stop, timeout_sec=3)
 
+    async def test_monitor_stop_timeout_rejects_restart_without_rewriting_shutdown_evidence(self):
+        async with self.storage_lifecycle_fixture() as (root, _url, _requests):
+            logger = CSVLoggerService()
+            logger.apply_config(log_path=root, auto_save=True, csv_v1_enabled=True, csv_v2_enabled=False)
+            logger.start()
+            locked = False
+            try:
+                await spot_api.start_spot_poll_loop(storage_sample_provider=logger.get_storage_pressure_samples)
+                monitor = spot_api._storage_pressure_monitor
+                self.assertIsNotNone(monitor)
+                for _ in range(300):
+                    if monitor.snapshot().state == 'NORMAL':
+                        break
+                    await asyncio.sleep(.02)
+                self.assertEqual(monitor.snapshot().state, 'NORMAL')
+                logger._runtime_lock.acquire()
+                locked = True
+                # The real provider must wait on its owner, while the loop and
+                # monitor snapshots remain responsive and shutdown is bounded.
+                await asyncio.sleep(1.2)
+                self.assertFalse(await asyncio.wait_for(spot_api.stop_spot_poll_loop(), 5))
+                failed_shutdown = spot_api.get_spot_poll_shutdown_status()
+                self.assertFalse(failed_shutdown['complete'])
+                self.assertFalse(failed_shutdown['pressure_monitor_stopped'])
+                with self.assertRaisesRegex(RuntimeError, 'monitor shutdown is incomplete'):
+                    await spot_api.start_spot_poll_loop(storage_sample_provider=logger.get_storage_pressure_samples)
+                self.assertIs(spot_api._storage_pressure_monitor, monitor)
+                self.assertEqual(spot_api.get_spot_poll_shutdown_status(), failed_shutdown,
+                                 'rejected restart rewrote the incomplete shutdown evidence')
+            finally:
+                if locked:
+                    logger._runtime_lock.release()
+                self.assertTrue(await spot_api.stop_spot_poll_loop())
+                await asyncio.to_thread(logger.stop, timeout_sec=3)
+
     async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
         self,
     ) -> None:

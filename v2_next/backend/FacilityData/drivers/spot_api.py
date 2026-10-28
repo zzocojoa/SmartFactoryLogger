@@ -4506,6 +4506,8 @@ async def _start_spot_poll_loop(
     global _storage_pressure_monitor, _spot_shutdown_pressure_monitor_stopped
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
+    if _storage_pressure_monitor is not None:
+        raise RuntimeError("Storage pressure monitor shutdown is incomplete")
 
     if bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)):
         if _spot_observation_queue is not None and not _spot_observation_queue.snapshot()["accepting"]:
@@ -4534,8 +4536,6 @@ async def _start_spot_poll_loop(
         _spot_shutdown_started_monotonic = None
     await asyncio.to_thread(_get_spot_diagnostic_request_journal)
     _activate_spot_image_storage()
-    if _storage_pressure_monitor is not None:
-        raise RuntimeError("Storage pressure monitor shutdown is incomplete")
     _storage_pressure_monitor = StoragePressureMonitor(
         lambda: _storage_pressure_samples(storage_sample_provider))
     with _spot_shutdown_state_lock:
