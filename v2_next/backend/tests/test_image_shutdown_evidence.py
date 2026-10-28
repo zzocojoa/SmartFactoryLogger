@@ -964,6 +964,46 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertTrue(final['accounting_consistent'])
         self.assertEqual(len(list((self.root / 'images').rglob('*.jpg'))), 1)
 
+    def test_image_fact_append_reserves_workspace_before_render(self):
+        data = io.BytesIO()
+        Image.new('RGB', (2, 2), (9, 5, 3)).save(data, format='JPEG')
+        args = dict(image_bytes=data.getvalue(), captured_at=1790640001.,
+                    image_url='http://synthetic.invalid/image.jpg', source='한' * 100_000,
+                    image_age_ms=0, capture_id='spotimg_20260929T000001000000Z_' + 'a' * 32)
+        with patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', 128 * 1024), \
+                self.assertLogs('spot_control', 'WARNING') as logs:
+            tracemalloc.start()
+            try:
+                receipt = spot._maybe_enqueue_spot_image_capture(**args)
+                self.assertTrue(receipt.accepted)
+                self.assertTrue(spot.flush_spot_image_capture_queue(3))
+                peak = tracemalloc.get_traced_memory()[1]
+            finally:
+                tracemalloc.stop()
+            state = spot.get_spot_image_capture_shutdown_status()
+            self.assertEqual(state['failure_count'], 1, 'fact append used unreserved serialization memory')
+            self.assertEqual(state['pending_payload_bytes'], 0)
+        self.assertLess(peak, 640 * 1024, 'fact CSV was allocated before its reservation was accepted')
+        failure = next(json.loads(record.getMessage().split('SPOT image capture writer failed ', 1)[1])
+                       for record in logs.records if record.getMessage().startswith('SPOT image capture writer failed '))
+        self.assertEqual(failure['capture_id'], receipt.capture_id)
+        self.assertEqual(failure['reason'], 'image_fact_append_byte_limit')
+        failed_image, = (self.root / 'images').rglob('*.jpg')
+        self.assertEqual(failed_image.read_bytes(), args['image_bytes'])
+        self.assertFalse((self.root / 'spot_image_fact.csv').exists())
+        success = spot._maybe_enqueue_spot_image_capture(**dict(
+            args, captured_at=1790640002., capture_id='spotimg_20260929T000002000000Z_' + 'b' * 32))
+        self.assertTrue(success.accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        final = spot.get_spot_image_capture_shutdown_status()
+        self.assertEqual((final['written_count'], final['failure_count'], final['pending_payload_bytes']), (1, 1, 0))
+        self.assertTrue(final['accounting_consistent'])
+        with (self.root / 'spot_image_fact.csv').open(encoding='utf-8-sig', newline='') as handle:
+            row, = csv.DictReader(handle)
+        self.assertEqual(row['spot_image_capture_id'], success.capture_id)
+        self.assertEqual(row['spot_image_source'], args['source'])
+        self.assertEqual(failed_image.read_bytes(), args['image_bytes'])
+
     def test_image_snapshot_decode_remains_in_pending_budget(self):
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
         clock = [100.0]

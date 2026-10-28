@@ -509,6 +509,28 @@ class SpotImageCaptureWriter:
             self.log_path.mkdir(parents=True, exist_ok=True)
             write_header = self._prepare_fact_file_for_append()
             previous_size = self._fact_file_size()
+            row = csv_record_sizes(fact[column] for column in SPOT_IMAGE_FACT_COLUMNS)
+            header = csv_record_sizes(SPOT_IMAGE_FACT_COLUMNS) if write_header else (0, 0, 1)
+            characters = row[0] + header[0]
+            text_bytes = characters * max(row[2], header[2])
+            encoded_bytes = row[1] + header[1] + 3
+            # Use the existing CPython CSV growth bound, plus old/new StringIO
+            # UCS4 buffers and getvalue/UTF-8/BOM copies, before rendering.
+            csv_buffer = max((item[0] // 32768 + 1) * 32768 * 4 for item in (row, header))
+            workspace = (2 * csv_buffer + 8 * (characters + characters // 8 + 16)
+                         + 2 * text_bytes + 2 * encoded_bytes + io.DEFAULT_BUFFER_SIZE)
+            reservation = (self.payload_reservation(workspace, "image_fact_append_byte_limit", "image_fact",
+                                                   self.fact_path, self.config_generation)
+                           if self.payload_reservation is not None else nullcontext())
+            with reservation:
+                self._append_reserved_fact(fact, write_header=write_header, previous_size=previous_size)
+
+    def _append_reserved_fact(self, fact: Mapping[str, str], *, write_header: bool, previous_size: int) -> None:
+        """Caller owns the file lock and serialization reservation through close/verification."""
+        buffer = None
+        writer = None
+        payload = b""
+        try:
             buffer = io.StringIO(newline="")
             writer = csv.DictWriter(buffer, fieldnames=SPOT_IMAGE_FACT_COLUMNS)
             if write_header:
@@ -558,6 +580,14 @@ class SpotImageCaptureWriter:
                 expected_size=expected_size,
             )
             self._fact_row_count = int(self._fact_row_count or 0) + 1
+        finally:
+            # Tracebacks may retain this frame after failure. Drop allocated
+            # copies before the caller returns their shared reservation.
+            payload = b""
+            writer = None
+            if buffer is not None:
+                buffer.close()
+                buffer = None
 
     def _prepare_fact_file_for_append(self) -> bool:
         if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
