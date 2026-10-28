@@ -5069,6 +5069,64 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 monitor.stop()
                 spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
 
+    async def test_normal_image_retry_waits_outside_device_lock_without_pressure_error(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        clock, image_requests, tasks = [100.0], [], []
+        driver_clock = SimpleNamespace(monotonic=lambda: clock[0], time=time.time, perf_counter=time.perf_counter)
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'available')])
+
+        def response(request):
+            if request.url.path == '/image.jpg':
+                image_requests.append(clock[0])
+                return httpx.Response(500 if len(image_requests) == 1 else 200,
+                                      content=_jpeg_bytes('retry'), request=request)
+            return httpx.Response(200, text='450.0', request=request)
+
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2
+            while monitor.snapshot().state != 'NORMAL' and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, 'NORMAL')
+            async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                        patch.object(spot_api, '_http_client', client), \
+                        patch.object(spot_api, 'time', driver_clock):
+                    interval = spot_api._spot_image_cache_ttl_sec('operator_live')
+                    with self.assertRaises(spot_api.SpotImageFetchError):
+                        await spot_api.fetch_image_async('operator_live')
+                    tasks.extend(asyncio.create_task(spot_api.fetch_image_async('operator_live')) for _ in range(2))
+                    await asyncio.sleep(.03)
+                    self.assertEqual(len(image_requests), 1, 'NORMAL image retry ignored the minimum interval')
+                    self.assertFalse(any(task.done() for task in tasks))
+                    temperature = await asyncio.wait_for(spot_api._request_spot_temperature(
+                        client, 'http://spot.local/output?p=temperature'), .2)
+                    self.assertEqual(temperature, 450.0)
+                    self.assertEqual(spot_api._img_storage_suppressed_task_count, 0)
+                    self.assertEqual(spot_api._img_failure_count, 1)
+                    clock[0] += interval
+                    results = await asyncio.wait_for(asyncio.gather(*tasks), 2)
+                    self.assertEqual(image_requests, [100.0, 100.0 + interval])
+                    for data, metadata in results:
+                        self.assertEqual(data, _jpeg_bytes('retry'))
+                        self.assertFalse(metadata['image_upstream_suppressed'])
+                        self.assertIsNone(metadata['suppression_reason'])
+                    self.assertEqual(spot_api._img_http_dispatch_count, 2)
+                    self.assertEqual(spot_api._img_upstream_request_count, 2)
+                    self.assertEqual(spot_api._img_coalesced_waiter_count, 1)
+                    self.assertEqual(spot_api._img_refresh_failure_count, 1)
+                    self.assertEqual(spot_api._img_failure_count, 0)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await spot_api._stop_spot_image_refresh_for_shutdown(timeout_sec=.1)
+            self.assertTrue(monitor.stop())
+
     async def test_pressured_image_interval_reuses_cache_until_double_interval(self) -> None:
         spot_api.config.SPOT_IP = 'spot.local'
         spot_api.config.SPOT_REFRESH_INTERVAL = 3.0

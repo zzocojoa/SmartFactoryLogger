@@ -2508,25 +2508,35 @@ async def _request_spot_image(
     request_started_at: Optional[float] = None
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
-        async with _spot_device_request_lock:
-            if _spot_image_request_storage_suppressed(profile, image_url):
-                _img_storage_suppressed_task_count += 1
-                raise SpotStoragePressureError
-            request_started_at = time.monotonic()
-            _img_last_http_dispatch_monotonic = request_started_at
-            _img_last_http_dispatch_url = image_url
-            _img_http_dispatch_count += 1
-            response = await _request_spot_http_response(
-                client,
-                kind=SpotRequestKind.IMAGE,
-                method="GET",
-                url=image_url,
-                connect_timeout_sec=2.0,
-                read_timeout_sec=5.0,
-                max_response_bytes=HARD_MAX_RESPONSE_BYTES,
-                correlation_id=transport_correlation_id,
-            )
-            response.raise_for_status()
+        while True:
+            async with _spot_device_request_lock:
+                if _spot_image_request_storage_suppressed(profile, image_url):
+                    _img_storage_suppressed_task_count += 1
+                    raise SpotStoragePressureError
+                delay = 0.0
+                if _img_last_http_dispatch_monotonic is not None and _img_last_http_dispatch_url == image_url:
+                    delay = max(0.0, _spot_image_cache_ttl_sec(profile)
+                                - (time.monotonic() - _img_last_http_dispatch_monotonic))
+                if delay <= 0.0:
+                    request_started_at = time.monotonic()
+                    _img_last_http_dispatch_monotonic = request_started_at
+                    _img_last_http_dispatch_url = image_url
+                    _img_http_dispatch_count += 1
+                    response = await _request_spot_http_response(
+                        client,
+                        kind=SpotRequestKind.IMAGE,
+                        method="GET",
+                        url=image_url,
+                        connect_timeout_sec=2.0,
+                        read_timeout_sec=5.0,
+                        max_response_bytes=HARD_MAX_RESPONSE_BYTES,
+                        correlation_id=transport_correlation_id,
+                    )
+                    response.raise_for_status()
+                    break
+            # A normal cadence wait is neither a storage failure nor a sensor
+            # failure. Release the device gate so temperature/control can run.
+            await asyncio.sleep(delay)
     except httpx.TimeoutException as exc:
         transport_error_type, transport_os_error_code = _transport_error_details(exc)
         request_elapsed_ms = (
