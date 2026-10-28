@@ -1495,7 +1495,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             @contextmanager
             def reserve(size, reason, sink_id, destination, generation):
                 nonlocal reserved
-                self.assertIn(reason, {"fact_digest_byte_limit", "image_fact_append_byte_limit"})
+                self.assertIn(reason, {"fact_digest_byte_limit", "image_fact_append_byte_limit", "image_fact_read_byte_limit"})
                 if denied and reason == "fact_digest_byte_limit":
                     raise PayloadBudgetExceeded(reason)
                 reserved += size

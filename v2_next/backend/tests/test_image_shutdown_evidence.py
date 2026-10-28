@@ -1059,6 +1059,58 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             rows = list(csv.DictReader(handle))
         self.assertEqual([row['spot_image_linked_observation_key'] for row in rows], ['decode-fixture:1'])
 
+    def test_image_fact_reader_reserves_before_parsing(self):
+        self.assertTrue(self.enqueue().accepted)
+        self.assertTrue(spot.flush_spot_image_capture_queue(3))
+        self.assertTrue(spot.stop_spot_image_capture_writer(3))
+        fact_path = self.root / 'spot_image_fact.csv'
+        original = fact_path.read_bytes()
+        args = dict(log_path=self.root, capture_root=self.root / 'images', retention_days=0,
+                    payload_reservation=spot._reserve_image_writer_payload, config_generation=7)
+        with patch.object(spot, '_SPOT_IMAGE_CAPTURE_PAYLOAD_BYTE_LIMIT', 128 * 1024):
+            with self.assertRaisesRegex(spot.PayloadBudgetExceeded, 'image_fact_read_byte_limit'):
+                spot.SpotImageCaptureWriter(**args)
+        self.assertEqual(spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes'], 0)
+        self.assertEqual(fact_path.read_bytes(), original)
+        reads = []
+        open_file = Path.open
+
+        class Reader:
+            def __init__(self, handle):
+                self.handle = handle
+
+            def __getattr__(self, name):
+                return getattr(self.handle, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self.handle.__exit__(*exc)
+
+            def readline(self, size=-1):
+                state = spot.get_spot_image_capture_shutdown_status()
+                reads.append((state['pending_payload_bytes'], state['pending_destinations']))
+                return self.handle.readline(size)
+
+        def observed(path, mode='r', *open_args, **kwargs):
+            handle = open_file(path, mode, *open_args, **kwargs)
+            return Reader(handle) if path == fact_path and mode == 'r' else handle
+
+        with patch.object(Path, 'open', observed), patch.object(spot.time, 'monotonic', return_value=100.):
+            recovered = spot.SpotImageCaptureWriter(**args)
+        self.assertTrue(reads)
+        for reserved, destinations in reads:
+            self.assertGreater(reserved, 0)
+            stage, = destinations
+            self.assertEqual(stage['sink_id'], 'image_fact')
+            self.assertEqual(stage['config_generation'], 7)
+            self.assertEqual(stage['oldest_pending_monotonic'], 100.)
+            self.assertEqual(stage['pending_bytes'], reserved)
+        self.assertEqual(recovered.try_manifest_stats(), (1, hashlib.sha256(original).hexdigest(), True))
+        self.assertEqual(fact_path.read_bytes(), original)
+        self.assertEqual(spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes'], 0)
+
     def test_oversized_image_snapshot_is_rejected_before_serialization(self):
         self.stack.enter_context(patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION', True))
         snapshot = {'spot_service_instance_id': 'preflight-fixture', 'spot_poll_seq': 1,

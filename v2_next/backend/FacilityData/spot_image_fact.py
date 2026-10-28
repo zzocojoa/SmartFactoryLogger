@@ -9,7 +9,7 @@ import stat
 import tempfile
 import threading
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -126,9 +126,11 @@ def _probe_storage_directory(destination: Path) -> None:
             raise RuntimeError("storage probe cleanup unconfirmed") from cleanup_error
 
 
-def _bounded_fact_rows(handle: TextIO) -> Generator[list[str], None, None]:
+def _bounded_fact_rows(
+    handle: TextIO, *, row_byte_limit: int = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT,
+) -> Generator[list[str], None, None]:
     """Bound each logical CSV record, including quoted physical newlines."""
-    remaining = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT
+    remaining = row_byte_limit
 
     def physical_lines() -> Generator[str, None, None]:
         nonlocal remaining
@@ -139,9 +141,9 @@ def _bounded_fact_rows(handle: TextIO) -> Generator[list[str], None, None]:
             remaining -= size
             yield line
 
-    with csv_parser_field_limit(SPOT_IMAGE_FACT_ROW_BYTE_LIMIT):
+    with csv_parser_field_limit(row_byte_limit):
         for row in csv.reader(physical_lines(), strict=True):
-            remaining = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT
+            remaining = row_byte_limit
             yield row
 
 
@@ -589,15 +591,34 @@ class SpotImageCaptureWriter:
                 buffer.close()
                 buffer = None
 
+    @contextmanager
+    def _read_fact_rows(
+        self, *, row_byte_limit: int = SPOT_IMAGE_FACT_ROW_BYTE_LIMIT,
+    ) -> Generator[Generator[list[str], None, None], None, None]:
+        # Bound the reader's growing UCS4 field, decoded physical line,
+        # UTF-8 size-check copy and returned cell strings. File length does
+        # not enlarge this reservation; each logical row stays bounded.
+        workspace = 24 * (row_byte_limit + 1) + 2 * io.DEFAULT_BUFFER_SIZE
+        reservation = (self.payload_reservation(workspace, "image_fact_read_byte_limit", "image_fact",
+                                               self.fact_path, self.config_generation)
+                       if self.payload_reservation is not None else nullcontext())
+        with reservation:
+            with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = _bounded_fact_rows(handle, row_byte_limit=row_byte_limit)
+                try:
+                    yield reader
+                finally:
+                    reader.close()
+
     def _prepare_fact_file_for_append(self) -> bool:
         if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
             return True
         try:
-            with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                existing_header = next(_bounded_fact_rows(handle), [])
+            with self._read_fact_rows(row_byte_limit=csv_record_sizes(SPOT_IMAGE_FACT_COLUMNS)[1]) as reader:
+                header_matches = next(reader, []) == SPOT_IMAGE_FACT_COLUMNS
         except (UnicodeError, csv.Error):
-            existing_header = []
-        if existing_header == SPOT_IMAGE_FACT_COLUMNS:
+            header_matches = False
+        if header_matches:
             return False
         self._mark_fact_append_uncertain()
         raise RuntimeError("SPOT image fact append is uncertain; manual recovery required")
@@ -620,8 +641,7 @@ class SpotImageCaptureWriter:
         row_count = 0
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
-                with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = _bounded_fact_rows(handle)
+                with self._read_fact_rows() as reader:
                     if next(reader, []) != SPOT_IMAGE_FACT_COLUMNS:
                         raise csv.Error("SPOT image fact history has an unsupported header")
                     for values in reader:
@@ -646,8 +666,7 @@ class SpotImageCaptureWriter:
         row_count = 0
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
-                with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = _bounded_fact_rows(handle)
+                with self._read_fact_rows() as reader:
                     header = next(reader, [])
                     if header == SPOT_IMAGE_FACT_COLUMNS:
                         for row in reader:

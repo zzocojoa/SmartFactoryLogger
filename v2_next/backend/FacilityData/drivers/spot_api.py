@@ -831,6 +831,8 @@ def _spot_image_capture_failure_evidence(
         "reason": ("snapshot_decode_byte_limit" if stage == "snapshot_decode" and isinstance(error, PayloadBudgetExceeded)
                    else "image_fact_append_byte_limit"
                    if isinstance(error, PayloadBudgetExceeded) and str(error) == "image_fact_append_byte_limit"
+                   else "image_fact_read_byte_limit"
+                   if isinstance(error, PayloadBudgetExceeded) and str(error) == "image_fact_read_byte_limit"
                    else None),
         "errno": getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
         "winerror": getattr(error, "winerror", None) if isinstance(getattr(error, "winerror", None), int) else None,
