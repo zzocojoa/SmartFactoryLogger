@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-28T01:23:50.772526+00:00",
+  "lastUpdated": "2026-10-28T02:31:08.956730+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "ba486c7bfc2e5a5e16e51ba693676be2cfe09a17",
+      "currentDevelopmentCommit": "a4e06036f95a872fe50cc46c2a4a67d987ad58cb",
       "lastBackendVerification": {
-        "commit": "ba486c7bfc2e5a5e16e51ba693676be2cfe09a17",
-        "total": 1223,
-        "passed": 1223,
+        "commit": "a4e06036f95a872fe50cc46c2a4a67d987ad58cb",
+        "total": 1226,
+        "passed": 1226,
         "skipped": 0,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/normal-request-priority/verification.json",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/monitor-lifecycle/verification.json",
         "includesVerifiedF01Fixture": true
       },
       "completedScope": [
@@ -48358,12 +48358,16 @@
         "NORMAL image retries wait outside the device gate using existing positive profile cadence and actual dispatch clock, without false pressure/sensor failures.",
         "Pending temperature requests take priority over images/periodic diagnostics; cancellation and HTTP failure release priority ownership.",
         "PRESSURED periodic diagnostics defer before scheduling and after device-lock acquisition; queued journal terminates suppressed and resumes after recovery.",
-        "IC04 normal scheduling-versus-storage-pressure boundary checks completed in real driver/HTTP-client regressions; full 17-scenario service integration remains partial."
+        "IC04 normal scheduling-versus-storage-pressure boundary checks completed in real driver/HTTP-client regressions; full 17-scenario service integration remains partial.",
+        "App lifespan supplies actual CSV samples to a lifecycle-owned monitor aggregating observation fact/spool and image providers; missing provider stays unknown.",
+        "Serialized polling start/stop reuses one monitor; real loopback HTTP and actual storage owners verify NORMAL, writer-stop BLOCKED, image suppression and continuing temperature.",
+        "Control and lifespan shutdown exceptions cannot be overwritten by a previously completed snapshot; pending poll shutdown rejects restart without state mutation.",
+        "Monitor stop timeout retains handle and incomplete shutdown evidence; restart rejects before owner/state mutation and cleanup can complete after release."
       ],
       "remainingScope": [
         "Complete image initialization stat/identity and close-failure ownership, metadata/cache budgets, old-owner/old-generation availability and required sidecar state.",
         "Complete all required file integrity, owner replacement, spool append/close/unlink recovery, aggregate metadata budgets and untimed pre-admission work.",
-        "Connect actual monitor lifecycle and aggregate live CSV/fact/image required-sink providers; complete end-to-end service and recovery scenarios.",
+        "Complete monitor owner/config-transition bindings, failed/cancelled startup and non-poll producer shutdown restart handling, required sidecars and end-to-end recovery scenarios; lifecycle is now connected.",
         "Complete fact/JPEG reconciliation, observation-reference and public status/validator contracts, all 7 stages and 17 r4 scenarios.",
         "Final build/installer validation and master integration; the approved operating installer remains unchanged."
       ],
@@ -48372,15 +48376,15 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-pressure-join/health-result.json"
       },
-      "updatedAt": "2026-10-28T01:23:50.772526+00:00",
+      "updatedAt": "2026-10-28T02:31:08.956730+00:00",
       "lastRelatedBackendVerification": {
-        "commit": "ba486c7bfc2e5a5e16e51ba693676be2cfe09a17",
-        "total": 197,
-        "passed": 197,
+        "commit": "a4e06036f95a872fe50cc46c2a4a67d987ad58cb",
+        "total": 4,
+        "passed": 4,
         "skipped": 0,
         "exitCode": 0,
-        "scope": "SPOT image/temperature/diagnostics/shared request/shutdown regressions",
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/pressured-diagnostic-deferral-green/result.json"
+        "scope": "Pending polling stop restart rejection, concurrent start, monitor stop timeout and late completion",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/monitor-pending-stop-restart-green/result.json"
       },
       "lastPressureVerification": {
         "commit": "e6a592847f0dbac0e6db4004ec57380335cd0ed6",
@@ -48509,7 +48513,7 @@
         "environmentVariable": "TEMPERATURE_GOAL_PACKAGE",
         "userActionRequired": false,
         "futureLocalBackendChecks": "Set TEMPERATURE_GOAL_PACKAGE to the verified packageRoot for subsequent full backend runs; do not substitute another file or add raw data to Git.",
-        "latestFullVerificationEvidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/normal-request-priority/verification.json"
+        "latestFullVerificationEvidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/monitor-lifecycle/verification.json"
       },
       "lastSupplementalBackendVerification": {
         "sourceCommit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",

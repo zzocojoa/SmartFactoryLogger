@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | NORMAL 이미지 간격·온도 우선·PRESSURED 주기 진단 gate와 IC04 경계 검증 추가. 전체 required 상태·monitor 실제 수명 연결·공개 판정 계약 등은 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `ba486c7b` backend 전체 1223통과·0skip(F01 포함), backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 실제 CSV/fact/image 상태 제공자와 monitor 시작·종료를 연결. 동시 시작·종료 timeout 경계 검증. 설정/owner 전환·전체 required 상태·공개 판정 계약 등은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `a4e06036` backend 전체 1226통과·0skip(F01 포함), backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -1380,3 +1380,18 @@ clean `ba486c7b`에서 **backend 전체 1223시험 통과·0skip**(482.826초), 
 전용 보안 검토 명령은 없어 직접 검토했다. 신규 대기는 장치 잠금 밖에 있고, 발송 전 판정은 메모리만 읽으며 기존 URL/응답 검사·명시 제어 직렬화·shared task·종료·timeout 처리를 유지한다. 새 인증/네트워크 권한이나 파일 I/O를 추가하지 않았다. 이 범위를 전체 보안 감사로 확대하지 않는다.
 
 IC04의 원인 분리·잠금 밖 양수 대기·온도 우선과 R06 진단 연기를 검증했다. CSV·온도 fact/spool·이미지 상태 제공자는 이미 존재하지만 실제 monitor에는 아직 연결되지 않았다. 다음 통합은 start_spot_poll_loop/lifespan과 stop_spot_poll_loop의 단일 수명에 이들을 연결하고 enabled이지만 owner가 없는 경로를 unknown으로 남기는 것이다. sidecar·이전 owner/세대·close 불확실·합산 metadata/cache 예산, fact/JPEG 대조·관측 참조·공개 상태/판정 계약, 전체7단계·17명세, 최종 빌드/설치본·master 통합은 미완료다. 변경 없는 frontend/Electron/의존성은 마지막 단일 전체 health c6901ab5의 근거를 재사용하며 새 전체 health 통과로 확대하지 않는다. 직전·이번 목표 턴은 PROGRESS이며 목표는 active다. 서버·운영본·태그·설정·백업은 변경하지 않았다.
+
+
+## 2026-10-28 저장 압력 감시기의 실제 서비스 수명 연결
+
+- `50c28d05`: 앱 lifespan이 실제 CSV 상태 제공자를 전달하고, poll 시작이 CSV·온도 fact/spool·이미지 상태를 모으는 기존1초 monitor를 시작한다. 제공자 부재는 unknown으로 남기고 온도 수신을 유지하면서 이미지·주기 진단을 억제한다. 종료 결과에 monitor 정리 성공 여부를 포함한다.
+- `5b02ea4b`: 시작·종료의 단일 lifecycle lock으로 동시 시작이 같은 monitor/poll을 재사용한다. 실제 CSV·fact/spool·이미지 owner와 loopback HTTP 센서로 NORMAL 도달, CSV writer 중단 뒤 BLOCKED, 이미지 미발송과 온도 진행을 검증했다.
+- `3d719d8c`: monitor 종료 timeout 후 재시작을 상태 변경 전에 거부한다. 기존 handle과 미완료 종료 기록을 보존하고 실제 owner 잠금 해제 후 정리된다.
+- `1273d18f`·`5c73bb3c`: 종료 예외를 이전 완료 상태로 덮던 제어·lifespan 종료 경계를 수정했다. 실제 정상 종료를 선행한 재현과 기존 수명 fixture의 예외 분기에서 RED를 확인했고, 관련 제어 종료6개·lifespan12개를 통과했다.
+- `a4e06036`: 종료 시간 제한을 넘긴 poll task를 정상 동작으로 재사용하지 않는다. 실제 대기 task로 거부·동일 handle·기존 종료 상태 보존을 확인하고 정상 동시 시작·monitor timeout·늦은 종료와 함께4개를 통과했다.
+
+첫 RED 세 건은 감시기 미시작, 동시 시작 오류, 거부된 재시작의 종료 기록 재작성이다. 관련209→210시험 및 마지막 경계3시험·lint/typecheck를 통과했다. 동시 시작 GREEN 첫 시도에서는 시험이 bytes 반환값을 tuple로 잘못 해석해 실패했고 시험 본문만 바로잡았다. 그 실패 로그도 보존했다. 기존 시작 시험의 수동 task 취소와 종료 통합 시험의 제공자 누락은 새 수명 계약에 맞춰 보완하고 전체 검사를 다시 실행했다.
+
+최종 clean `a4e06036`에서 backend **1226통과·0skip**(569.713초), backend lint/typecheck·QA 자체 검사 exit0. F01을 포함하며 추가 사용자 자료는 필요 없다. 첫 전체 실행은 오류 표시 후 프로세스 확인·명시 중단하여 완주 판정이 없고, 격리 재현으로 원인을 확인했다. 첫 완주에서는 1226개 중 종료 예외 시험1개가 실패했다(548.357초). 이 실패와 단독 통과·상태를 명시한 RED 재현도 보존했다. 중단·완주 실패·수정 후 최종 통과 로그를 별도로 보존하고 source hash·종료 코드·원문4문서·109경로·보호 stash·버전5파일을 검산했다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/monitor-lifecycle/verification.json`.
+
+이는 개발 소스와 격리된 로컬 시험의 결과다. 운영 서버 적용이나 최종 설치본 검증은 아니다. monitor의 설정/owner 전환과 다른 생산자의 종료 대기 경계·실패/취소된 시작 정리, sidecar·이전 세대·close 불확실·합산 metadata/cache 예산, fact/JPEG 독립 대조·관측 참조·공개 판정 계약, 전체7단계·17명세, 최종 빌드/설치본·master 통합은 남아 있다. 기존 단일 전체 health c6901ab5 이후 변경 없는 frontend/Electron/의존성 근거를 재사용하며 새 전체 health 통과로 확대하지 않는다. 수정·검증·근거 보존을 계속 진행 중이며 목표는 active다. 서버·운영본·태그·설정·백업은 변경하지 않았다.
