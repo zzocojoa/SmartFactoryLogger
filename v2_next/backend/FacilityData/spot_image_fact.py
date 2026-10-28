@@ -614,7 +614,10 @@ class SpotImageCaptureWriter:
         if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
             return True
         try:
-            with self._read_fact_rows(row_byte_limit=csv_record_sizes(SPOT_IMAGE_FACT_COLUMNS)[1]) as reader:
+            # Existing CSVs may quote every column name. The names contain
+            # no quotes, so two extra quote bytes per field cover that form.
+            header_limit = csv_record_sizes(SPOT_IMAGE_FACT_COLUMNS)[1] + 2 * len(SPOT_IMAGE_FACT_COLUMNS)
+            with self._read_fact_rows(row_byte_limit=header_limit) as reader:
                 header_matches = next(reader, []) == SPOT_IMAGE_FACT_COLUMNS
         except (UnicodeError, csv.Error):
             header_matches = False

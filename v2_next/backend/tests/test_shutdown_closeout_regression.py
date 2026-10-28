@@ -1589,6 +1589,28 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 self.assertEqual(list(csv.DictReader(handle)), [first, second])
             self.assertEqual(writer.fact_row_count, 2)
 
+    def test_image_equivalent_quoted_header_remains_appendable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            writer = SpotImageCaptureWriter(log_path=root, capture_root=root / 'images', retention_days=0)
+            args = dict(image_bytes=b'\xff\xd8quoted-header\xff\xd9', captured_at=1782910800.,
+                        source_url='http://synthetic.invalid/image.jpg', source='test', image_age_ms=0.,
+                        link_checked_at=None, observation_snapshot=None)
+            first = writer.write_capture(**args)
+            with writer.fact_path.open('w', encoding='utf-8-sig', newline='') as handle:
+                output = csv.DictWriter(handle, fieldnames=SPOT_IMAGE_FACT_COLUMNS, quoting=csv.QUOTE_ALL)
+                output.writeheader()
+                output.writerow(first)
+            original = writer.fact_path.read_bytes()
+            restarted = SpotImageCaptureWriter(log_path=root, capture_root=root / 'images', retention_days=0)
+            self.assertTrue(restarted.try_manifest_stats()[2])
+            second = restarted.write_capture(**dict(args, captured_at=1782910801.))
+            final = writer.fact_path.read_bytes()
+            self.assertTrue(final.startswith(original))
+            with writer.fact_path.open(encoding='utf-8-sig', newline='') as handle:
+                self.assertEqual(list(csv.DictReader(handle)), [first, second])
+            self.assertEqual(restarted.try_manifest_stats(), (2, hashlib.sha256(final).hexdigest(), True))
+
     def test_image_allowed_long_field_survives_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
