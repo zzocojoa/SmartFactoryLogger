@@ -2137,6 +2137,21 @@ def _spot_auxiliary_dispatch_storage_blocked() -> bool:
             and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED")
 
 
+def _spot_image_request_storage_suppressed(profile: SpotImageProfile, image_url: str) -> bool:
+    if _storage_pressure_monitor is None:
+        return False
+    state = _storage_pressure_monitor.snapshot().state
+    if state == "PERSISTENCE_BLOCKED":
+        return True
+    entry = _img_cache_entry
+    if state != "PRESSURED" or entry is None or entry.image_url != image_url:
+        return False
+    age = time.monotonic() - entry.captured_at_monotonic
+    interval = _spot_image_cache_ttl_sec(profile)
+    # The ordinary fresh-cache window is not a storage-pressure deferral.
+    return interval <= age < 2.0 * interval
+
+
 def _spot_image_pressure_response(profile: SpotImageProfile) -> tuple[bytes, Dict[str, Any]]:
     global _img_cache_hit_count
     image_url = _resolve_spot_image_url()
@@ -4211,7 +4226,7 @@ async def fetch_image_async(
             _img_failure_count = min(_img_failure_count + 1, 10)
             raise
 
-        if _spot_auxiliary_dispatch_storage_blocked():
+        if _spot_image_request_storage_suppressed(normalized_profile, image_url):
             return _spot_image_pressure_response(normalized_profile)
         cache_entry = _img_cache_entry
         if _is_spot_image_cache_fresh(
@@ -4237,7 +4252,7 @@ async def fetch_image_async(
                     image_url=image_url,
                     upstream_status=None,
                 )
-            if _spot_auxiliary_dispatch_storage_blocked():
+            if _spot_image_request_storage_suppressed(normalized_profile, image_url):
                 return _spot_image_pressure_response(normalized_profile)
             cache_entry = _img_cache_entry
             if _is_spot_image_cache_fresh(

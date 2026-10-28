@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.request import Request as UrlRequest
 from unittest.mock import ANY, AsyncMock, Mock, patch
@@ -5067,6 +5068,56 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     await asyncio.gather(task, return_exceptions=True)
                 monitor.stop()
                 spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
+
+    async def test_pressured_image_interval_reuses_cache_until_double_interval(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        clock = [100.0]
+        requests = []
+        driver_clock = SimpleNamespace(monotonic=lambda: clock[0], time=time.time, perf_counter=time.perf_counter)
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'available', byte_limit=100, budget_pending_bytes=80)])
+
+        def response(request):
+            requests.append((str(request.url), clock[0]))
+            return httpx.Response(200, content=_jpeg_bytes(str(len(requests))), request=request)
+
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2
+            while monitor.snapshot().state != 'PRESSURED' and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, 'PRESSURED')
+            async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                        patch.object(spot_api, '_http_client', client), \
+                        patch.object(spot_api, 'time', driver_clock):
+                    interval = spot_api._spot_image_cache_ttl_sec('operator_live')
+                    first, original = await spot_api.fetch_image_async('operator_live')
+                    self.assertEqual(len(requests), 1)
+                    clock[0] += interval * 1.5
+                    cached, metadata = await spot_api.fetch_image_async('operator_live')
+                    self.assertEqual(len(requests), 1, 'PRESSURED dispatched before twice the normal interval')
+                    self.assertEqual(cached, first)
+                    self.assertEqual(metadata['captured_at'], original['captured_at'])
+                    self.assertEqual(metadata['age_ms'], interval * 1500)
+                    self.assertEqual(metadata['source'], 'cache')
+                    self.assertTrue(metadata['image_upstream_suppressed'])
+                    self.assertEqual(metadata['suppression_reason'], 'storage_pressure')
+                    self.assertGreaterEqual(metadata['retry_after_sec'], 1)
+                    clock[0] = 100.0 + interval * 2
+                    refreshed, metadata = await spot_api.fetch_image_async('operator_live')
+                    self.assertEqual(len(requests), 2)
+                    self.assertNotEqual(refreshed, first)
+                    self.assertEqual(metadata['source'], 'upstream')
+                    self.assertFalse(metadata['image_upstream_suppressed'])
+                    self.assertEqual(spot_api._img_http_dispatch_count, 2)
+                    self.assertEqual(spot_api._img_upstream_request_count, 2)
+                    self.assertEqual(spot_api._img_refresh_failure_count, 0)
+                    self.assertEqual(spot_api._img_failure_count, 0)
+        finally:
+            self.assertTrue(monitor.stop())
 
     async def test_storage_blocked_while_waiting_for_device_lock_returns_503_without_dispatch(self) -> None:
         spot_api.config.SPOT_IP = 'spot.local'
