@@ -1814,9 +1814,11 @@ async def lifespan(app: FastAPI):
             observation_fact_drained = True
             if spot_start_attempted:
                 print("[Main] Stopping SPOT temperature and diagnostics polling...")
+                spot_stop_raised = False
                 try:
                     spot_poll_stopped = await spot_control.stop_spot_poll_loop()
                 except Exception as exc:
+                    spot_stop_raised = True
                     spot_poll_stopped = False
                     _logger.warning(
                         "[Main] Lifespan SPOT poll shutdown failed error_type=%s %s",
@@ -1906,7 +1908,7 @@ async def lifespan(app: FastAPI):
                 observation_fact_drained = _probe_spot_observation_fact_drained(
                     "Lifespan final"
                 )
-                spot_poll_stopped = _probe_spot_poll_shutdown_drained(
+                spot_poll_stopped = not spot_stop_raised and _probe_spot_poll_shutdown_drained(
                     "Lifespan final",
                     spot_poll_stopped,
                 )

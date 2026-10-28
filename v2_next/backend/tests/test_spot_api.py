@@ -3224,78 +3224,86 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         from backend import app as backend_app
 
-        stopped_stages: list[tuple[str, Any]] = []
+        for stop_raises in (False, True):
+            with self.subTest(stop_raises=stop_raises):
+                stopped_stages: list[tuple[str, Any]] = []
 
-        async def stop_stage(stage: str, stopper: Any) -> bool:
-            stopped_stages.append((stage, stopper))
-            return True
+                async def stop_stage(stage: str, stopper: Any) -> bool:
+                    stopped_stages.append((stage, stopper))
+                    return True
 
-        with (
-            patch.object(
-                backend_app,
-                "acquire_single_instance_lock",
-                return_value=True,
-            ),
-            patch.object(backend_app, "release_single_instance_lock"),
-            patch.object(backend_app, "_run_lifespan_start_stage"),
-            patch.object(
-                backend_app,
-                "_run_lifespan_stop_stage",
-                side_effect=stop_stage,
-            ),
-            patch.object(backend_app, "_start_backend_access_log_thread"),
-            patch.object(
-                backend_app.spot_control,
-                "start_spot_poll_loop",
-                new=AsyncMock(),
-            ),
-            patch.object(
-                backend_app.spot_control,
-                "stop_spot_poll_loop",
-                new=AsyncMock(return_value=True),
-            ),
-            patch.object(
-                backend_app.spot_control,
-                "spot_observation_fact_writes_drained",
-                return_value=True,
-            ),
-            patch.object(
-                backend_app.spot_control,
-                "stop_spot_image_capture_for_shutdown",
-                return_value=True,
-            ),
-            patch.object(
-                backend_app,
-                "_probe_spot_poll_shutdown_drained",
-                return_value=True,
-            ),
-            patch.object(
-                backend_app,
-                "_probe_spot_observation_fact_drained",
-                return_value=True,
-            ),
-        ):
-            async with backend_app.lifespan(backend_app.app):
-                pass
+                with (
+                    patch.object(
+                        backend_app,
+                        "acquire_single_instance_lock",
+                        return_value=True,
+                    ),
+                    patch.object(backend_app, "release_single_instance_lock"),
+                    patch.object(backend_app, "_run_lifespan_start_stage"),
+                    patch.object(
+                        backend_app,
+                        "_run_lifespan_stop_stage",
+                        side_effect=stop_stage,
+                    ),
+                    patch.object(backend_app, "_start_backend_access_log_thread"),
+                    patch.object(
+                        backend_app.spot_control,
+                        "start_spot_poll_loop",
+                        new=AsyncMock(),
+                    ),
+                    patch.object(
+                        backend_app.spot_control,
+                        "stop_spot_poll_loop",
+                        new=AsyncMock(side_effect=RuntimeError("poll stop failed") if stop_raises else None,
+                                      return_value=True),
+                    ),
+                    patch.object(
+                        backend_app.spot_control,
+                        "spot_observation_fact_writes_drained",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        backend_app.spot_control,
+                        "stop_spot_image_capture_for_shutdown",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        backend_app,
+                        "_probe_spot_poll_shutdown_drained",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        backend_app,
+                        "_probe_spot_observation_fact_drained",
+                        return_value=True,
+                    ),
+                ):
+                    if stop_raises:
+                        with self.assertRaisesRegex(RuntimeError, "spot_poll"):
+                            async with backend_app.lifespan(backend_app.app):
+                                pass
+                    else:
+                        async with backend_app.lifespan(backend_app.app):
+                            pass
 
-        stage_names = [stage for stage, _stopper in stopped_stages]
-        self.assertLess(
-            stage_names.index("plc_service"),
-            stage_names.index("spot_diagnostic_journal"),
-        )
-        self.assertLess(
-            stage_names.index("csv_logger"),
-            stage_names.index("spot_diagnostic_journal"),
-        )
-        journal_stopper = next(
-            stopper
-            for stage, stopper in stopped_stages
-            if stage == "spot_diagnostic_journal"
-        )
-        self.assertIs(
-            journal_stopper,
-            backend_app.spot_control.stop_spot_diagnostic_request_journal,
-        )
+                stage_names = [stage for stage, _stopper in stopped_stages]
+                self.assertLess(
+                    stage_names.index("plc_service"),
+                    stage_names.index("spot_diagnostic_journal"),
+                )
+                self.assertLess(
+                    stage_names.index("csv_logger"),
+                    stage_names.index("spot_diagnostic_journal"),
+                )
+                journal_stopper = next(
+                    stopper
+                    for stage, stopper in stopped_stages
+                    if stage == "spot_diagnostic_journal"
+                )
+                self.assertIs(
+                    journal_stopper,
+                    backend_app.spot_control.stop_spot_diagnostic_request_journal,
+                )
 
     async def test_lifespan_persists_late_terminal_event_before_journal_close(
         self,
