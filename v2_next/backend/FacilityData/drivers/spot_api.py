@@ -130,6 +130,9 @@ class _SpotImageCacheEntry:
 
 _img_fetch_lock = asyncio.Lock()
 _spot_device_request_lock = asyncio.Lock()
+_spot_temperature_requests_pending = 0
+# Internal gate recheck only; this does not change sensor polling intervals.
+_SPOT_TEMPERATURE_PRIORITY_RECHECK_SEC = 0.01
 SpotImageProfile: TypeAlias = Literal["snapshot", "operator_live"]
 _SPOT_IMAGE_PROFILE_SNAPSHOT: SpotImageProfile = "snapshot"
 _SPOT_IMAGE_PROFILE_OPERATOR_LIVE: SpotImageProfile = "operator_live"
@@ -2517,6 +2520,8 @@ async def _request_spot_image(
                 if _img_last_http_dispatch_monotonic is not None and _img_last_http_dispatch_url == image_url:
                     delay = max(0.0, _spot_image_cache_ttl_sec(profile)
                                 - (time.monotonic() - _img_last_http_dispatch_monotonic))
+                if _spot_temperature_requests_pending:
+                    delay = max(delay, _SPOT_TEMPERATURE_PRIORITY_RECHECK_SEC)
                 if delay <= 0.0:
                     request_started_at = time.monotonic()
                     _img_last_http_dispatch_monotonic = request_started_at
@@ -2617,15 +2622,20 @@ async def _request_spot_temperature_observation(
     *,
     request_kind: SpotRequestKind = SpotRequestKind.TEMPERATURE,
 ) -> tuple[float, SpotRawClassification]:
+    global _spot_temperature_requests_pending
     try:
-        async with _spot_device_request_lock:
-            response = await _request_spot_http_response(
-                client,
-                kind=request_kind,
-                method="GET",
-                url=temp_url,
-            )
-            response.raise_for_status()
+        _spot_temperature_requests_pending += 1
+        try:
+            async with _spot_device_request_lock:
+                response = await _request_spot_http_response(
+                    client,
+                    kind=request_kind,
+                    method="GET",
+                    url=temp_url,
+                )
+                response.raise_for_status()
+        finally:
+            _spot_temperature_requests_pending -= 1
     except httpx.TimeoutException as exc:
         classification = classify_spot_raw_response(
             poll_status=SpotPollStatus.TIMEOUT,

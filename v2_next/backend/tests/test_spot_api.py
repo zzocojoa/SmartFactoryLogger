@@ -5069,6 +5069,41 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 monitor.stop()
                 spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
 
+    async def test_queued_image_yields_to_temperature_without_storage_suppression(self) -> None:
+        requests, tasks = [], []
+
+        def response(request):
+            kind = 'image' if request.url.path == '/image.jpg' else 'temperature'
+            requests.append(kind)
+            return httpx.Response(200, content=_jpeg_bytes('priority') if kind == 'image' else b'450.0',
+                                  request=request)
+
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                await spot_api._spot_device_request_lock.acquire()
+                tasks.append(asyncio.create_task(spot_api._request_spot_image(
+                    client, 'http://spot.local/image.jpg', profile='operator_live')))
+                await asyncio.sleep(.01)
+                tasks.append(asyncio.create_task(spot_api._request_spot_temperature(
+                    client, 'http://spot.local/output?p=temperature')))
+                await asyncio.sleep(.01)
+                self.assertFalse(any(task.done() for task in tasks))
+                spot_api._spot_device_request_lock.release()
+                results = await asyncio.wait_for(asyncio.gather(*tasks), 2)
+                self.assertEqual(requests, ['temperature', 'image'], 'queued image ran before waiting temperature')
+                self.assertEqual(results, [_jpeg_bytes('priority'), 450.0])
+                self.assertEqual(spot_api._img_http_dispatch_count, 1)
+                self.assertEqual(spot_api._img_storage_suppressed_task_count, 0)
+                self.assertEqual(spot_api._img_failure_count, 0)
+        finally:
+            if spot_api._spot_device_request_lock.locked():
+                spot_api._spot_device_request_lock.release()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
     async def test_normal_image_retry_waits_outside_device_lock_without_pressure_error(self) -> None:
         spot_api.config.SPOT_IP = 'spot.local'
         spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
