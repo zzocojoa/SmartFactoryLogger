@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-28T00:05:27.753888+00:00",
+  "lastUpdated": "2026-10-28T00:35:45.428077+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,14 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "2b78c443f2b10be9b8f609d74e932429d2788dd2",
+      "currentDevelopmentCommit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
       "lastBackendVerification": {
-        "commit": "2b78c443f2b10be9b8f609d74e932429d2788dd2",
-        "total": 1212,
-        "passed": 1211,
+        "commit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
+        "total": 1216,
+        "passed": 1215,
         "skipped": 1,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-workspace-join/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-fact-workspace/verification.json"
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48345,10 +48345,14 @@
         "Image pressure samples join independent probes and admitted stages without reader I/O, preserving original delay and shared budget occupancy; unknown processing remains blocked and production monitor is still not started.",
         "Decoded image snapshot workspaces retain admitted destinations, generations and original capture clocks through OFF and delayed writes, then release atomically.",
         "Image probe and file-read workspaces retain exact destination hashes, generations and monotonic deadlines; idle OFF work remains visible without creating fake capture counts.",
-        "Image writer construction and file-read reservations use the admitted capture generation after destination changes; default generation zero no longer contaminates bound work."
+        "Image writer construction and file-read reservations use the admitted capture generation after destination changes; default generation zero no longer contaminates bound work.",
+        "Image fact CSV serialization reserves all bounded temporary payload copies before rendering; failure drops copies before returning budget.",
+        "Image fact history/header/row parsing reserves bounded workspace before open through reader/file close with admitted generation and destination.",
+        "Equivalent quote-all CSV headers remain appendable with original bytes and strict column validation preserved.",
+        "Idle image fact access reserves buffer workspace and original clock/destination/generation through lock wait and close; OFF retains pending work."
       ],
       "remainingScope": [
-        "Complete image initialization/append work outside existing reservations, old-owner/old-generation availability and required sidecar state.",
+        "Complete image initialization stat/identity and close-failure ownership, metadata/cache budgets, old-owner/old-generation availability and required sidecar state.",
         "Complete all required file integrity, owner replacement, spool append/close/unlink recovery, aggregate metadata budgets and untimed pre-admission work.",
         "Connect actual monitor lifecycle; implement PRESSURED cadence and NORMAL interval/temperature priority without false storage failures.",
         "Complete fact/JPEG reconciliation, observation-reference and public status/validator contracts, all 7 stages and 17 r4 scenarios.",
@@ -48359,15 +48363,15 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-pressure-join/health-result.json"
       },
-      "updatedAt": "2026-10-28T00:05:27.753888+00:00",
+      "updatedAt": "2026-10-28T00:35:45.428077+00:00",
       "lastRelatedBackendVerification": {
-        "commit": "2b78c443f2b10be9b8f609d74e932429d2788dd2",
-        "total": 162,
-        "passed": 162,
+        "commit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
+        "total": 166,
+        "passed": 166,
         "skipped": 0,
         "exitCode": 0,
         "scope": "Image shutdown/startup, persistence pressure and shutdown closeout regressions",
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/image-workspace-generation-green/result.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/image-fact-access-workspace-green/result.json"
       },
       "lastPressureVerification": {
         "commit": "e6a592847f0dbac0e6db4004ec57380335cd0ed6",
