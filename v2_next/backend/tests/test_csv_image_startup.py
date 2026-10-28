@@ -92,10 +92,7 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertEqual(spot_api._SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks, 0)
             finally:
                 release.set()
-                task = spot_api._spot_poll_task
-                if task is not None:
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(await spot_api.stop_spot_poll_loop())
                 self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
 
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
@@ -260,10 +257,7 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
                 self.assertEqual(len(owners), 2)
             finally:
-                task = spot_api._spot_poll_task
-                if task is not None:
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(await spot_api.stop_spot_poll_loop())
                 self.assertTrue(spot_api.stop_spot_image_capture_writer(timeout_sec=2))
 
         with patch.object(spot_api, '_request_spot_image_manifest_initialization', self.request_initializer), \
@@ -1054,10 +1048,7 @@ class CsvImageStartupTests(unittest.TestCase):
                 self.assertEqual(spot_api._spot_image_capture_enqueued_count, 0)
                 self.assertEqual(spot_api._spot_image_capture_failure_count, 0)
             finally:
-                task = spot_api._spot_poll_task
-                if task is not None:
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(await spot_api.stop_spot_poll_loop())
                 spot_api.stop_spot_image_capture_writer(timeout_sec=2)
 
         with patch.object(Path, 'resolve', resolve_path), \
