@@ -121,7 +121,7 @@ def run_child(root: Path, recover: bool) -> None:
             shutdown_task = None
             try:
                 logger.start()
-                await spot_api.start_spot_poll_loop()
+                await spot_api.start_spot_poll_loop(storage_sample_provider=logger.get_storage_pressure_samples)
                 service.start()
                 owned.update(csv=logger.thread, service=service.thread, driver_reader=service.driver_thread)
                 owned.update({f'driver_worker_{i}': thread for i, thread in enumerate(driver._worker_threads)})
@@ -129,13 +129,16 @@ def run_child(root: Path, recover: bool) -> None:
                 transport = spot_api._spot_http_transport
                 observation = spot_api._spot_observation_queue
                 journal = spot_api._spot_diagnostic_journal
+                monitor = spot_api._storage_pressure_monitor
+                assert monitor is not None
                 owned.update(http_executor=transport._executor._thread,
                              http_watchdog=transport._response_deadline_thread,
-                             observation_writer=observation._thread, journal_writer=journal._writer_thread)
+                             observation_writer=observation._thread, journal_writer=journal._writer_thread,
+                             pressure_monitor=monitor._thread)
                 deadline = time.monotonic() + 20
                 next_image = 0.0
                 while time.monotonic() < deadline:
-                    if time.monotonic() >= next_image:
+                    if time.monotonic() >= next_image and monitor.snapshot().state == 'NORMAL':
                         body, _ = await spot_api.fetch_image_async()
                         assert body == jpeg.getvalue()
                         next_image = time.monotonic() + 3.1
