@@ -2,6 +2,7 @@ import asyncio
 import csv
 import errno
 import hashlib
+import http.server
 import io
 import json
 import logging
@@ -3389,6 +3390,62 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 "timed_out",
             )
             self.assertTrue(recovered.close())
+
+    @asynccontextmanager
+    async def storage_lifecycle_fixture(self):
+        requests = []
+
+        class Sensor(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                requests.append(self.path)
+                body = _BASE_TEST_JPEG if self.path.startswith('/image') else b'450.0'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Sensor)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            url = f'http://127.0.0.1:{server.server_port}'
+            for name, value in dict(LOG_PATH=Path(tmp), SPOT_URL=url + '/output?p=temperature',
+                                    SPOT_IP='127.0.0.1', SPOT_INTERNAL_TEMPERATURE_URL='',
+                                    SPOT_REFRESH_INTERVAL=0.2, SPOT_OBSERVATION_FACT_ENABLED=False,
+                                    SPOT_IMAGE_CAPTURE_ENABLED=False).items():
+                stack.enter_context(patch.object(spot_api.config, name, value))
+            try:
+                yield Path(tmp), url, requests
+            finally:
+                await spot_api.stop_spot_poll_loop()
+                await asyncio.to_thread(spot_api.stop_spot_image_capture_for_shutdown, 3)
+                await asyncio.to_thread(spot_api.stop_spot_diagnostic_request_journal, 3)
+                await asyncio.to_thread(server.shutdown)
+                server.server_close()
+                thread.join(2)
+
+    async def test_poll_lifecycle_blocks_images_without_csv_provider_but_keeps_temperature(self):
+        async with self.storage_lifecycle_fixture() as (_root, url, requests):
+            await spot_api.start_spot_poll_loop()
+            monitor = spot_api._storage_pressure_monitor
+            self.assertIsNotNone(monitor, 'poll lifecycle did not start the storage pressure monitor')
+            for _ in range(200):
+                if spot_api._spot_temperature_snapshot is not None:
+                    break
+                await asyncio.sleep(.01)
+            self.assertEqual(spot_api.get_cached_spot_temp(), 450.0)
+            self.assertEqual(monitor.snapshot().state, 'PERSISTENCE_BLOCKED')
+            self.assertEqual(monitor.snapshot().current_storage_availability, 'unknown')
+            with self.assertRaises(spot_api.SpotStoragePressureError):
+                await spot_api._request_spot_image(spot_api._get_http_client(), url + '/image.jpg')
+            self.assertTrue(requests)
+            self.assertTrue(all(path == '/output?p=temperature' for path in requests))
+            self.assertTrue(await spot_api.stop_spot_poll_loop())
+            self.assertIn('monitor_stopped', monitor.snapshot().reasons)
+            self.assertTrue(spot_api.get_spot_poll_shutdown_status()['complete'])
 
     async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
         self,

@@ -1786,7 +1786,9 @@ async def lifespan(app: FastAPI):
         print("[Main] Starting SPOT temperature and diagnostics polling...")
         spot_started_perf = time.perf_counter()
         spot_start_attempted = True
-        await spot_control.start_spot_poll_loop()
+        await spot_control.start_spot_poll_loop(
+            storage_sample_provider=lambda: logger_service.get_storage_pressure_samples(),
+        )
         _logger.info(
             "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
             (time.perf_counter() - spot_started_perf) * 1000.0,

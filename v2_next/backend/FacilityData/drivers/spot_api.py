@@ -285,6 +285,39 @@ _storage_pressure_monitor: Optional[StoragePressureMonitor] = None
 _logger = logging.getLogger("spot_control")
 
 
+def _storage_pressure_samples(
+    csv_provider: Callable[[], Iterable[StoragePressureSample]] | None,
+) -> tuple[StoragePressureSample, ...]:
+    # Providers publish memory snapshots. File access remains with each owner.
+    samples = (list(csv_provider()) if csv_provider is not None else [
+        StoragePressureSample("csv_provider", None, "", True, "unknown", writer_alive=False)
+    ])
+    enabled = bool(config.SPOT_OBSERVATION_FACT_ENABLED)
+    observation_queue = _spot_observation_queue
+    if observation_queue is not None:
+        samples.extend(observation_queue.storage_pressure_samples(enabled=enabled))
+    elif enabled:
+        samples.append(StoragePressureSample(
+            "temperature_fact", None, "", True, "unknown", writer_alive=False))
+    samples.extend(get_spot_image_storage_pressure_samples())
+    return tuple(samples)
+
+
+async def _stop_storage_pressure_monitor() -> bool:
+    global _storage_pressure_monitor, _spot_shutdown_pressure_monitor_stopped
+    monitor = _storage_pressure_monitor
+    try:
+        stopped = monitor is None or await asyncio.to_thread(monitor.stop)
+    except Exception as exc:
+        stopped = False
+        _logger.warning("Storage pressure monitor shutdown failed error_type=%s", type(exc).__name__)
+    if stopped and _storage_pressure_monitor is monitor:
+        _storage_pressure_monitor = None
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_pressure_monitor_stopped = stopped
+    return stopped
+
+
 @dataclass(frozen=True)
 class ImageCaptureAdmissionResult:
     status: Literal[
@@ -4387,6 +4420,7 @@ _spot_shutdown_task_states: dict[str, str] = {
 }
 _spot_shutdown_image_refresh_stopped = False
 _spot_shutdown_transport_stopped = False
+_spot_shutdown_pressure_monitor_stopped = True
 _spot_shutdown_started_monotonic: float | None = None
 
 
@@ -4451,7 +4485,9 @@ async def _spot_poll_loop():
     _spot_poll_running = False
 
 
-async def start_spot_poll_loop():
+async def start_spot_poll_loop(
+    *, storage_sample_provider: Callable[[], Iterable[StoragePressureSample]] | None = None,
+):
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
     global _img_accepting_requests, _spot_poll_task, _spot_poll_running
     global _spot_shutdown_image_refresh_stopped, _spot_shutdown_started_monotonic
@@ -4459,6 +4495,7 @@ async def start_spot_poll_loop():
     global _spot_diagnostic_journal_shutdown_started
     global _spot_diagnostic_journal_closed_snapshot
     global _spot_observation_queue
+    global _storage_pressure_monitor, _spot_shutdown_pressure_monitor_stopped
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
 
@@ -4489,10 +4526,21 @@ async def start_spot_poll_loop():
         _spot_shutdown_started_monotonic = None
     await asyncio.to_thread(_get_spot_diagnostic_request_journal)
     _activate_spot_image_storage()
-    _start_spot_http_transport()
-    _img_accepting_requests = True
-    _spot_poll_running = True
-    _spot_poll_task = asyncio.create_task(_spot_poll_loop())
+    if _storage_pressure_monitor is not None:
+        raise RuntimeError("Storage pressure monitor shutdown is incomplete")
+    _storage_pressure_monitor = StoragePressureMonitor(
+        lambda: _storage_pressure_samples(storage_sample_provider))
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_pressure_monitor_stopped = False
+    try:
+        _storage_pressure_monitor.start()
+        _start_spot_http_transport()
+        _img_accepting_requests = True
+        _spot_poll_running = True
+        _spot_poll_task = asyncio.create_task(_spot_poll_loop())
+    except BaseException:
+        await _stop_storage_pressure_monitor()
+        raise
 
 
 async def stop_spot_poll_loop() -> bool:
@@ -4630,11 +4678,13 @@ async def stop_spot_poll_loop() -> bool:
                 ),
             },
         )
+    pressure_monitor_stopped = await _stop_storage_pressure_monitor()
     return (
         task_shutdown_succeeded
         and observation_fact_drained
         and image_refresh_stopped
         and transport_stopped
+        and pressure_monitor_stopped
     )
 
 
@@ -4704,6 +4754,7 @@ def get_spot_poll_shutdown_status() -> Dict[str, Any]:
         task_states = dict(_spot_shutdown_task_states)
         image_refresh_stopped = _spot_shutdown_image_refresh_stopped
         transport_stopped = _spot_shutdown_transport_stopped
+        pressure_monitor_stopped = _spot_shutdown_pressure_monitor_stopped
     drained_states = {
         "not_started",
         "cancelled",
@@ -4722,11 +4773,13 @@ def get_spot_poll_shutdown_status() -> Dict[str, Any]:
         "observation_fact_drained": observation_fact_drained,
         "image_refresh_stopped": image_refresh_stopped,
         "transport_stopped": transport_stopped,
+        "pressure_monitor_stopped": pressure_monitor_stopped,
         "complete": (
             tasks_drained
             and observation_fact_drained
             and image_refresh_stopped
             and transport_stopped
+            and pressure_monitor_stopped
         ),
     }
 
