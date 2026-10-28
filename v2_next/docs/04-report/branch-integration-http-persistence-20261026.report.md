@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | PRESSURED 이미지 간격2배·실패 뒤 간격 유지·장치 잠금 후 재검사를 추가. 전체 required 상태·monitor 수명·주기 진단/NORMAL 온도 우선·공개 판정 계약 등은 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `cc529c57` backend 전체 1219통과·0skip(F01 포함), backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | NORMAL 이미지 간격·온도 우선·PRESSURED 주기 진단 gate와 IC04 경계 검증 추가. 전체 required 상태·monitor 실제 수명 연결·공개 판정 계약 등은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `ba486c7b` backend 전체 1223통과·0skip(F01 포함), backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -1364,3 +1364,19 @@ clean `cc529c57`에서 **backend 전체 1219시험 통과·0skip**(529.437초), 
 전용 보안 검토 명령은 없어 메모리 전용 gate, 기존 URL 확인·single-flight·종료·오류 계수 유지 범위를 직접 검토했다. 변경 경로 위험도 도구의 낮음8/100은 보안 감사 통과가 아니다. 도구가 새로 만든 호출 영수증2파일만 확인해 증거 폴더로 옮겼다.
 
 R06/FR02의 이미지 PRESSURED 분기만 보완했다. monitor 실제 시작/종료·주기 진단/NORMAL 온도 우선, sidecar·이전 owner/세대·close 불확실·합산 metadata/cache 예산, fact/JPEG 대조·관측 참조·공개 상태/판정 계약, 전체7단계·17명세, 최종 빌드/설치본·master 통합은 미완료다. 변경 없는 frontend/Electron/의존성은 마지막 단일 전체 health c6901ab5의 근거를 재사용하며 새 전체 health 통과로 확대하지 않는다. 직전·이번 목표 턴은 PROGRESS이며 목표는 active다. 서버·운영본·태그·설정·백업은 변경하지 않았다.
+
+
+## 2026-10-28 정상 간격·온도 우선과 PRESSURED 주기 진단
+
+- `5ae65e1e`: NORMAL 이미지 재요청도 실제 발송 시작의 단조 시각·같은 URL·leader profile의 기존 양수 간격을 지킨다. shared task가 장치 잠금 밖에서 기다리고 온도 요청이 그 사이 진행한다. 정상 대기는 압력503이나 센서 실패로 집계하지 않는다.
+- `09e9dda3`: 잠금을 기다리는 온도 요청을 이미지보다 우선한다. 온도 대기 상태는 실제 장치 잠금 대기 전부터 관리하고 취소·HTTP 실패에도 finally에서 해제한다.
+- `8318f329`: 주기 진단도 온도에 양보한다. 온도 요청 하나의 취소와 다른 하나의 HTTP 실패 후에도 진단·이미지가 이어지고 거짓 압력 억제 계수가 생기지 않는다. 진단 journal은 발송 허용 뒤에만 running으로 전환한다.
+- `ba486c7b`: PRESSURED에서도 주기 진단을 작업 생성 전과 잠금 후 발송 경계에서 미룬다. 대기 journal은 suppressed로 종결하고 센서 오류/active 누수를 남기지 않는다. 저장 상태 회복 후8개 진단 요청이 완료됨을 확인했다.
+
+행동별 RED(정상 재요청 조기 발송2건, 이미지/진단의 온도 우선 순서 위반, PRESSURED 진단 생성True)를 확인한 뒤 관련194→195→196→197시험과 lint/typecheck를 통과해 순서대로 커밋했다. 시험은 실제 driver·HTTP client·압력 monitor·임시 journal을 사용하며 HTTP 응답/시계만 외부 경계에서 제어한다. 내부10ms 재판정 대기는 센서 수집·표시 주기나 현장 성능 기준 변경이 아니며 추가 worker/장치 연결을 만들지 않는다.
+
+clean `ba486c7b`에서 **backend 전체 1223시험 통과·0skip**(482.826초), backend lint·typecheck·QA 자체 검사 모두 exit0. F01의 시작/종료 SHA256을 대조하고 TEMPERATURE_GOAL_PACKAGE를 설정한 단일 전체 실행이다. 이전1skip은 과거 기록으로 보존하며 사용자에게 추가 자료를 요청할 필요가 없다. HEAD·변경2파일·전체 로그/종료 코드·원문4문서·109경로·보호 stash·버전5파일·운영 설치본 해시를 확인했다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/normal-request-priority/verification.json`.
+
+전용 보안 검토 명령은 없어 직접 검토했다. 신규 대기는 장치 잠금 밖에 있고, 발송 전 판정은 메모리만 읽으며 기존 URL/응답 검사·명시 제어 직렬화·shared task·종료·timeout 처리를 유지한다. 새 인증/네트워크 권한이나 파일 I/O를 추가하지 않았다. 이 범위를 전체 보안 감사로 확대하지 않는다.
+
+IC04의 원인 분리·잠금 밖 양수 대기·온도 우선과 R06 진단 연기를 검증했다. CSV·온도 fact/spool·이미지 상태 제공자는 이미 존재하지만 실제 monitor에는 아직 연결되지 않았다. 다음 통합은 start_spot_poll_loop/lifespan과 stop_spot_poll_loop의 단일 수명에 이들을 연결하고 enabled이지만 owner가 없는 경로를 unknown으로 남기는 것이다. sidecar·이전 owner/세대·close 불확실·합산 metadata/cache 예산, fact/JPEG 대조·관측 참조·공개 상태/판정 계약, 전체7단계·17명세, 최종 빌드/설치본·master 통합은 미완료다. 변경 없는 frontend/Electron/의존성은 마지막 단일 전체 health c6901ab5의 근거를 재사용하며 새 전체 health 통과로 확대하지 않는다. 직전·이번 목표 턴은 PROGRESS이며 목표는 active다. 서버·운영본·태그·설정·백업은 변경하지 않았다.
