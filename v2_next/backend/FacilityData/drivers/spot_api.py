@@ -2500,14 +2500,16 @@ async def _refresh_spot_diagnostics_safely(
         _spot_diagnostics_last_completed_at = time.time()
 
 
-async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+async def _request_spot_image(
+    client: httpx.AsyncClient, image_url: str, *, profile: SpotImageProfile = _SPOT_IMAGE_PROFILE_SNAPSHOT,
+) -> bytes:
     global _img_http_dispatch_count, _img_storage_suppressed_task_count
     global _img_last_http_dispatch_monotonic, _img_last_http_dispatch_url
     request_started_at: Optional[float] = None
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
         async with _spot_device_request_lock:
-            if _spot_auxiliary_dispatch_storage_blocked():
+            if _spot_image_request_storage_suppressed(profile, image_url):
                 _img_storage_suppressed_task_count += 1
                 raise SpotStoragePressureError
             request_started_at = time.monotonic()
@@ -4149,7 +4151,9 @@ def _consume_spot_image_refresh_result(task: asyncio.Task[_SpotImageCacheEntry])
         return
 
 
-async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
+async def _refresh_spot_image_cache(
+    image_url: str, *, profile: SpotImageProfile = _SPOT_IMAGE_PROFILE_SNAPSHOT,
+) -> _SpotImageCacheEntry:
     global _img_cache_entry, _img_failure_count
     global _img_upstream_request_count, _img_refresh_success_count, _img_refresh_failure_count
     global _img_last_upstream_started_at, _img_last_upstream_completed_at
@@ -4160,7 +4164,7 @@ async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
     _img_upstream_request_count += 1
     _img_last_upstream_started_at = started_at_epoch
     try:
-        data = await _request_spot_image(client, image_url)
+        data = await _request_spot_image(client, image_url, profile=profile)
     except SpotImageFetchError as exc:
         _record_image_error(exc.code, str(exc))
         _img_failure_count = min(_img_failure_count + 1, 10)
@@ -4280,7 +4284,7 @@ async def fetch_image_async(
 
             refresh_task = _img_refresh_task
             if refresh_task is None or refresh_task.done():
-                refresh_task = asyncio.create_task(_refresh_spot_image_cache(image_url))
+                refresh_task = asyncio.create_task(_refresh_spot_image_cache(image_url, profile=normalized_profile))
                 refresh_task.add_done_callback(_consume_spot_image_refresh_result)
                 _img_refresh_task = refresh_task
                 _img_singleflight_leader_count += 1
