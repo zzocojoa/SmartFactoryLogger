@@ -3659,13 +3659,20 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             stopped = await spot_api.stop_spot_poll_loop()
 
-        self.assertFalse(stopped)
-        self.assertFalse(poll_task.done())
-        stop_image_refresh.assert_awaited_once_with()
-        stop_transport.assert_awaited_once_with()
-        release_task.set()
-        with self.assertRaises(asyncio.CancelledError):
-            await poll_task
+        try:
+            self.assertFalse(stopped)
+            self.assertFalse(poll_task.done())
+            stop_image_refresh.assert_awaited_once_with()
+            stop_transport.assert_awaited_once_with()
+            shutdown = spot_api.get_spot_poll_shutdown_status()
+            with self.assertRaisesRegex(RuntimeError, "polling shutdown is incomplete"):
+                await spot_api.start_spot_poll_loop()
+            self.assertIs(spot_api._spot_poll_task, poll_task)
+            self.assertEqual(spot_api.get_spot_poll_shutdown_status(), shutdown)
+        finally:
+            release_task.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await poll_task
 
     async def test_spot_shutdown_records_named_timeout_and_late_completion(self) -> None:
         release_task = asyncio.Event()

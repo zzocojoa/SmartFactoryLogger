@@ -4505,7 +4505,9 @@ async def _start_spot_poll_loop(
     global _spot_observation_queue
     global _storage_pressure_monitor, _spot_shutdown_pressure_monitor_stopped
     if _spot_poll_task and not _spot_poll_task.done():
-        return  # ??? ??쎈뻬 餓?
+        if not _spot_poll_running:
+            raise RuntimeError("SPOT polling shutdown is incomplete")
+        return
     if _storage_pressure_monitor is not None:
         raise RuntimeError("Storage pressure monitor shutdown is incomplete")
 
