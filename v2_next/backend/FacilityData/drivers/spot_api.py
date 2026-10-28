@@ -2140,9 +2140,9 @@ def _spot_image_response(
     }
 
 
-def _spot_auxiliary_dispatch_storage_blocked() -> bool:
+def _spot_diagnostic_storage_suppressed() -> bool:
     return (_storage_pressure_monitor is not None
-            and _storage_pressure_monitor.snapshot().state == "PERSISTENCE_BLOCKED")
+            and _storage_pressure_monitor.snapshot().state in {"PRESSURED", "PERSISTENCE_BLOCKED"})
 
 
 def _spot_image_request_storage_suppressed(profile: SpotImageProfile, image_url: str) -> bool:
@@ -2259,7 +2259,7 @@ async def _request_spot_diagnostic_output(
     url = _resolve_spot_diagnostic_url(param)
     while True:
         async with _spot_device_request_lock:
-            if _spot_auxiliary_dispatch_storage_blocked():
+            if _spot_diagnostic_storage_suppressed():
                 _spot_diagnostics_storage_suppressed_request_count += 1
                 raise SpotStoragePressureError()
             if not _spot_temperature_requests_pending:
@@ -3504,7 +3504,7 @@ def _schedule_spot_diagnostics_for_poll(
         _spot_diagnostics_inflight_suppressed_count += 1
         return False
 
-    if _spot_auxiliary_dispatch_storage_blocked():
+    if _spot_diagnostic_storage_suppressed():
         _spot_diagnostics_storage_suppressed_poll_count += 1
         return False
 

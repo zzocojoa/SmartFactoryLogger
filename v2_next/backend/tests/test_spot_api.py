@@ -4938,6 +4938,82 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     monitor.stop()
                     spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
 
+    async def test_pressured_diagnostics_defer_before_queue_and_before_dispatch(self) -> None:
+        spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
+        spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
+        clock, requests = [100.0], []
+        pressured = threading.Event()
+        pressured.set()
+        driver_clock = SimpleNamespace(monotonic=lambda: clock[0], time=time.time, perf_counter=time.perf_counter)
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'temperature_fact', 1, 'fixture', True, 'available', byte_limit=100,
+            budget_pending_bytes=80 if pressured.is_set() else 0)])
+        context = spot_api.SpotPollContext(service_instance_id=spot_api._spot_service_instance_id,
+                                          poll_seq=1, started_at_epoch=time.time(), started_monotonic=clock[0])
+
+        def response(request):
+            requests.append(str(request.url))
+            return httpx.Response(200, text='0', request=request)
+
+        async def await_state(state):
+            deadline = time.monotonic() + 5
+            while monitor.snapshot().state != state and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, state)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            spot_api.config.LOG_PATH = Path(temp_dir)
+            try:
+                self.assertTrue(monitor.start())
+                await await_state('PRESSURED')
+                async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                    with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                            patch.object(spot_api, 'time', driver_clock):
+                        self.assertFalse(spot_api._schedule_spot_diagnostics_for_poll(client, context),
+                                         'PRESSURED poll created a diagnostic sweep')
+                        self.assertIsNone(spot_api._spot_diagnostics_task)
+                        self.assertIsNone(spot_api._spot_diagnostic_journal)
+                        self.assertEqual(spot_api._spot_diagnostics_storage_suppressed_poll_count, 1)
+                        pressured.clear()
+                        await await_state('NORMAL')
+                        await spot_api._spot_device_request_lock.acquire()
+                        self.assertTrue(spot_api._schedule_spot_diagnostics_for_poll(client, context))
+                        deadline = time.monotonic() + 2
+                        while time.monotonic() < deadline:
+                            journal = spot_api.get_spot_diagnostics()['diagnostic_request_journal']
+                            if journal.get('active_request_count') == 1:
+                                break
+                            await asyncio.sleep(.01)
+                        self.assertEqual(journal.get('active_request_count'), 1)
+                        pressured.set()
+                        await await_state('PRESSURED')
+                        spot_api._spot_device_request_lock.release()
+                        await asyncio.wait_for(spot_api._spot_diagnostics_task, 2)
+                        self.assertEqual(requests, [])
+                        diagnostics = spot_api.get_spot_diagnostics()
+                        self.assertEqual(diagnostics['diagnostics_storage_suppressed_request_count'], 1)
+                        journal = diagnostics['diagnostic_request_journal']
+                        self.assertEqual(journal['state_counts']['suppressed'], 1)
+                        self.assertEqual(journal['failure_count_total'], 0)
+                        self.assertEqual(journal['active_request_count'], 0)
+                        pressured.clear()
+                        await await_state('NORMAL')
+                        clock[0] += 20
+                        self.assertTrue(spot_api._schedule_spot_diagnostics_for_poll(client, context))
+                        await asyncio.wait_for(spot_api._spot_diagnostics_task, 2)
+                        self.assertEqual(len(requests), 8)
+                        self.assertEqual(spot_api._spot_diagnostics_snapshot['diagnostics_capture_status'],
+                                         'async_complete')
+            finally:
+                if spot_api._spot_device_request_lock.locked():
+                    spot_api._spot_device_request_lock.release()
+                task = spot_api._spot_diagnostics_task
+                if task is not None and not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(monitor.stop())
+                spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
+
     async def test_storage_blocked_poll_skips_diagnostic_task_and_resumes(self) -> None:
         spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
         blocked = threading.Event()
