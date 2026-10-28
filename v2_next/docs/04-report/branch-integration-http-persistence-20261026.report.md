@@ -12,8 +12,8 @@
 | 3 | 버전 파일 5개를 운영 소스 기준과 일치 | 1.0.32로 동기화. 새 기능의 출시 승인·배포를 의미하지 않음 |
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
-| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 이미지 CSV 직렬화·파싱·파일 접근의 예약/시각을 추가하고 quoted 헤더 호환성 보완. 초기화/close 불확실·metadata·이전 owner·sidecar·monitor 수명 등 전체 구현은 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `7a5d370c` backend 전체 실행1215통과·1skip 뒤, 같은 제품 소스에서 F01 단독1시험 통과로 누락 보완. backend lint/typecheck·QA 자체 검사 exit0. 새 단일 전체 실행의 skip0을 주장하지 않으며 최종 빌드·새 설치본 검증은 미완료 |
+| 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | PRESSURED 이미지 간격2배·실패 뒤 간격 유지·장치 잠금 후 재검사를 추가. 전체 required 상태·monitor 수명·주기 진단/NORMAL 온도 우선·공개 판정 계약 등은 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `cc529c57` backend 전체 1219통과·0skip(F01 포함), backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -1349,3 +1349,18 @@ npm.cmd run health:backend:test
 ```
 
 이는 개발 검사용 절차이며 사용자가 직접 실행할 요청이 아니다. 전체 HTTP 개선·최종 빌드·master 통합의 미완료 상태는 유지한다.
+
+
+## 2026-10-28 이미지 압력 간격·발송 직전 검사와 F01 전체 실행
+
+- `45fb01a3`: PRESSURED에서 평상시 양수 이미지 간격의2배 전에는 같은 센서의 캐시를 원래 취득 시각/나이로 반환하고 억제 사유·양수 재확인 시간을 표시한다. 평상시 신선한 캐시 조회는 압력 억제로 바꾸지 않는다.
+- `a84a7f55`: 실제 HTTP 발송 시작의 단조 시각과 URL을 보관해 HTTP 실패·무캐시 상태에도2배 간격을 유지한다. 미발송 응답은 센서 실패를 추가하지 않으며 시간이 지난 뒤 실제 요청을 허용한다.
+- `cc529c57`: single-flight leader profile을 발송까지 전달한다. 장치 잠금 대기 중 NORMAL→PRESSURED 전환을 검사하고 공유 task당 억제1건을 기록한다. 이미 발송한 요청과 기존 종료 규칙은 유지한다. 기존 시험10개 함수의 mock 인자만 새 private profile 인자에 맞췄다.
+
+행동별 RED(조기 발송2건, 압력 예외 미발생, 잠금 후 조기 발송2건)를 확인한 뒤 관련191→192→247시험과 lint/typecheck를 통과해 순서대로 커밋했다. 첫 실패 간격 typecheck는 존재하지 않는 backend/mypy.ini를 지정한 명령 오류(exit2)였다. 실제 프로젝트 명령 python -m mypy로 수정해 통과했으며 원래 실패 기록도 보존한다.
+
+clean `cc529c57`에서 **backend 전체 1219시험 통과·0skip**(529.437초), backend lint·typecheck·QA 자체 검사 모두 exit0. F01의 시작/종료 SHA256을 대조하고 TEMPERATURE_GOAL_PACKAGE를 설정한 단일 전체 실행이다. 이전1skip은 과거 기록으로 보존하며 사용자에게 추가 자료를 요청할 필요가 없다. HEAD·변경2파일·전체 로그/종료 코드·원문4문서·109경로·보호 stash·버전5파일·운영 설치본 해시를 확인했다. 근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-cadence/verification.json`.
+
+전용 보안 검토 명령은 없어 메모리 전용 gate, 기존 URL 확인·single-flight·종료·오류 계수 유지 범위를 직접 검토했다. 변경 경로 위험도 도구의 낮음8/100은 보안 감사 통과가 아니다. 도구가 새로 만든 호출 영수증2파일만 확인해 증거 폴더로 옮겼다.
+
+R06/FR02의 이미지 PRESSURED 분기만 보완했다. monitor 실제 시작/종료·주기 진단/NORMAL 온도 우선, sidecar·이전 owner/세대·close 불확실·합산 metadata/cache 예산, fact/JPEG 대조·관측 참조·공개 상태/판정 계약, 전체7단계·17명세, 최종 빌드/설치본·master 통합은 미완료다. 변경 없는 frontend/Electron/의존성은 마지막 단일 전체 health c6901ab5의 근거를 재사용하며 새 전체 health 통과로 확대하지 않는다. 직전·이번 목표 턴은 PROGRESS이며 목표는 active다. 서버·운영본·태그·설정·백업은 변경하지 않았다.

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-28T00:38:52.153877+00:00",
+  "lastUpdated": "2026-10-28T01:03:17.660038+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48293,14 +48293,15 @@
       "implementationStatus": "PARTIAL_7_STAGES_17_SCENARIOS",
       "overallGoalComplete": false,
       "operatingBuildUnchanged": "cd46692ac9c551080c57d8168fa9ea5abd530206",
-      "currentDevelopmentCommit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
+      "currentDevelopmentCommit": "cc529c5727fc5aeec7f970371bdc166bc72d2e02",
       "lastBackendVerification": {
-        "commit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
-        "total": 1216,
-        "passed": 1215,
-        "skipped": 1,
+        "commit": "cc529c5727fc5aeec7f970371bdc166bc72d2e02",
+        "total": 1219,
+        "passed": 1219,
+        "skipped": 0,
         "exitCode": 0,
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-fact-workspace/verification.json"
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-cadence/verification.json",
+        "includesVerifiedF01Fixture": true
       },
       "completedScope": [
         "CSV current-producer admission, output, file and metadata proof with strict QA CLI",
@@ -48349,12 +48350,16 @@
         "Image fact CSV serialization reserves all bounded temporary payload copies before rendering; failure drops copies before returning budget.",
         "Image fact history/header/row parsing reserves bounded workspace before open through reader/file close with admitted generation and destination.",
         "Equivalent quote-all CSV headers remain appendable with original bytes and strict column validation preserved.",
-        "Idle image fact access reserves buffer workspace and original clock/destination/generation through lock wait and close; OFF retains pending work."
+        "Idle image fact access reserves buffer workspace and original clock/destination/generation through lock wait and close; OFF retains pending work.",
+        "PRESSURED image cadence uses twice the positive profile interval with matching cached identity/time preserved.",
+        "Image dispatch monotonic time/URL survives HTTP failure, preventing cache-free pressure retry bursts without false sensor failures.",
+        "Image shared refresh retains leader profile and rechecks pressure after device-lock acquisition; one suppression count per shared task.",
+        "Full backend suite includes hash-verified F01 with zero skips; no user fixture action required."
       ],
       "remainingScope": [
         "Complete image initialization stat/identity and close-failure ownership, metadata/cache budgets, old-owner/old-generation availability and required sidecar state.",
         "Complete all required file integrity, owner replacement, spool append/close/unlink recovery, aggregate metadata budgets and untimed pre-admission work.",
-        "Connect actual monitor lifecycle; implement PRESSURED cadence and NORMAL interval/temperature priority without false storage failures.",
+        "Connect actual monitor lifecycle; complete periodic diagnostic pressure deferral and NORMAL interval/temperature priority without false storage failures.",
         "Complete fact/JPEG reconciliation, observation-reference and public status/validator contracts, all 7 stages and 17 r4 scenarios.",
         "Final build/installer validation and master integration; the approved operating installer remains unchanged."
       ],
@@ -48363,15 +48368,15 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-pressure-join/health-result.json"
       },
-      "updatedAt": "2026-10-28T00:38:52.153877+00:00",
+      "updatedAt": "2026-10-28T01:03:17.660038+00:00",
       "lastRelatedBackendVerification": {
-        "commit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
-        "total": 166,
-        "passed": 166,
+        "commit": "cc529c5727fc5aeec7f970371bdc166bc72d2e02",
+        "total": 247,
+        "passed": 247,
         "skipped": 0,
         "exitCode": 0,
-        "scope": "Image shutdown/startup, persistence pressure and shutdown closeout regressions",
-        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/image-fact-access-workspace-green/result.json"
+        "scope": "SPOT image/diagnostics/shared request/shutdown and image persistence regressions",
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/tdd/pressured-image-dispatch-boundary-regression/result.json"
       },
       "lastPressureVerification": {
         "commit": "e6a592847f0dbac0e6db4004ec57380335cd0ed6",
@@ -48491,7 +48496,7 @@
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-idle-access/verification.json"
       },
       "privateF01Fixture": {
-        "status": "AVAILABLE_AND_REPLAY_PASSED",
+        "status": "AVAILABLE_AND_INCLUDED_IN_FULL_BACKEND_PASS",
         "packageRoot": "C:/Users/user/Downloads/Codex_Temperature_20260909_Goal_Package",
         "relativePath": "fixtures/F01_startup_and_poll1.csv",
         "sha256": "bab8f61354124b5fdfa155abdb289255a2514fb710f4fa5e23a7e43418dec4b4",
@@ -48499,7 +48504,8 @@
         "rows": 940,
         "environmentVariable": "TEMPERATURE_GOAL_PACKAGE",
         "userActionRequired": false,
-        "futureLocalBackendChecks": "Set TEMPERATURE_GOAL_PACKAGE to the verified packageRoot for subsequent full backend runs; do not substitute another file or add raw data to Git."
+        "futureLocalBackendChecks": "Set TEMPERATURE_GOAL_PACKAGE to the verified packageRoot for subsequent full backend runs; do not substitute another file or add raw data to Git.",
+        "latestFullVerificationEvidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/pressure-cadence/verification.json"
       },
       "lastSupplementalBackendVerification": {
         "sourceCommit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
