@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-28T00:35:45.428077+00:00",
+  "lastUpdated": "2026-10-28T00:38:52.153877+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -48363,7 +48363,7 @@
         "exitCode": 0,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/owner-pressure-join/health-result.json"
       },
-      "updatedAt": "2026-10-28T00:35:45.428077+00:00",
+      "updatedAt": "2026-10-28T00:38:52.153877+00:00",
       "lastRelatedBackendVerification": {
         "commit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
         "total": 166,
@@ -48489,6 +48489,27 @@
         "commit": "47d9c3b988917ceaec5545c41504beefcd15492d",
         "focusedRuns": 12,
         "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/trace-idle-access/verification.json"
+      },
+      "privateF01Fixture": {
+        "status": "AVAILABLE_AND_REPLAY_PASSED",
+        "packageRoot": "C:/Users/user/Downloads/Codex_Temperature_20260909_Goal_Package",
+        "relativePath": "fixtures/F01_startup_and_poll1.csv",
+        "sha256": "bab8f61354124b5fdfa155abdb289255a2514fb710f4fa5e23a7e43418dec4b4",
+        "bytes": 1303015,
+        "rows": 940,
+        "environmentVariable": "TEMPERATURE_GOAL_PACKAGE",
+        "userActionRequired": false,
+        "futureLocalBackendChecks": "Set TEMPERATURE_GOAL_PACKAGE to the verified packageRoot for subsequent full backend runs; do not substitute another file or add raw data to Git."
+      },
+      "lastSupplementalBackendVerification": {
+        "sourceCommit": "7a5d370c3daae82e3d2b1c21c3e611ad90530d6c",
+        "headAtExecution": "039c51d76d7daa01e8fba75769205104f9309113",
+        "total": 1,
+        "passed": 1,
+        "skipped": 0,
+        "exitCode": 0,
+        "evidence": "C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-fact-workspace/f01-replay/verification.json",
+        "scope": "Previously skipped F01 historical-input replay; product source unchanged from preceding 1215-pass/1-skip full run; not a new full-suite run."
       }
     }
   },

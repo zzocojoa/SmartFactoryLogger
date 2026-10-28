@@ -13,7 +13,7 @@
 | 4 | 기존 109개 변경 보존·검토·커밋 | 109개 경로 모두 추적·커밋. 도구 충돌 15파일/29블록 통합. 2026-10-27 원본 4문서 모두 기존 SHA256과 일치하도록 복원했고 보호 stash도 유지 |
 | 5 | 원격 브랜치·upstream·기본 브랜치 반영 | 원격 작업 브랜치 생성·upstream 연결·HEAD 대조 완료. master 통합은 미완료 |
 | 6 | HTTP 저장 무결성 계획의 7단계·17개 추가 시험 및 경계 계약 구현 | 이미지 CSV 직렬화·파싱·파일 접근의 예약/시각을 추가하고 quoted 헤더 호환성 보완. 초기화/close 불확실·metadata·이전 owner·sidecar·monitor 수명 등 전체 구현은 미완료 |
-| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `7a5d370c` backend 1216중1215통과·1skip, backend lint/typecheck·QA 자체 검사 exit0. 마지막 단일 전체 health는 c6901ab5. 최종 빌드·새 설치본 검증 미완료 |
+| 7 | 최종 통합 상태의 빌드·회귀·정적 검사 | `7a5d370c` backend 전체 실행1215통과·1skip 뒤, 같은 제품 소스에서 F01 단독1시험 통과로 누락 보완. backend lint/typecheck·QA 자체 검사 exit0. 새 단일 전체 실행의 skip0을 주장하지 않으며 최종 빌드·새 설치본 검증은 미완료 |
 
 ## 보존과 통합
 
@@ -1329,3 +1329,23 @@ clean `7a5d370c`에서 **backend lint·typecheck·전체 unittest·QA 자체 검
 직접 검토한 범위는 예약 전 할당 차단, finally의 임시 사본/reader 정리, 정상 CSV 표현 유지, 파일 접근의 시각/세대 결합, 조회 경로의 파일 I/O 없음이다. 전용 보안 검토 도구가 없어 전체 보안 감사로 확대하지 않는다. 직전·이번 목표 턴 모두 실제 구현·검증 PROGRESS다.
 
 남은 범위는 초기화 stat/identity와 close 실패 시 자원 소유, metadata/cache 합산 예산, 이전 owner/세대 가용성·sidecar, 전체 파일 무결성·spool append/close/unlink·접수 전 시각, 실제 monitor 시작/종료·PRESSURED 감속·NORMAL 온도 우선/간격, fact/JPEG 대조·관측 참조·공개 상태/판정 계약,7단계/17명세·최종 빌드/설치본·master 통합이다. `_storage_pressure_monitor`를 실제 서비스에 아직 연결하지 않았다. 서버·운영본·태그·설정·백업은 변경하지 않았다.
+
+
+## 2026-10-28 F01 입력 자료 발견과 누락 시험 보완
+
+사용자의 전용 자료 질문에 따라 Downloads까지 다시 확인하여 `C:/Users/user/Downloads/Codex_Temperature_20260909_Goal_Package/fixtures/F01_startup_and_poll1.csv`를 찾았다. 1303015bytes·940행이며 SHA256 `bab8f61354124b5fdfa155abdb289255a2514fb710f4fa5e23a7e43418dec4b4`가 기존 시험의 고정값과 일치한다. 2026-09-09 자료에서 원래 열/셀을 내보낸 부분집합이며 원본 바이트 구간 사본이나 새 현장 측정은 아니다. 사용자에게 새 자료·장비·비밀번호를 요청할 필요가 없다.
+
+이전 일반 실행은 `TEMPERATURE_GOAL_PACKAGE`가 지정되지 않아 skip됐다. 이번 확인 전에는 자료 위치를 더 조사하지 않고 같은 skip 설명을 반복했다. 과거 NAS/ZIP 미발견 기록은 당시 조사 범위의 결과로 보존하고, 현재 개발 PC Downloads에서 찾은 사실을 별도로 기록한다.
+
+자료 폴더를 해당 시험 프로세스의 환경변수로 전달해 `backend.tests.test_temperature_fact_queue.FactPollingTests.test_f01_raw_inputs_poll_publish_csv_continue_during_fact_initialization`을 실행했다. **1시험 통과·skip0·exit0**. 두 원시 온도 응답을 재생하여, 원장 초기화가 지연된 동안 최신 온도 게시와 CSV 저장이 진행되고 마지막 저장 정산이 완료됨을 확인했다. 시간 기록에서도 CSV 증거 시각이 초기화 완료보다 앞섰다. 실제 장비·화면 성능 시험으로 확대하지 않는다.
+
+근거: `C:/Users/user/Desktop/SmartFactory/BRANCH_SYNC_20261026_4d2950c6/image-fact-workspace/f01-replay/verification.json`. 직전 전체 backend 실행의1215통과·1skip은 그대로 보존하며, 제품 소스 SHA가 같은 상태의 보완1시험을 연결한다. 전체1216시험을 skip0으로 한 번에 다시 실행한 결과는 아니다. 원시 CSV는 읽기만 했고 Git에 넣지 않았다. 제품 코드·서버·운영본은 변경하지 않았다.
+
+이 개발 PC에서 후속 전체 backend 검사를 실행할 때는 아래처럼 위치를 명시하여 같은 이유의 skip을 방지한다. 다른 PC/CI에 자료가 있다고 가정하거나 임의 파일로 고정 해시를 대체하지 않는다.
+
+```powershell
+$env:TEMPERATURE_GOAL_PACKAGE = 'C:\Users\user\Downloads\Codex_Temperature_20260909_Goal_Package'
+npm.cmd run health:backend:test
+```
+
+이는 개발 검사용 절차이며 사용자가 직접 실행할 요청이 아니다. 전체 HTTP 개선·최종 빌드·master 통합의 미완료 상태는 유지한다.
