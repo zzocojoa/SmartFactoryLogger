@@ -157,6 +157,8 @@ _img_snapshot_downstream_request_count = 0
 _img_live_downstream_request_count = 0
 _img_upstream_request_count = 0
 _img_http_dispatch_count = 0
+_img_last_http_dispatch_monotonic: Optional[float] = None
+_img_last_http_dispatch_url: Optional[str] = None
 _img_storage_suppressed_task_count = 0
 _img_cache_hit_count = 0
 _img_singleflight_leader_count = 0
@@ -1377,6 +1379,7 @@ def _reset_spot_image_request_state_for_tests() -> None:
     global _img_fetch_lock, _img_cache_entry, _img_refresh_task, _img_accepting_requests, _img_last_source
     global _img_downstream_request_count, _img_upstream_request_count, _img_cache_hit_count
     global _img_http_dispatch_count, _img_storage_suppressed_task_count
+    global _img_last_http_dispatch_monotonic, _img_last_http_dispatch_url
     global _img_snapshot_downstream_request_count, _img_live_downstream_request_count
     global _img_singleflight_leader_count, _img_coalesced_waiter_count
     global _img_refresh_success_count, _img_refresh_failure_count
@@ -1398,6 +1401,8 @@ def _reset_spot_image_request_state_for_tests() -> None:
     _img_live_downstream_request_count = 0
     _img_upstream_request_count = 0
     _img_http_dispatch_count = 0
+    _img_last_http_dispatch_monotonic = None
+    _img_last_http_dispatch_url = None
     _img_storage_suppressed_task_count = 0
     _img_cache_hit_count = 0
     _img_singleflight_leader_count = 0
@@ -2143,13 +2148,15 @@ def _spot_image_request_storage_suppressed(profile: SpotImageProfile, image_url:
     state = _storage_pressure_monitor.snapshot().state
     if state == "PERSISTENCE_BLOCKED":
         return True
-    entry = _img_cache_entry
-    if state != "PRESSURED" or entry is None or entry.image_url != image_url:
+    if state != "PRESSURED":
         return False
-    age = time.monotonic() - entry.captured_at_monotonic
+    if _is_spot_image_cache_fresh(_img_cache_entry, profile=profile, expected_image_url=image_url):
+        return False  # Ordinary cache freshness is not a pressure deferral.
+    if _img_last_http_dispatch_monotonic is None or _img_last_http_dispatch_url != image_url:
+        return False
+    elapsed = time.monotonic() - _img_last_http_dispatch_monotonic
     interval = _spot_image_cache_ttl_sec(profile)
-    # The ordinary fresh-cache window is not a storage-pressure deferral.
-    return interval <= age < 2.0 * interval
+    return elapsed < 2.0 * interval
 
 
 def _spot_image_pressure_response(profile: SpotImageProfile) -> tuple[bytes, Dict[str, Any]]:
@@ -2495,6 +2502,7 @@ async def _refresh_spot_diagnostics_safely(
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
     global _img_http_dispatch_count, _img_storage_suppressed_task_count
+    global _img_last_http_dispatch_monotonic, _img_last_http_dispatch_url
     request_started_at: Optional[float] = None
     transport_correlation_id = f"transport:{uuid4().hex}"
     try:
@@ -2503,6 +2511,8 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
                 _img_storage_suppressed_task_count += 1
                 raise SpotStoragePressureError
             request_started_at = time.monotonic()
+            _img_last_http_dispatch_monotonic = request_started_at
+            _img_last_http_dispatch_url = image_url
             _img_http_dispatch_count += 1
             response = await _request_spot_http_response(
                 client,

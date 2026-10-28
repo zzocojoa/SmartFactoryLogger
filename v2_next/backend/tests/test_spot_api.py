@@ -5119,6 +5119,55 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.assertTrue(monitor.stop())
 
+    async def test_pressured_image_failure_keeps_dispatch_interval_without_cache(self) -> None:
+        spot_api.config.SPOT_IP = 'spot.local'
+        spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
+        clock, requests = [100.0], []
+        driver_clock = SimpleNamespace(monotonic=lambda: clock[0], time=time.time, perf_counter=time.perf_counter)
+        monitor = StoragePressureMonitor(lambda: [StoragePressureSample(
+            'image_jpeg', 1, 'fixture', True, 'available', byte_limit=100, budget_pending_bytes=80)])
+
+        def response(request):
+            requests.append((str(request.url), clock[0]))
+            return httpx.Response(500 if len(requests) == 1 else 200,
+                                  content=_jpeg_bytes('recovered'), request=request)
+
+        try:
+            self.assertTrue(monitor.start())
+            deadline = time.monotonic() + 2
+            while monitor.snapshot().state != 'PRESSURED' and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            self.assertEqual(monitor.snapshot().state, 'PRESSURED')
+            async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                with patch.object(spot_api, '_storage_pressure_monitor', monitor), \
+                        patch.object(spot_api, '_http_client', client), \
+                        patch.object(spot_api, 'time', driver_clock):
+                    interval = spot_api._spot_image_cache_ttl_sec('snapshot')
+                    with self.assertRaises(spot_api.SpotImageFetchError):
+                        await spot_api.fetch_image_async()
+                    self.assertIsNone(spot_api._img_cache_entry)
+                    self.assertEqual(spot_api._img_failure_count, 1)
+                    clock[0] += interval * 1.5
+                    with self.assertRaises(spot_api.SpotStoragePressureError):
+                        await spot_api.fetch_image_async()
+                    self.assertEqual(len(requests), 1)
+                    self.assertEqual(spot_api._img_http_dispatch_count, 1)
+                    self.assertEqual(spot_api._img_upstream_request_count, 1)
+                    self.assertEqual(spot_api._img_failure_count, 1)
+                    self.assertEqual(spot_api._img_refresh_failure_count, 1)
+                    clock[0] = 100.0 + interval * 2
+                    data, metadata = await spot_api.fetch_image_async()
+                    self.assertEqual(data, _jpeg_bytes('recovered'))
+                    self.assertFalse(metadata['image_upstream_suppressed'])
+                    self.assertEqual(len(requests), 2)
+                    self.assertEqual(spot_api._img_http_dispatch_count, 2)
+                    self.assertEqual(spot_api._img_upstream_request_count, 2)
+                    self.assertEqual(spot_api._img_failure_count, 0)
+                    self.assertEqual(spot_api._img_refresh_failure_count, 1)
+        finally:
+            self.assertTrue(monitor.stop())
+
     async def test_storage_blocked_while_waiting_for_device_lock_returns_503_without_dispatch(self) -> None:
         spot_api.config.SPOT_IP = 'spot.local'
         spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = False
