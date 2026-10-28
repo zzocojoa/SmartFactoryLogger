@@ -273,7 +273,10 @@ class SpotImageCaptureWriter:
 
     def _check_fact_access(self) -> str:
         """Check an existing required file without creating, truncating or appending it."""
-        with _SPOT_IMAGE_FACT_FILE_LOCK:
+        reservation = (self.payload_reservation(2 * io.DEFAULT_BUFFER_SIZE, "image_fact_access_byte_limit",
+                                               "image_fact", self.fact_path, self.config_generation)
+                       if self.payload_reservation is not None else nullcontext())
+        with reservation, _SPOT_IMAGE_FACT_FILE_LOCK:
             self._assert_fact_unchanged()
             if self._fact_identity is None:
                 return "new_fact_path"

@@ -624,6 +624,64 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertEqual(list(self.root.rglob('.sfl-storage-probe-*')), [])
         self.assertEqual(spot.get_spot_image_capture_shutdown_status()['enqueued_count'], 0)
 
+    def test_idle_image_fact_access_keeps_workspace_binding_after_disable(self):
+        clock, pause = [100.0], [False]
+        entered, release = threading.Event(), threading.Event()
+        self.releases.append(release)
+        open_file = Path.open
+        fact_path = self.root / 'spot_image_fact.csv'
+
+        def stalled(path, mode='r', *args, **kwargs):
+            if pause[0] and path == fact_path and mode == 'r+b':
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError('fact access release missing')
+            return open_file(path, mode, *args, **kwargs)
+
+        with patch.object(spot.time, 'monotonic', side_effect=lambda: clock[0]), \
+                patch.object(spot.time, 'time', return_value=1790640000.), \
+                patch.object(Path, 'open', stalled):
+            self.assertTrue(self.enqueue().accepted)
+            self.assertTrue(spot.flush_spot_image_capture_queue(3))
+            original = fact_path.read_bytes()
+            deadline = time.perf_counter() + 3
+            while time.perf_counter() < deadline:
+                samples = spot.get_spot_image_storage_pressure_samples()
+                if len(samples) == 2 and all(s.availability == 'available' for s in samples):
+                    break
+                time.sleep(.01)
+            else:
+                self.fail('initial destination checks did not complete')
+            initial = next(s for s in samples if s.sink_id == 'image_fact')
+            pause[0] = True
+            clock[0] = 101.0
+            self.assertTrue(entered.wait(3))
+            with patch.object(spot.config, 'SPOT_IMAGE_CAPTURE_MODE', 'off'):
+                spot._activate_spot_image_storage()
+                clock[0] = 104.25
+                with patch.object(Path, 'open', side_effect=AssertionError('state reader did file I/O')):
+                    samples = spot.get_spot_image_storage_pressure_samples()
+                pending = [s for s in samples if s.has_pending]
+                self.assertEqual([s.sink_id for s in pending], ['image_fact'])
+                sample, = pending
+                self.assertEqual((sample.config_generation, sample.destination_key),
+                                 (initial.config_generation, initial.destination_key))
+                self.assertEqual((sample.pending_count, sample.pending_bytes), (0, 2 * io.DEFAULT_BUFFER_SIZE))
+                self.assertEqual((sample.oldest_pending_monotonic, sample.stage_due_monotonic), (101., 101.))
+                self.assertFalse(sample.enabled)
+                decision = StoragePressureController().evaluate(samples, now_monotonic=clock[0])
+                self.assertEqual(decision.state, 'PRESSURED')
+                self.assertEqual(decision.max_stage_overdue_seconds, 3.25)
+                release.set()
+                self.assertTrue(spot.stop_spot_image_capture_writer(3))
+                complete = spot.get_spot_image_storage_pressure_samples()
+                self.assertTrue(all(not s.has_pending for s in complete))
+                self.assertEqual(spot.get_spot_image_capture_shutdown_status()['pending_payload_bytes'], 0)
+                self.assertEqual(StoragePressureController().evaluate(complete, now_monotonic=clock[0]).state, 'NORMAL')
+        self.assertEqual(fact_path.read_bytes(), original)
+        self.assertEqual(list(self.root.rglob('.sfl-storage-probe-*')), [])
+        self.assertEqual(spot.get_spot_image_capture_shutdown_status()['written_count'], 1)
+
     def test_transient_fact_open_failure_retries_owned_capture(self):
         image = io.BytesIO()
         Image.new('RGB', (2, 2), (3, 4, 5)).save(image, format='JPEG')
