@@ -5069,6 +5069,51 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 monitor.stop()
                 spot_api._close_spot_diagnostic_request_journal(timeout_sec=2)
 
+    async def test_diagnostic_yields_after_temperature_cancellation_and_failure(self) -> None:
+        spot_api.config.SPOT_URL = 'http://spot.local/output?p=temperature'
+        requests, tasks = [], []
+
+        def response(request):
+            kind = 'image' if request.url.path == '/image.jpg' else request.url.params.get('p')
+            requests.append(kind)
+            return httpx.Response(500 if kind == 'temperature' else 200,
+                                  content=_jpeg_bytes('after-temperature') if kind == 'image' else b'80',
+                                  request=request)
+
+        try:
+            async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                await spot_api._spot_device_request_lock.acquire()
+                tasks.append(asyncio.create_task(spot_api._request_spot_diagnostic_output(client, 'signalpc')))
+                await asyncio.sleep(.01)
+                tasks.extend(asyncio.create_task(spot_api._request_spot_temperature(
+                    client, spot_api.config.SPOT_URL)) for _ in range(2))
+                await asyncio.sleep(.01)
+                tasks[1].cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await tasks[1]
+                spot_api._spot_device_request_lock.release()
+                results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 2)
+                self.assertEqual(requests, ['temperature', 'signalpc'],
+                                 'diagnostic ran before the non-cancelled temperature request')
+                self.assertEqual(results[0], ('signalpc', '80'))
+                self.assertIsInstance(results[2], spot_api.SpotTemperatureFetchError)
+                self.assertEqual(results[2].code, 'temperature-upstream-http-error')
+                self.assertEqual(spot_api._spot_diagnostics_storage_suppressed_request_count, 0)
+                self.assertEqual(spot_api._spot_diagnostics_upstream_request_count, 1)
+                image = await asyncio.wait_for(spot_api._request_spot_image(
+                    client, 'http://spot.local/image.jpg', profile='operator_live'), 2)
+                self.assertEqual(image, _jpeg_bytes('after-temperature'))
+                self.assertEqual(requests, ['temperature', 'signalpc', 'image'])
+                self.assertEqual(spot_api._img_storage_suppressed_task_count, 0)
+        finally:
+            if spot_api._spot_device_request_lock.locked():
+                spot_api._spot_device_request_lock.release()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
     async def test_queued_image_yields_to_temperature_without_storage_suppression(self) -> None:
         requests, tasks = [], []
 

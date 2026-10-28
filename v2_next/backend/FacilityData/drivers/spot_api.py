@@ -2257,23 +2257,27 @@ async def _request_spot_diagnostic_output(
     global _spot_diagnostics_storage_suppressed_request_count
 
     url = _resolve_spot_diagnostic_url(param)
-    async with _spot_device_request_lock:
-        if _spot_auxiliary_dispatch_storage_blocked():
-            _spot_diagnostics_storage_suppressed_request_count += 1
-            raise SpotStoragePressureError()
-        if journal is not None and request_context is not None:
-            journal.mark_running(request_context)
-        _spot_diagnostics_upstream_request_count += 1
-        response = await _request_spot_http_response(
-            client,
-            kind=SpotRequestKind.DIAGNOSTIC,
-            method="GET",
-            url=url,
-            correlation_id=(
-                request_context.transport_correlation_id if request_context is not None else None
-            ),
-        )
-        response.raise_for_status()
+    while True:
+        async with _spot_device_request_lock:
+            if _spot_auxiliary_dispatch_storage_blocked():
+                _spot_diagnostics_storage_suppressed_request_count += 1
+                raise SpotStoragePressureError()
+            if not _spot_temperature_requests_pending:
+                if journal is not None and request_context is not None:
+                    journal.mark_running(request_context)
+                _spot_diagnostics_upstream_request_count += 1
+                response = await _request_spot_http_response(
+                    client,
+                    kind=SpotRequestKind.DIAGNOSTIC,
+                    method="GET",
+                    url=url,
+                    correlation_id=(
+                        request_context.transport_correlation_id if request_context is not None else None
+                    ),
+                )
+                response.raise_for_status()
+                break
+        await asyncio.sleep(_SPOT_TEMPERATURE_PRIORITY_RECHECK_SEC)
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
 
 
