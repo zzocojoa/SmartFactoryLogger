@@ -2067,6 +2067,7 @@ async def _run_async_control_shutdown_stage(
         succeeded = result is True
     except Exception as exc:
         succeeded = False
+        status[f"{stage}_error_type"] = type(exc).__name__
         _logger.warning(
             "[Main] Control shutdown stage failed stage=%s error_type=%s %s",
             stage,
@@ -3818,10 +3819,13 @@ async def _run_control_shutdown(reason: str) -> None:
             observation_fact_drained=observation_fact_drained,
         )
     )
-    status["spot_poll_loop_stopped"] = _probe_spot_poll_shutdown_drained(
-        "Control shutdown final",
-        bool(status.get("spot_poll_loop_stopped")),
-    )
+    # A timeout may settle during closeout. An exception in this attempt must
+    # remain a failure even if a previous attempt left a complete snapshot.
+    if "spot_poll_loop_error_type" not in status:
+        status["spot_poll_loop_stopped"] = _probe_spot_poll_shutdown_drained(
+            "Control shutdown final",
+            bool(status.get("spot_poll_loop_stopped")),
+        )
     spot_producers_settled = _probe_spot_poll_producers_settled(
         "Control shutdown final",
         bool(status.get("spot_poll_loop_stopped")),

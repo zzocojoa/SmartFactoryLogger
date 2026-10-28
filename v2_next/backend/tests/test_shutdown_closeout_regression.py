@@ -2258,6 +2258,9 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
     def test_control_shutdown_spot_failure_still_runs_closeout_and_exits_with_failure(self) -> None:
         async def exercise() -> None:
+            # A completed earlier shutdown must not erase this attempt's error.
+            self.assertTrue(await backend_app.spot_control.stop_spot_poll_loop())
+            self.assertTrue(backend_app.spot_control.get_spot_poll_shutdown_status()["complete"])
             downstream_status = {
                 key: True
                 for key in backend_app._CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS
